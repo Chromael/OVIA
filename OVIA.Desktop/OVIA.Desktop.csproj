@@ -78,6 +78,9 @@
     <Compile Include="FrmMain.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="FrmProjectBarListList.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="FrmProjectManager.cs">
       <SubType>Form</SubType>
     </Compile>

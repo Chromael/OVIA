@@ -40,6 +40,7 @@ namespace OVIA.Desktop
         private bool waitingAutoCadImport = false;
         private bool isSaved = true;
         private bool isClosingByButton = false;
+        private readonly string initialFilePath;
 
         private readonly Color BrandIndigo = Color.FromArgb(37, 30, 130);
         private readonly Color BrandViolet = Color.FromArgb(91, 49, 225);
@@ -49,11 +50,16 @@ namespace OVIA.Desktop
         private readonly Color TextSub = Color.FromArgb(102, 111, 135);
 
         public FrmBarList(string companyId, string userId)
-            : this(companyId, userId, "", "공사 미선택", "", "")
+            : this(companyId, userId, "", "공사 미선택", "", "", "")
         {
         }
 
         public FrmBarList(string companyId, string userId, string projectNo, string projectName, string clientName, string projectStatus)
+            : this(companyId, userId, projectNo, projectName, clientName, projectStatus, "")
+        {
+        }
+
+        public FrmBarList(string companyId, string userId, string projectNo, string projectName, string clientName, string projectStatus, string initialFilePath)
         {
             this.companyId = companyId;
             this.userId = userId;
@@ -61,8 +67,14 @@ namespace OVIA.Desktop
             this.projectName = projectName == null ? "" : projectName;
             this.clientName = clientName == null ? "" : clientName;
             this.projectStatus = projectStatus == null ? "" : projectStatus;
+            this.initialFilePath = initialFilePath == null ? "" : initialFilePath;
 
             BuildUI();
+
+            if (this.initialFilePath.Trim() != "" && File.Exists(this.initialFilePath))
+            {
+                LoadCsv(this.initialFilePath, true);
+            }
         }
 
         private void BuildUI()
@@ -406,12 +418,8 @@ namespace OVIA.Desktop
         {
             if (!IsAutoCadRunning())
             {
-                MessageBox.Show(
-                    "AutoCAD 비활성 상태입니다.\r\n\r\nAutoCAD를 먼저 실행하고 DWG 도면을 연 뒤 다시 시도해주세요.",
-                    "OVIA AutoCAD 비활성",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning
-                );
+                lblStatus.Text = "AutoCAD 비활성 상태\r\nAutoCAD를 먼저 실행하고 DWG 도면을 열어주세요.";
+                lblStatus.ForeColor = Color.FromArgb(210, 78, 78);
 
                 return;
             }
@@ -419,12 +427,8 @@ namespace OVIA.Desktop
             StartAutoCadWatcher();
             ActivateAutoCad();
 
-            MessageBox.Show(
-                "AutoCAD로 이동합니다.\r\n\r\n작업 순서:\r\n1. AutoCAD 명령창에서 OVIABOX 실행\r\n2. 원하는 배근표/집계표를 드래그 선택\r\n3. OVIABOXTABLE 실행\r\n\r\n추출 CSV가 생성되면 OVIA BarList 화면에 자동 입력됩니다.",
-                "OVIA AutoCAD 가져오기",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information
-            );
+            lblStatus.Text = "AutoCAD 추출 대기 중\r\nOVIABOX → OVIABOXTABLE 실행 후 자동 입력됩니다.";
+            lblStatus.ForeColor = TextSub;
         }
 
         private void StartAutoCadWatcher()
@@ -507,7 +511,7 @@ namespace OVIA.Desktop
                 return;
             }
 
-            LoadCsv(filePath);
+            LoadCsv(filePath, false);
             waitingAutoCadImport = false;
             StopAutoCadWatcher();
 
@@ -605,7 +609,7 @@ namespace OVIA.Desktop
                 return;
             }
 
-            LoadCsv(filePath);
+            LoadCsv(filePath, false);
         }
 
         private void OpenCsv_Click(object sender, EventArgs e)
@@ -620,7 +624,7 @@ namespace OVIA.Desktop
                 return;
             }
 
-            LoadCsv(dialog.FileName);
+            LoadCsv(dialog.FileName, false);
         }
 
         private void SaveProjectBarList_Click(object sender, EventArgs e)
@@ -649,18 +653,6 @@ namespace OVIA.Desktop
                 return;
             }
 
-            DialogResult result = MessageBox.Show(
-                "불러온 내용을 모두 확인하셨습니까?\r\n\r\n[예]를 누르면 현재 BarList가 공사별 데이터로 저장됩니다.",
-                "OVIA BarList 저장 확인",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question
-            );
-
-            if (result != DialogResult.Yes)
-            {
-                return;
-            }
-
             try
             {
                 string dir = GetProjectBarListDirectory();
@@ -674,12 +666,9 @@ namespace OVIA.Desktop
                 isSaved = true;
                 UpdateSaveState();
 
-                MessageBox.Show(
-                    "BarList 저장이 완료되었습니다.\r\n\r\n" + filePath,
-                    "OVIA",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information
-                );
+                lblStatus.Text = "BarList 저장 완료\r\n공사별 BarList 목록에 반영되었습니다.";
+                lblStatus.ForeColor = TextSub;
+                txtFilePath.Text = filePath;
             }
             catch (Exception ex)
             {
@@ -910,7 +899,7 @@ namespace OVIA.Desktop
             return candidates[0];
         }
 
-        private void LoadCsv(string filePath)
+        private void LoadCsv(string filePath, bool loadAsSaved)
         {
             try
             {
@@ -918,12 +907,8 @@ namespace OVIA.Desktop
 
                 if (rows.Count == 0)
                 {
-                    MessageBox.Show(
-                        "CSV 파일에 읽을 데이터가 없습니다.",
-                        "OVIA",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information
-                    );
+                    lblStatus.Text = "CSV 파일에 읽을 데이터가 없습니다.";
+                    lblStatus.ForeColor = Color.FromArgb(210, 78, 78);
 
                     return;
                 }
@@ -931,26 +916,27 @@ namespace OVIA.Desktop
                 BindCsvRows(rows);
                 txtFilePath.Text = filePath;
                 lastLoadedFilePath = filePath;
-                lblStatus.Text = "불러오기 완료\r\n" + Path.GetFileName(filePath);
 
-                MarkUnsaved();
                 RecalculateSummary();
 
-                MessageBox.Show(
-                    "BarList 후보 데이터를 불러왔습니다.\r\n\r\n화면의 내용이 도면과 맞는지 반드시 확인한 후 [검토 후 저장]을 눌러주세요.",
-                    "OVIA BarList 확인 필요",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information
-                );
+                if (loadAsSaved)
+                {
+                    isSaved = true;
+                    UpdateSaveState();
+                    lblStatus.Text = "저장된 BarList 상세 열기\r\n" + Path.GetFileName(filePath);
+                    lblStatus.ForeColor = TextSub;
+                }
+                else
+                {
+                    MarkUnsaved();
+                    lblStatus.Text = "BarList 후보 데이터 입력 완료\r\n도면과 비교 확인 후 검토 저장하세요.";
+                    lblStatus.ForeColor = Color.FromArgb(210, 78, 78);
+                }
             }
             catch (Exception ex)
             {
-                MessageBox.Show(
-                    "CSV 불러오기 중 오류가 발생했습니다.\r\n\r\n" + ex.Message,
-                    "OVIA 오류",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error
-                );
+                lblStatus.Text = "CSV 불러오기 오류\r\n" + ex.Message;
+                lblStatus.ForeColor = Color.FromArgb(210, 78, 78);
             }
         }
 

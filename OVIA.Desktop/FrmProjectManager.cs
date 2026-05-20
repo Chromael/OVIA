@@ -365,8 +365,8 @@ namespace OVIA.Desktop
             string clientName = GetSelectedCellText("거래처");
             string status = GetSelectedCellText("상태");
 
-            FrmBarList barList = new FrmBarList(companyId, userId, projectNo, projectName, clientName, status);
-            barList.ShowDialog(this);
+            FrmProjectBarListList barListList = new FrmProjectBarListList(companyId, userId, projectNo, projectName, clientName, status);
+            barListList.ShowDialog(this);
         }
 
         private string GetSelectedCellText(string columnName)
