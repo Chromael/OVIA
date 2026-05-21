@@ -495,7 +495,7 @@ namespace OVIA.Desktop
             {
                 projectManagerForm = null;
             };
-            projectManagerForm.Show(this);
+            projectManagerForm.Show();
             projectManagerForm.Activate();
         }
 
@@ -514,7 +514,7 @@ namespace OVIA.Desktop
             {
                 barListForm = null;
             };
-            barListForm.Show(this);
+            barListForm.Show();
             barListForm.Activate();
         }
 

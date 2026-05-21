@@ -8,6 +8,7 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 namespace OVIA.Desktop
@@ -58,6 +59,11 @@ namespace OVIA.Desktop
         private Label lblProjectTitle;
         private Label lblProjectSub;
         private Label lblSaveState;
+        private ToolTip windowToolTip;
+        private OviaBarListMappingStore mappingStore;
+        private int lastMappingMatchCount = 0;
+        private int lastMappingTotalHeaderCount = 0;
+        private string lastMappingVersion = "";
 
         private FileSystemWatcher autoCadWatcher;
         private DateTime autoImportStartTime;
@@ -65,6 +71,9 @@ namespace OVIA.Desktop
         private bool waitingAutoCadImport = false;
         private bool isSaved = true;
         private bool isClosingByButton = false;
+        private bool suppressUnsavedClosePrompt = false;
+        private bool isInternalNavigation = false;
+        private bool isBackNavigationQueued = false;
         private readonly string initialFilePath;
         private string savedProjectFilePath = "";
 
@@ -126,11 +135,19 @@ namespace OVIA.Desktop
             this.BackColor = SurfaceColor;
             this.FormClosing += FrmBarList_FormClosing;
 
+            windowToolTip = new ToolTip();
+            windowToolTip.AutoPopDelay = 4000;
+            windowToolTip.InitialDelay = 350;
+            windowToolTip.ReshowDelay = 100;
+            windowToolTip.ShowAlways = true;
+
             scrollPanel = new Panel();
             scrollPanel.Dock = DockStyle.Fill;
             scrollPanel.BackColor = SurfaceColor;
             scrollPanel.AutoScroll = true;
-            scrollPanel.AutoScrollMinSize = new Size(BaseClientWidth, BaseClientHeight);
+            scrollPanel.AutoScrollMinSize = new Size(0, BaseClientHeight);
+            scrollPanel.HorizontalScroll.Enabled = false;
+            scrollPanel.HorizontalScroll.Visible = false;
             scrollPanel.Resize += ScrollPanel_Resize;
             this.Controls.Add(scrollPanel);
 
@@ -166,18 +183,20 @@ namespace OVIA.Desktop
                 return;
             }
 
-            bool needScroll = this.ClientSize.Width < BaseClientWidth || this.ClientSize.Height < BaseClientHeight;
+            bool needVerticalScroll = this.ClientSize.Height < BaseClientHeight;
 
             scrollPanel.SuspendLayout();
 
             try
             {
-                if (needScroll)
+                if (needVerticalScroll)
                 {
                     scrollPanel.AutoScroll = true;
-                    scrollPanel.AutoScrollMinSize = new Size(BaseClientWidth, BaseClientHeight);
+                    scrollPanel.AutoScrollMinSize = new Size(0, BaseClientHeight);
+                    scrollPanel.HorizontalScroll.Enabled = false;
+                    scrollPanel.HorizontalScroll.Visible = false;
 
-                    int width = Math.Max(BaseClientWidth, scrollPanel.ClientSize.Width);
+                    int width = Math.Max(1, scrollPanel.ClientSize.Width);
                     int height = Math.Max(BaseClientHeight, scrollPanel.ClientSize.Height);
 
                     contentPanel.Location = new Point(0, 0);
@@ -188,7 +207,7 @@ namespace OVIA.Desktop
                     scrollPanel.AutoScroll = false;
                     scrollPanel.AutoScrollMinSize = Size.Empty;
                     contentPanel.Location = new Point(0, 0);
-                    contentPanel.Size = new Size(scrollPanel.ClientSize.Width, scrollPanel.ClientSize.Height);
+                    contentPanel.Size = new Size(Math.Max(1, scrollPanel.ClientSize.Width), Math.Max(1, scrollPanel.ClientSize.Height));
                 }
             }
             finally
@@ -273,37 +292,171 @@ namespace OVIA.Desktop
             title.Font = new Font("맑은 고딕", 22F, FontStyle.Bold);
             title.ForeColor = TextDark;
             title.BackColor = SurfaceColor;
-            title.Location = new Point(34, 24);
+            title.Location = new Point(34, 22);
             parent.Controls.Add(title);
 
-            Label desc = new Label();
-            desc.Text = GetScreenDescriptionText();
-            desc.AutoSize = true;
-            desc.Font = new Font("맑은 고딕", 10F, FontStyle.Regular);
-            desc.ForeColor = TextSub;
-            desc.BackColor = SurfaceColor;
-            desc.Location = new Point(38, 70);
-            parent.Controls.Add(desc);
+            Button help = CreateHelpIcon(GetScreenDescriptionText());
+            help.Location = new Point(title.Right + 10, 34);
+            parent.Controls.Add(help);
 
-            OviaBarListButton defaultSize = new OviaBarListButton();
-            defaultSize.Text = "기본크기";
-            defaultSize.Location = new Point(1016, 34);
-            defaultSize.Size = new Size(92, 34);
+            LinkLabel breadcrumb = CreateBreadcrumbLabel();
+            breadcrumb.Text = "공사관리  >  공사별 BarList  >  " + GetScreenTitleText();
+            breadcrumb.Links.Add(0, "공사관리".Length, "PROJECT_MANAGER");
+
+            int barListListStart = breadcrumb.Text.IndexOf("공사별 BarList");
+            if (barListListStart >= 0)
+            {
+                breadcrumb.Links.Add(barListListStart, "공사별 BarList".Length, "PROJECT_BARLIST_LIST");
+            }
+
+            breadcrumb.LinkClicked += Breadcrumb_LinkClicked;
+            parent.Controls.Add(breadcrumb);
+
+            Button defaultSize = CreateDefaultSizeButton();
+            defaultSize.Location = new Point(1166, 34);
             defaultSize.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            defaultSize.StartColor = Color.FromArgb(55, 65, 95);
-            defaultSize.EndColor = Color.FromArgb(37, 30, 130);
             defaultSize.Click += DefaultSize_Click;
             parent.Controls.Add(defaultSize);
+        }
 
-            OviaBarListButton close = new OviaBarListButton();
-            close.Text = "닫기";
-            close.Location = new Point(1120, 34);
-            close.Size = new Size(82, 34);
-            close.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            close.StartColor = Color.FromArgb(120, 128, 150);
-            close.EndColor = Color.FromArgb(85, 93, 115);
-            close.Click += Close_Click;
-            parent.Controls.Add(close);
+        private LinkLabel CreateBreadcrumbLabel()
+        {
+            LinkLabel label = new LinkLabel();
+            label.Text = "";
+            label.AutoSize = false;
+            label.Size = new Size(860, 22);
+            label.Location = new Point(38, 68);
+            label.TextAlign = ContentAlignment.MiddleLeft;
+            label.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+            label.BackColor = SurfaceColor;
+            label.ForeColor = TextSub;
+            label.LinkColor = Color.FromArgb(80, 88, 112);
+            label.ActiveLinkColor = BrandViolet;
+            label.VisitedLinkColor = Color.FromArgb(80, 88, 112);
+            label.DisabledLinkColor = TextSub;
+            label.TabStop = false;
+            return label;
+        }
+
+        private Button CreateDefaultSizeButton()
+        {
+            Button button = new Button();
+            button.Text = "";
+            button.Size = new Size(34, 30);
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderSize = 1;
+            button.FlatAppearance.BorderColor = Color.FromArgb(185, 192, 205);
+            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(246, 248, 252);
+            button.FlatAppearance.MouseDownBackColor = Color.FromArgb(232, 236, 244);
+            button.BackColor = Color.White;
+            button.ForeColor = Color.FromArgb(138, 146, 160);
+            button.Cursor = Cursors.Hand;
+            button.TabStop = false;
+            button.Paint += DefaultSizeButton_Paint;
+
+            if (windowToolTip != null)
+            {
+                windowToolTip.SetToolTip(button, "창 기본크기로");
+            }
+
+            return button;
+        }
+
+        private void DefaultSizeButton_Paint(object sender, PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+            using (Pen pen = new Pen(Color.FromArgb(138, 146, 160), 1.6F))
+            {
+                Rectangle backRect = new Rectangle(12, 8, 13, 11);
+                Rectangle frontRect = new Rectangle(8, 12, 13, 11);
+
+                e.Graphics.DrawRectangle(pen, backRect);
+                e.Graphics.DrawRectangle(pen, frontRect);
+                e.Graphics.DrawLine(pen, frontRect.Left + 3, frontRect.Top + 3, frontRect.Right - 3, frontRect.Top + 3);
+            }
+        }
+
+        private Button CreateHelpIcon(string helpText)
+        {
+            Button button = new Button();
+            button.Text = "";
+            button.Size = new Size(24, 24);
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderSize = 0;
+            button.FlatAppearance.MouseOverBackColor = SurfaceColor;
+            button.FlatAppearance.MouseDownBackColor = SurfaceColor;
+            button.BackColor = SurfaceColor;
+            button.ForeColor = Color.FromArgb(138, 146, 160);
+            button.Cursor = Cursors.Help;
+            button.TabStop = false;
+            button.Paint += HelpIcon_Paint;
+
+            if (windowToolTip != null)
+            {
+                windowToolTip.SetToolTip(button, helpText);
+            }
+
+            return button;
+        }
+
+        private void HelpIcon_Paint(object sender, PaintEventArgs e)
+        {
+            Button button = sender as Button;
+            if (button == null)
+            {
+                return;
+            }
+
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+            Rectangle rect = new Rectangle(2, 2, button.Width - 5, button.Height - 5);
+            Color lineColor = Color.FromArgb(185, 192, 205);
+            Color textColor = Color.FromArgb(138, 146, 160);
+
+            using (SolidBrush fillBrush = new SolidBrush(Color.White))
+            using (Pen pen = new Pen(lineColor, 1.2F))
+            using (SolidBrush textBrush = new SolidBrush(textColor))
+            using (Font font = new Font("맑은 고딕", 9F, FontStyle.Bold))
+            using (StringFormat format = new StringFormat())
+            {
+                format.Alignment = StringAlignment.Center;
+                format.LineAlignment = StringAlignment.Center;
+
+                e.Graphics.FillEllipse(fillBrush, rect);
+                e.Graphics.DrawEllipse(pen, rect);
+                e.Graphics.DrawString("?", font, textBrush, rect, format);
+            }
+        }
+
+        private void Breadcrumb_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        {
+            string target = e.Link.LinkData == null ? "" : e.Link.LinkData.ToString();
+
+            if (target == "PROJECT_MANAGER")
+            {
+                if (!ConfirmDiscardUnsavedForNavigation())
+                {
+                    return;
+                }
+
+                suppressUnsavedClosePrompt = true;
+                FrmProjectManager form = new FrmProjectManager(companyId, userId);
+                ShowReplacementWindow(form);
+                return;
+            }
+
+            if (target == "PROJECT_BARLIST_LIST")
+            {
+                if (!ConfirmDiscardUnsavedForNavigation())
+                {
+                    return;
+                }
+
+                suppressUnsavedClosePrompt = true;
+                FrmProjectBarListList form = new FrmProjectBarListList(companyId, userId, projectNo, projectName, clientName, projectStatus);
+                ShowReplacementWindow(form);
+            }
         }
 
         private void BuildProjectInfo(Control parent)
@@ -467,11 +620,11 @@ namespace OVIA.Desktop
             lblStatus = new Label();
             lblStatus.Text = "AutoCAD에서 가져오거나 CSV를 선택하세요.";
             lblStatus.AutoSize = false;
-            lblStatus.Size = new Size(240, 62);
-            lblStatus.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+            lblStatus.Size = new Size(240, 28);
+            lblStatus.Font = new Font("맑은 고딕", 8.5F, FontStyle.Regular);
             lblStatus.ForeColor = TextSub;
-            lblStatus.BackColor = SurfaceColor;
-            lblStatus.Location = new Point(948, 315);
+            lblStatus.BackColor = Color.FromArgb(235, 241, 252);
+            lblStatus.Location = new Point(948, 330);
             parent.Controls.Add(lblStatus);
         }
 
@@ -516,6 +669,7 @@ namespace OVIA.Desktop
             grid.AllowUserToResizeRows = false;
             grid.AllowUserToResizeColumns = true;
             grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            grid.ScrollBars = ScrollBars.Vertical;
             grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
             grid.MultiSelect = true;
             grid.RowHeadersVisible = true;
@@ -683,7 +837,7 @@ namespace OVIA.Desktop
         {
             if (!IsAutoCadRunning())
             {
-                lblStatus.Text = "AutoCAD 비활성 상태\r\nAutoCAD를 먼저 실행하고 DWG 도면을 열어주세요.";
+                lblStatus.Text = "AutoCAD 비활성 상태 - AutoCAD를 먼저 실행하고 DWG 도면을 열어주세요.";
                 lblStatus.ForeColor = Color.FromArgb(210, 78, 78);
 
                 return;
@@ -692,7 +846,7 @@ namespace OVIA.Desktop
             StartAutoCadWatcher();
             ActivateAutoCad();
 
-            lblStatus.Text = "AutoCAD 추출 대기 중\r\nOVIABOX → OVIABOXTABLE 실행 후 자동 입력됩니다.";
+            lblStatus.Text = "AutoCAD 추출 대기 중 - OVIABOX → OVIABOXTABLE 실행 후 자동 입력됩니다.";
             lblStatus.ForeColor = TextSub;
         }
 
@@ -718,7 +872,7 @@ namespace OVIA.Desktop
             autoCadWatcher.Changed += AutoCadWatcher_Changed;
             autoCadWatcher.EnableRaisingEvents = true;
 
-            lblStatus.Text = "AutoCAD 추출 대기 중\r\nOVIABOXTABLE 실행을 기다립니다.";
+            lblStatus.Text = "AutoCAD 추출 대기 중 - OVIABOXTABLE 실행을 기다립니다.";
         }
 
         private void StopAutoCadWatcher()
@@ -780,14 +934,15 @@ namespace OVIA.Desktop
             waitingAutoCadImport = false;
             StopAutoCadWatcher();
 
-            lblStatus.Text = "AutoCAD 추출 데이터 자동 입력 완료\r\n반드시 확인 후 저장하세요.";
+            lblStatus.Text = "AutoCAD 추출 데이터 자동 입력 완료 - 확인 후 저장하세요.";
+            lblStatus.ForeColor = TextSub;
 
-            MessageBox.Show(
-                "AutoCAD 추출 데이터가 BarList에 자동 입력되었습니다.\r\n\r\n내용을 반드시 확인한 후 [검토 후 저장]을 눌러야 공사별 BarList에 반영됩니다.",
-                "OVIA BarList 자동 입력",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information
-            );
+            if (this.WindowState == FormWindowState.Minimized)
+            {
+                this.WindowState = FormWindowState.Normal;
+            }
+
+            this.Activate();
         }
 
         private bool WaitUntilFileReady(string filePath)
@@ -944,7 +1099,7 @@ namespace OVIA.Desktop
                 ClearUndoRedoStates();
                 grid.Invalidate();
 
-                lblStatus.Text = "BarList 저장 완료\r\n공사별 BarList 목록에 반영되었습니다.";
+                lblStatus.Text = "BarList 저장 완료 - 공사별 BarList 목록에 반영되었습니다.";
                 lblStatus.ForeColor = TextSub;
                 txtFilePath.Text = filePath;
                 lastLoadedFilePath = filePath;
@@ -2715,6 +2870,51 @@ namespace OVIA.Desktop
             );
         }
 
+        private void ShowReplacementWindow(Form nextForm)
+        {
+            if (nextForm == null)
+            {
+                return;
+            }
+
+            Form ownerForm = this.Owner;
+            FormWindowState currentState = this.WindowState;
+            Rectangle normalBounds = this.WindowState == FormWindowState.Normal ? this.Bounds : this.RestoreBounds;
+
+            nextForm.StartPosition = FormStartPosition.Manual;
+            nextForm.Bounds = normalBounds;
+
+            if (currentState == FormWindowState.Maximized)
+            {
+                nextForm.WindowState = FormWindowState.Maximized;
+            }
+
+            nextForm.Show();
+            nextForm.Activate();
+            isInternalNavigation = true;
+            this.Close();
+        }
+
+        private bool ConfirmDiscardUnsavedForNavigation()
+        {
+            if (!isSaved && grid != null && grid.Columns.Count > 0 && grid.Rows.Count > 0)
+            {
+                DialogResult result = MessageBox.Show(
+                    "저장하지 않은 BarList 데이터가 있습니다.\r\n\r\n이전 화면으로 이동하면 저장하지 않은 변경 내용이 사라질 수 있습니다.\r\n이동하시겠습니까?",
+                    "OVIA",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning
+                );
+
+                if (result != DialogResult.Yes)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         private void DefaultSize_Click(object sender, EventArgs e)
         {
             RestoreDefaultWindowSize();
@@ -2775,30 +2975,62 @@ namespace OVIA.Desktop
 
         private void Close_Click(object sender, EventArgs e)
         {
-            isClosingByButton = true;
-            this.Close();
+            NavigateBackToProjectBarListList();
         }
 
         private void FrmBarList_FormClosing(object sender, FormClosingEventArgs e)
         {
-            if (!isSaved && grid.Columns.Count > 0 && grid.Rows.Count > 0)
+            if (isInternalNavigation)
             {
-                DialogResult result = MessageBox.Show(
-                    "저장하지 않은 BarList 데이터가 있습니다.\r\n\r\n저장하지 않고 닫으시겠습니까?",
-                    "OVIA",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Warning
-                );
+                StopAutoCadWatcher();
+                return;
+            }
 
-                if (result != DialogResult.Yes)
+            if (e.CloseReason == CloseReason.UserClosing)
+            {
+                if (!ConfirmDiscardUnsavedForNavigation())
                 {
                     isClosingByButton = false;
                     e.Cancel = true;
                     return;
                 }
+
+                e.Cancel = true;
+                QueueBackNavigationToProjectBarListList();
+                return;
             }
 
             StopAutoCadWatcher();
+        }
+
+        private void QueueBackNavigationToProjectBarListList()
+        {
+            if (isBackNavigationQueued || this.IsDisposed)
+            {
+                return;
+            }
+
+            isBackNavigationQueued = true;
+
+            try
+            {
+                this.BeginInvoke(new MethodInvoker(delegate
+                {
+                    isBackNavigationQueued = false;
+                    NavigateBackToProjectBarListList();
+                }));
+            }
+            catch
+            {
+                isBackNavigationQueued = false;
+            }
+        }
+
+        private void NavigateBackToProjectBarListList()
+        {
+            FrmProjectBarListList form = new FrmProjectBarListList(companyId, userId, projectNo, projectName, clientName, projectStatus);
+            suppressUnsavedClosePrompt = true;
+            ShowReplacementWindow(form);
         }
 
         private string FindLatestOviaBoxTableCsv()
@@ -2877,19 +3109,19 @@ namespace OVIA.Desktop
                 {
                     isSaved = true;
                     UpdateSaveState();
-                    lblStatus.Text = "저장된 BarList 열기\r\n수정 후 [검토 후 저장]을 누르면 기존 BarList에 반영됩니다.";
+                    lblStatus.Text = "저장된 BarList 열기 - " + GetMappingSummaryText();
                     lblStatus.ForeColor = TextSub;
                 }
                 else
                 {
                     MarkUnsaved();
-                    lblStatus.Text = "BarList 후보 데이터 입력 완료\r\n도면과 비교 확인 후 검토 저장하세요.";
+                    lblStatus.Text = "BarList 후보 데이터 입력 완료 - " + GetMappingSummaryText();
                     lblStatus.ForeColor = Color.FromArgb(210, 78, 78);
                 }
             }
             catch (Exception ex)
             {
-                lblStatus.Text = "CSV 불러오기 오류\r\n" + ex.Message;
+                lblStatus.Text = "CSV 불러오기 오류 - " + ex.Message;
                 lblStatus.ForeColor = Color.FromArgb(210, 78, 78);
             }
         }
@@ -2904,50 +3136,60 @@ namespace OVIA.Desktop
                 grid.Columns.Clear();
                 grid.Rows.Clear();
 
-            List<string> headers = rows[0];
-            int i;
+                List<string> sourceHeaders = rows[0];
+                OviaBarListMappingStore store = GetMappingStore();
+                OviaBarListMappedTable mappedTable = store.BuildMappedTable(sourceHeaders);
 
-            for (i = 0; i < headers.Count; i++)
-            {
-                string header = headers[i];
+                lastMappingMatchCount = mappedTable.MatchedCount;
+                lastMappingTotalHeaderCount = sourceHeaders.Count;
+                lastMappingVersion = store.Version;
 
-                if (header == null || header.Trim() == "")
+                int i;
+
+                for (i = 0; i < mappedTable.Columns.Count; i++)
                 {
-                    header = "Column" + (i + 1).ToString();
+                    string header = mappedTable.Columns[i].DisplayName;
+
+                    if (header == null || header.Trim() == "")
+                    {
+                        header = "Column" + (i + 1).ToString();
+                    }
+
+                    DataGridViewTextBoxColumn column = new DataGridViewTextBoxColumn();
+                    column.Name = GetSafeColumnName(header, i);
+                    column.HeaderText = header;
+                    column.Tag = mappedTable.Columns[i];
+                    column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+                    column.MinimumWidth = 45;
+                    column.SortMode = DataGridViewColumnSortMode.NotSortable;
+                    column.Resizable = DataGridViewTriState.True;
+                    grid.Columns.Add(column);
                 }
 
-                DataGridViewTextBoxColumn column = new DataGridViewTextBoxColumn();
-                column.Name = header;
-                column.HeaderText = header;
-                column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-                column.MinimumWidth = 45;
-                column.SortMode = DataGridViewColumnSortMode.NotSortable;
-                column.Resizable = DataGridViewTriState.True;
-                grid.Columns.Add(column);
-            }
+                int r;
 
-            int r;
-
-            for (r = 1; r < rows.Count; r++)
-            {
-                List<string> values = rows[r];
-                object[] cells = new object[headers.Count];
-
-                for (i = 0; i < headers.Count; i++)
+                for (r = 1; r < rows.Count; r++)
                 {
-                    if (i < values.Count)
-                    {
-                        cells[i] = values[i];
-                    }
-                    else
-                    {
-                        cells[i] = "";
-                    }
-                }
+                    List<string> values = rows[r];
+                    object[] cells = new object[mappedTable.Columns.Count];
 
-                int newRowIndex = grid.Rows.Add(cells);
-                SetRowOriginalValues(newRowIndex, cells);
-            }
+                    for (i = 0; i < mappedTable.Columns.Count; i++)
+                    {
+                        int sourceIndex = mappedTable.Columns[i].SourceIndex;
+
+                        if (sourceIndex >= 0 && sourceIndex < values.Count)
+                        {
+                            cells[i] = values[sourceIndex];
+                        }
+                        else
+                        {
+                            cells[i] = "";
+                        }
+                    }
+
+                    int newRowIndex = grid.Rows.Add(cells);
+                    SetRowOriginalValues(newRowIndex, cells);
+                }
 
                 ApplyGridColumnStyle();
             }
@@ -2958,11 +3200,59 @@ namespace OVIA.Desktop
             }
         }
 
+        private string GetSafeColumnName(string header, int index)
+        {
+            string name = header == null ? "" : header.Trim();
+
+            if (name == "")
+            {
+                name = "Column" + (index + 1).ToString();
+            }
+
+            name = name.Replace(" ", "_");
+            name = name.Replace("/", "_");
+            name = name.Replace("\\", "_");
+            name = name.Replace("(", "");
+            name = name.Replace(")", "");
+            name = name.Replace("[", "");
+            name = name.Replace("]", "");
+
+            if (grid != null && grid.Columns.Contains(name))
+            {
+                name = name + "_" + (index + 1).ToString();
+            }
+
+            return name;
+        }
+
+        private OviaBarListMappingStore GetMappingStore()
+        {
+            if (mappingStore == null)
+            {
+                mappingStore = OviaBarListMappingStore.LoadDefault();
+            }
+
+            return mappingStore;
+        }
+
+        private string GetMappingSummaryText()
+        {
+            if (lastMappingTotalHeaderCount <= 0)
+            {
+                return "매핑 사전 대기";
+            }
+
+            string versionText = lastMappingVersion == null || lastMappingVersion.Trim() == "" ? "내장 기본" : lastMappingVersion;
+
+            return "매핑 " + lastMappingMatchCount.ToString() + "/" + lastMappingTotalHeaderCount.ToString() + "개 적용  |  사전 " + versionText;
+        }
+
         private void ApplyGridColumnStyle()
         {
             int i;
 
             grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            grid.ScrollBars = ScrollBars.Vertical;
 
             for (i = 0; i < grid.Columns.Count; i++)
             {
@@ -3440,6 +3730,465 @@ namespace OVIA.Desktop
             }
 
             base.OnPaint(e);
+        }
+    }
+
+    public class OviaBarListMappedTable
+    {
+        public List<OviaBarListMappedColumn> Columns = new List<OviaBarListMappedColumn>();
+        public int MatchedCount = 0;
+    }
+
+    public class OviaBarListMappedColumn
+    {
+        public int SourceIndex = -1;
+        public string SourceHeader = "";
+        public string StandardKey = "";
+        public string DisplayName = "";
+        public bool IsMapped = false;
+    }
+
+    public class OviaBarListMappingColumn
+    {
+        public string Key = "";
+        public string DisplayName = "";
+        public string DataType = "";
+        public int Priority = 100;
+        public List<string> Aliases = new List<string>();
+    }
+
+    public class OviaBarListMappingStore
+    {
+        public string Version = "built-in";
+        public string UpdatedAt = "";
+        public List<OviaBarListMappingColumn> StandardColumns = new List<OviaBarListMappingColumn>();
+
+        public static OviaBarListMappingStore LoadDefault()
+        {
+            OviaBarListMappingStore store = null;
+            string path = FindMappingFilePath();
+
+            if (path != "" && File.Exists(path))
+            {
+                try
+                {
+                    store = FromJson(File.ReadAllText(path, Encoding.UTF8));
+                }
+                catch
+                {
+                    store = null;
+                }
+            }
+
+            if (store == null || store.StandardColumns.Count == 0)
+            {
+                store = CreateBuiltInDefault();
+            }
+
+            return store;
+        }
+
+        private static string FindMappingFilePath()
+        {
+            List<string> candidates = new List<string>();
+            string startup = Application.StartupPath;
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+
+            if (startup != null && startup.Trim() != "")
+            {
+                candidates.Add(Path.Combine(startup, "Data", "Mapping", "barlist_mapping.json"));
+                candidates.Add(Path.GetFullPath(Path.Combine(startup, "..", "..", "Data", "Mapping", "barlist_mapping.json")));
+                candidates.Add(Path.GetFullPath(Path.Combine(startup, "..", "..", "..", "Data", "Mapping", "barlist_mapping.json")));
+            }
+
+            if (appData != null && appData.Trim() != "")
+            {
+                candidates.Add(Path.Combine(appData, "OVIA", "Mapping", "barlist_mapping.json"));
+            }
+
+            int i;
+
+            for (i = 0; i < candidates.Count; i++)
+            {
+                if (File.Exists(candidates[i]))
+                {
+                    return candidates[i];
+                }
+            }
+
+            return "";
+        }
+
+        public OviaBarListMappedTable BuildMappedTable(List<string> sourceHeaders)
+        {
+            OviaBarListMappedTable table = new OviaBarListMappedTable();
+            Dictionary<string, OviaBarListMappedColumn> matchedByKey = new Dictionary<string, OviaBarListMappedColumn>(StringComparer.OrdinalIgnoreCase);
+            List<OviaBarListMappedColumn> unmapped = new List<OviaBarListMappedColumn>();
+            bool hasOviaSystemColumns = HasOviaSystemColumns(sourceHeaders);
+            int i;
+
+            for (i = 0; i < sourceHeaders.Count; i++)
+            {
+                string sourceHeader = sourceHeaders[i] == null ? "" : sourceHeaders[i].Trim();
+                OviaBarListMappingColumn standard = null;
+
+                if (!IsOviaSystemColumn(sourceHeader, hasOviaSystemColumns))
+                {
+                    standard = FindStandardColumn(sourceHeader);
+                }
+
+                if (standard != null && !matchedByKey.ContainsKey(standard.Key))
+                {
+                    OviaBarListMappedColumn col = new OviaBarListMappedColumn();
+                    col.SourceIndex = i;
+                    col.SourceHeader = sourceHeader;
+                    col.StandardKey = standard.Key;
+                    col.DisplayName = standard.DisplayName;
+                    col.IsMapped = true;
+                    matchedByKey.Add(standard.Key, col);
+                    table.MatchedCount++;
+                }
+                else
+                {
+                    OviaBarListMappedColumn col = new OviaBarListMappedColumn();
+                    col.SourceIndex = i;
+                    col.SourceHeader = sourceHeader;
+                    col.StandardKey = "";
+                    col.DisplayName = sourceHeader == "" ? "Column" + (i + 1).ToString() : sourceHeader;
+                    col.IsMapped = false;
+                    unmapped.Add(col);
+                }
+            }
+
+            for (i = 0; i < StandardColumns.Count; i++)
+            {
+                string key = StandardColumns[i].Key;
+
+                if (matchedByKey.ContainsKey(key))
+                {
+                    table.Columns.Add(matchedByKey[key]);
+                }
+            }
+
+            for (i = 0; i < unmapped.Count; i++)
+            {
+                table.Columns.Add(unmapped[i]);
+            }
+
+            return table;
+        }
+
+        private bool HasOviaSystemColumns(List<string> headers)
+        {
+            bool hasRowType = false;
+            bool hasSourceRowNo = false;
+            int i;
+
+            for (i = 0; i < headers.Count; i++)
+            {
+                string value = NormalizeToken(headers[i]);
+
+                if (value == "ROWTYPE")
+                {
+                    hasRowType = true;
+                }
+                else if (value == "SOURCEROWNO")
+                {
+                    hasSourceRowNo = true;
+                }
+            }
+
+            return hasRowType && hasSourceRowNo;
+        }
+
+        private bool IsOviaSystemColumn(string header, bool hasOviaSystemColumns)
+        {
+            if (!hasOviaSystemColumns)
+            {
+                return false;
+            }
+
+            string value = NormalizeToken(header);
+
+            return value == "NO" || value == "ROWTYPE" || value == "SOURCEROWNO";
+        }
+
+        private OviaBarListMappingColumn FindStandardColumn(string header)
+        {
+            string normalizedHeader = NormalizeToken(header);
+
+            if (normalizedHeader == "")
+            {
+                return null;
+            }
+
+            OviaBarListMappingColumn best = null;
+            int bestScore = -1;
+            int i;
+
+            for (i = 0; i < StandardColumns.Count; i++)
+            {
+                OviaBarListMappingColumn col = StandardColumns[i];
+                int score = GetMatchScore(normalizedHeader, col);
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = col;
+                }
+            }
+
+            if (bestScore <= 0)
+            {
+                return null;
+            }
+
+            return best;
+        }
+
+        private int GetMatchScore(string normalizedHeader, OviaBarListMappingColumn col)
+        {
+            int best = 0;
+            int i;
+
+            if (NormalizeToken(col.DisplayName) == normalizedHeader)
+            {
+                best = Math.Max(best, 1000 + col.Priority);
+            }
+
+            for (i = 0; i < col.Aliases.Count; i++)
+            {
+                string alias = NormalizeToken(col.Aliases[i]);
+
+                if (alias == "")
+                {
+                    continue;
+                }
+
+                if (alias == normalizedHeader)
+                {
+                    best = Math.Max(best, 900 + col.Priority);
+                }
+                else if (alias.Length >= 3 && normalizedHeader.IndexOf(alias, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    best = Math.Max(best, 500 + col.Priority);
+                }
+                else if (normalizedHeader.Length >= 4 && alias.IndexOf(normalizedHeader, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    best = Math.Max(best, 300 + col.Priority);
+                }
+            }
+
+            return best;
+        }
+
+        private static string NormalizeToken(string value)
+        {
+            if (value == null)
+            {
+                return "";
+            }
+
+            value = value.Trim().ToUpperInvariant();
+            value = value.Replace(" ", "");
+            value = value.Replace("\t", "");
+            value = value.Replace("\r", "");
+            value = value.Replace("\n", "");
+            value = value.Replace("_", "");
+            value = value.Replace("-", "");
+            value = value.Replace(".", "");
+            value = value.Replace(":", "");
+            value = value.Replace("/", "");
+            value = value.Replace("\\", "");
+            value = value.Replace("(", "");
+            value = value.Replace(")", "");
+            value = value.Replace("[", "");
+            value = value.Replace("]", "");
+            value = value.Replace("{", "");
+            value = value.Replace("}", "");
+            value = value.Replace("㎜", "MM");
+            value = value.Replace("㎡", "M2");
+            value = value.Replace("㎥", "M3");
+
+            return value;
+        }
+
+        private static OviaBarListMappingStore FromJson(string json)
+        {
+            OviaBarListMappingStore store = new OviaBarListMappingStore();
+
+            store.Version = ExtractString(json, "version");
+            store.UpdatedAt = ExtractString(json, "updatedAt");
+
+            Match arrayMatch = Regex.Match(json, "\\\"standardColumns\\\"\\s*:\\s*\\[(.*)\\]", RegexOptions.Singleline);
+
+            if (arrayMatch.Success)
+            {
+                string arrayText = arrayMatch.Groups[1].Value;
+                MatchCollection objectMatches = Regex.Matches(arrayText, "\\{[^\\{\\}]*\\}", RegexOptions.Singleline);
+                int i;
+
+                for (i = 0; i < objectMatches.Count; i++)
+                {
+                    string objectText = objectMatches[i].Value;
+                    string key = ExtractString(objectText, "key");
+                    string displayName = ExtractString(objectText, "displayName");
+
+                    if (key.Trim() == "" || displayName.Trim() == "")
+                    {
+                        continue;
+                    }
+
+                    OviaBarListMappingColumn col = new OviaBarListMappingColumn();
+                    col.Key = key.Trim();
+                    col.DisplayName = displayName.Trim();
+                    col.DataType = ExtractString(objectText, "dataType").Trim();
+                    col.Priority = ExtractInt(objectText, "priority", 100);
+                    col.Aliases = ExtractStringArray(objectText, "aliases");
+
+                    if (!ContainsText(col.Aliases, col.DisplayName))
+                    {
+                        col.Aliases.Add(col.DisplayName);
+                    }
+
+                    store.StandardColumns.Add(col);
+                }
+            }
+
+            if (store.Version == null || store.Version.Trim() == "")
+            {
+                store.Version = "json-local";
+            }
+
+            return store;
+        }
+
+        private static string ExtractString(string source, string name)
+        {
+            Match match = Regex.Match(source, "\\\"" + Regex.Escape(name) + "\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"", RegexOptions.Singleline);
+
+            if (!match.Success)
+            {
+                return "";
+            }
+
+            return UnescapeJsonString(match.Groups[1].Value);
+        }
+
+        private static int ExtractInt(string source, string name, int defaultValue)
+        {
+            Match match = Regex.Match(source, "\\\"" + Regex.Escape(name) + "\\\"\\s*:\\s*([0-9]+)", RegexOptions.Singleline);
+
+            if (!match.Success)
+            {
+                return defaultValue;
+            }
+
+            int value;
+
+            if (Int32.TryParse(match.Groups[1].Value, out value))
+            {
+                return value;
+            }
+
+            return defaultValue;
+        }
+
+        private static List<string> ExtractStringArray(string source, string name)
+        {
+            List<string> result = new List<string>();
+            Match match = Regex.Match(source, "\\\"" + Regex.Escape(name) + "\\\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
+
+            if (!match.Success)
+            {
+                return result;
+            }
+
+            MatchCollection items = Regex.Matches(match.Groups[1].Value, "\\\"([^\\\"]*)\\\"", RegexOptions.Singleline);
+            int i;
+
+            for (i = 0; i < items.Count; i++)
+            {
+                string value = UnescapeJsonString(items[i].Groups[1].Value).Trim();
+
+                if (value != "" && !ContainsText(result, value))
+                {
+                    result.Add(value);
+                }
+            }
+
+            return result;
+        }
+
+        private static string UnescapeJsonString(string value)
+        {
+            if (value == null)
+            {
+                return "";
+            }
+
+            return value.Replace("\\\\", "\\").Replace("\\\"", "\"");
+        }
+
+        private static bool ContainsText(List<string> list, string value)
+        {
+            int i;
+
+            for (i = 0; i < list.Count; i++)
+            {
+                if (String.Equals(list[i], value, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static OviaBarListMappingStore CreateBuiltInDefault()
+        {
+            OviaBarListMappingStore store = new OviaBarListMappingStore();
+            store.Version = "built-in-2026.05.22.001";
+            store.UpdatedAt = "2026-05-22";
+
+            store.AddColumn("no", "번호", "number_or_text", 100, "NO", "NO.", "No", "No.", "순번", "번호", "번", "숫자");
+            store.AddColumn("part", "부위", "text", 100, "부위", "위치", "층", "구간", "시공부위", "ZONE", "AREA", "LOCATION");
+            store.AddColumn("mark", "부호/명칭", "text", 100, "부호", "명칭", "부호명", "부호 및 명칭", "BAR MARK", "MARK", "기호", "철근명", "ITEM");
+            store.AddColumn("shape", "철근형상", "text_or_image", 100, "형상", "철근형상", "SHAPE", "BENT", "BAR SHAPE", "절곡형상", "형상번호", "형번", "SHAPE NO");
+            store.AddColumn("dia", "규격", "rebar_diameter", 100, "규격", "DIA", "D", "직경", "철근규격", "BAR DIA", "SIZE", "강종");
+            store.AddColumn("length_mm", "길이(mm)", "number", 100, "길이", "L", "LENGTH", "절단길이", "산출길이", "MM", "길이MM", "길이(MM)");
+            store.AddColumn("qty_ea", "수량(EA)", "number", 100, "수량", "EA", "QTY", "QUANTITY", "개수", "갯수", "본수", "수량EA", "수량(EA)");
+            store.AddColumn("total_length_m", "총길이(M)", "number", 90, "총길이", "총연장", "연장", "TOTAL LENGTH", "T.L", "M", "총길이M", "총길이(M)");
+            store.AddColumn("total_weight_ton", "총중량(TON)", "number", 90, "총중량", "중량", "WEIGHT", "WT", "TON", "톤", "KG", "TOTAL WEIGHT", "총중량TON", "총중량(TON)");
+            store.AddColumn("remark", "비고", "text", 80, "비고", "REMARK", "NOTE", "메모", "특기사항", "비고사항");
+
+            return store;
+        }
+
+        private void AddColumn(string key, string displayName, string dataType, int priority, params string[] aliases)
+        {
+            OviaBarListMappingColumn col = new OviaBarListMappingColumn();
+            col.Key = key;
+            col.DisplayName = displayName;
+            col.DataType = dataType;
+            col.Priority = priority;
+
+            int i;
+
+            for (i = 0; i < aliases.Length; i++)
+            {
+                if (aliases[i] != null && aliases[i].Trim() != "" && !ContainsText(col.Aliases, aliases[i].Trim()))
+                {
+                    col.Aliases.Add(aliases[i].Trim());
+                }
+            }
+
+            if (!ContainsText(col.Aliases, displayName))
+            {
+                col.Aliases.Add(displayName);
+            }
+
+            StandardColumns.Add(col);
         }
     }
 

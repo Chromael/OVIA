@@ -16,6 +16,7 @@ namespace OVIA.Desktop
         private CheckBox chkIncludeDone;
         private DataGridView grid;
         private Label lblStatus;
+        private ToolTip windowToolTip;
 
         private readonly Color BrandIndigo = Color.FromArgb(37, 30, 130);
         private readonly Color BrandViolet = Color.FromArgb(91, 49, 225);
@@ -56,11 +57,19 @@ namespace OVIA.Desktop
             this.MinimumSize = new Size(760, 520);
             this.BackColor = SurfaceColor;
 
+            windowToolTip = new ToolTip();
+            windowToolTip.AutoPopDelay = 4000;
+            windowToolTip.InitialDelay = 350;
+            windowToolTip.ReshowDelay = 100;
+            windowToolTip.ShowAlways = true;
+
             scrollPanel = new Panel();
             scrollPanel.Dock = DockStyle.Fill;
             scrollPanel.BackColor = SurfaceColor;
             scrollPanel.AutoScroll = true;
-            scrollPanel.AutoScrollMinSize = new Size(BaseClientWidth, BaseClientHeight);
+            scrollPanel.AutoScrollMinSize = new Size(0, BaseClientHeight);
+            scrollPanel.HorizontalScroll.Enabled = false;
+            scrollPanel.HorizontalScroll.Visible = false;
             scrollPanel.Resize += ScrollPanel_Resize;
             this.Controls.Add(scrollPanel);
 
@@ -94,18 +103,20 @@ namespace OVIA.Desktop
                 return;
             }
 
-            bool needScroll = this.ClientSize.Width < BaseClientWidth || this.ClientSize.Height < BaseClientHeight;
+            bool needVerticalScroll = this.ClientSize.Height < BaseClientHeight;
 
             scrollPanel.SuspendLayout();
 
             try
             {
-                if (needScroll)
+                if (needVerticalScroll)
                 {
                     scrollPanel.AutoScroll = true;
-                    scrollPanel.AutoScrollMinSize = new Size(BaseClientWidth, BaseClientHeight);
+                    scrollPanel.AutoScrollMinSize = new Size(0, BaseClientHeight);
+                    scrollPanel.HorizontalScroll.Enabled = false;
+                    scrollPanel.HorizontalScroll.Visible = false;
 
-                    int width = Math.Max(BaseClientWidth, scrollPanel.ClientSize.Width);
+                    int width = Math.Max(1, scrollPanel.ClientSize.Width);
                     int height = Math.Max(BaseClientHeight, scrollPanel.ClientSize.Height);
 
                     contentPanel.Location = new Point(0, 0);
@@ -116,7 +127,7 @@ namespace OVIA.Desktop
                     scrollPanel.AutoScroll = false;
                     scrollPanel.AutoScrollMinSize = Size.Empty;
                     contentPanel.Location = new Point(0, 0);
-                    contentPanel.Size = new Size(scrollPanel.ClientSize.Width, scrollPanel.ClientSize.Height);
+                    contentPanel.Size = new Size(Math.Max(1, scrollPanel.ClientSize.Width), Math.Max(1, scrollPanel.ClientSize.Height));
                 }
             }
             finally
@@ -176,37 +187,128 @@ namespace OVIA.Desktop
             title.Font = new Font("맑은 고딕", 22F, FontStyle.Bold);
             title.ForeColor = TextDark;
             title.BackColor = SurfaceColor;
-            title.Location = new Point(34, 26);
+            title.Location = new Point(34, 22);
             parent.Controls.Add(title);
 
-            Label desc = new Label();
-            desc.Text = "진행 중인 공사를 검색하고 선택합니다. 이후 ERP 연동 시 거래처/공사 정보를 자동으로 불러옵니다.";
-            desc.AutoSize = true;
-            desc.Font = new Font("맑은 고딕", 10F, FontStyle.Regular);
-            desc.ForeColor = TextSub;
-            desc.BackColor = SurfaceColor;
-            desc.Location = new Point(38, 72);
-            parent.Controls.Add(desc);
+            Button help = CreateHelpIcon("진행 중인 공사를 검색하고 선택합니다.\r\n이후 ERP 연동 시 거래처/공사 정보를 자동으로 불러옵니다.");
+            help.Location = new Point(title.Right + 10, 36);
+            parent.Controls.Add(help);
 
-            OviaProjectButton defaultSize = new OviaProjectButton();
-            defaultSize.Text = "기본크기";
-            defaultSize.Location = new Point(956, 36);
-            defaultSize.Size = new Size(92, 34);
+            Button defaultSize = CreateDefaultSizeButton();
+            defaultSize.Location = new Point(1106, 36);
             defaultSize.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            defaultSize.StartColor = Color.FromArgb(55, 65, 95);
-            defaultSize.EndColor = Color.FromArgb(37, 30, 130);
             defaultSize.Click += DefaultSize_Click;
             parent.Controls.Add(defaultSize);
+        }
 
-            OviaProjectButton close = new OviaProjectButton();
-            close.Text = "닫기";
-            close.Location = new Point(1060, 36);
-            close.Size = new Size(82, 34);
-            close.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            close.StartColor = Color.FromArgb(120, 128, 150);
-            close.EndColor = Color.FromArgb(85, 93, 115);
-            close.Click += Close_Click;
-            parent.Controls.Add(close);
+        private LinkLabel CreateBreadcrumbLabel()
+        {
+            LinkLabel label = new LinkLabel();
+            label.Text = "";
+            label.AutoSize = false;
+            label.Size = new Size(520, 22);
+            label.Location = new Point((BaseClientWidth - 520) / 2, 58);
+            label.TextAlign = ContentAlignment.MiddleCenter;
+            label.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+            label.BackColor = SurfaceColor;
+            label.ForeColor = TextSub;
+            label.LinkColor = Color.FromArgb(80, 88, 112);
+            label.ActiveLinkColor = BrandViolet;
+            label.VisitedLinkColor = Color.FromArgb(80, 88, 112);
+            label.DisabledLinkColor = TextSub;
+            label.TabStop = false;
+            return label;
+        }
+
+        private Button CreateDefaultSizeButton()
+        {
+            Button button = new Button();
+            button.Text = "";
+            button.Size = new Size(34, 30);
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderSize = 1;
+            button.FlatAppearance.BorderColor = Color.FromArgb(185, 192, 205);
+            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(246, 248, 252);
+            button.FlatAppearance.MouseDownBackColor = Color.FromArgb(232, 236, 244);
+            button.BackColor = Color.White;
+            button.ForeColor = Color.FromArgb(138, 146, 160);
+            button.Cursor = Cursors.Hand;
+            button.TabStop = false;
+            button.Paint += DefaultSizeButton_Paint;
+
+            if (windowToolTip != null)
+            {
+                windowToolTip.SetToolTip(button, "창 기본크기로");
+            }
+
+            return button;
+        }
+
+        private void DefaultSizeButton_Paint(object sender, PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+            using (Pen pen = new Pen(Color.FromArgb(138, 146, 160), 1.6F))
+            {
+                Rectangle backRect = new Rectangle(12, 8, 13, 11);
+                Rectangle frontRect = new Rectangle(8, 12, 13, 11);
+
+                e.Graphics.DrawRectangle(pen, backRect);
+                e.Graphics.DrawRectangle(pen, frontRect);
+                e.Graphics.DrawLine(pen, frontRect.Left + 3, frontRect.Top + 3, frontRect.Right - 3, frontRect.Top + 3);
+            }
+        }
+
+        private Button CreateHelpIcon(string helpText)
+        {
+            Button button = new Button();
+            button.Text = "";
+            button.Size = new Size(24, 24);
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderSize = 0;
+            button.FlatAppearance.MouseOverBackColor = SurfaceColor;
+            button.FlatAppearance.MouseDownBackColor = SurfaceColor;
+            button.BackColor = SurfaceColor;
+            button.ForeColor = Color.FromArgb(138, 146, 160);
+            button.Cursor = Cursors.Help;
+            button.TabStop = false;
+            button.Paint += HelpIcon_Paint;
+
+            if (windowToolTip != null)
+            {
+                windowToolTip.SetToolTip(button, helpText);
+            }
+
+            return button;
+        }
+
+        private void HelpIcon_Paint(object sender, PaintEventArgs e)
+        {
+            Button button = sender as Button;
+            if (button == null)
+            {
+                return;
+            }
+
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+            Rectangle rect = new Rectangle(2, 2, button.Width - 5, button.Height - 5);
+            Color lineColor = Color.FromArgb(185, 192, 205);
+            Color textColor = Color.FromArgb(138, 146, 160);
+
+            using (SolidBrush fillBrush = new SolidBrush(Color.White))
+            using (Pen pen = new Pen(lineColor, 1.2F))
+            using (SolidBrush textBrush = new SolidBrush(textColor))
+            using (Font font = new Font("맑은 고딕", 9F, FontStyle.Bold))
+            using (StringFormat format = new StringFormat())
+            {
+                format.Alignment = StringAlignment.Center;
+                format.LineAlignment = StringAlignment.Center;
+
+                e.Graphics.FillEllipse(fillBrush, rect);
+                e.Graphics.DrawEllipse(pen, rect);
+                e.Graphics.DrawString("?", font, textBrush, rect, format);
+            }
         }
 
         private void BuildSearchArea(Control parent)
@@ -299,6 +401,7 @@ namespace OVIA.Desktop
             grid.AllowUserToResizeRows = false;
             grid.AllowUserToResizeColumns = true;
             grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            grid.ScrollBars = ScrollBars.Vertical;
             grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             grid.MultiSelect = false;
             grid.RowHeadersVisible = false;
@@ -491,7 +594,31 @@ namespace OVIA.Desktop
             string status = GetSelectedCellText("상태");
 
             FrmProjectBarListList barListList = new FrmProjectBarListList(companyId, userId, projectNo, projectName, clientName, status);
-            barListList.ShowDialog(this);
+            ShowReplacementWindow(barListList);
+        }
+
+        private void ShowReplacementWindow(Form nextForm)
+        {
+            if (nextForm == null)
+            {
+                return;
+            }
+
+            Form ownerForm = this.Owner;
+            FormWindowState currentState = this.WindowState;
+            Rectangle normalBounds = this.WindowState == FormWindowState.Normal ? this.Bounds : this.RestoreBounds;
+
+            nextForm.StartPosition = FormStartPosition.Manual;
+            nextForm.Bounds = normalBounds;
+
+            if (currentState == FormWindowState.Maximized)
+            {
+                nextForm.WindowState = FormWindowState.Maximized;
+            }
+
+            nextForm.Show();
+            nextForm.Activate();
+            this.Close();
         }
 
         private string GetSelectedCellText(string columnName)

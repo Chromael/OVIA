@@ -1,0 +1,77 @@
+{
+  "version": "2026.05.22.001",
+  "updatedAt": "2026-05-22",
+  "description": "OVIA BarList 표준 컬럼 매핑 사전입니다. 관리자는 aliases 배열에 도면업체별 항목명을 추가하면 됩니다.",
+  "standardColumns": [
+    {
+      "key": "no",
+      "displayName": "번호",
+      "aliases": ["NO", "NO.", "No", "No.", "순번", "번호", "번", "숫자"],
+      "priority": 100,
+      "dataType": "number_or_text"
+    },
+    {
+      "key": "part",
+      "displayName": "부위",
+      "aliases": ["부위", "위치", "층", "구간", "시공부위", "ZONE", "AREA", "LOCATION"],
+      "priority": 100,
+      "dataType": "text"
+    },
+    {
+      "key": "mark",
+      "displayName": "부호/명칭",
+      "aliases": ["부호", "명칭", "부호명", "부호 및 명칭", "BAR MARK", "MARK", "기호", "철근명", "ITEM"],
+      "priority": 100,
+      "dataType": "text"
+    },
+    {
+      "key": "shape",
+      "displayName": "철근형상",
+      "aliases": ["형상", "철근형상", "SHAPE", "BENT", "BAR SHAPE", "절곡형상", "형상번호", "형번", "SHAPE NO"],
+      "priority": 100,
+      "dataType": "text_or_image"
+    },
+    {
+      "key": "dia",
+      "displayName": "규격",
+      "aliases": ["규격", "DIA", "D", "직경", "철근규격", "BAR DIA", "SIZE", "강종"],
+      "priority": 100,
+      "dataType": "rebar_diameter"
+    },
+    {
+      "key": "length_mm",
+      "displayName": "길이(mm)",
+      "aliases": ["길이", "L", "LENGTH", "절단길이", "산출길이", "MM", "길이MM", "길이(MM)"],
+      "priority": 100,
+      "dataType": "number"
+    },
+    {
+      "key": "qty_ea",
+      "displayName": "수량(EA)",
+      "aliases": ["수량", "EA", "QTY", "QUANTITY", "개수", "갯수", "본수", "수량EA", "수량(EA)"],
+      "priority": 100,
+      "dataType": "number"
+    },
+    {
+      "key": "total_length_m",
+      "displayName": "총길이(M)",
+      "aliases": ["총길이", "총연장", "연장", "TOTAL LENGTH", "T.L", "M", "총길이M", "총길이(M)"],
+      "priority": 90,
+      "dataType": "number"
+    },
+    {
+      "key": "total_weight_ton",
+      "displayName": "총중량(TON)",
+      "aliases": ["총중량", "중량", "WEIGHT", "WT", "TON", "톤", "KG", "TOTAL WEIGHT", "총중량TON", "총중량(TON)"],
+      "priority": 90,
+      "dataType": "number"
+    },
+    {
+      "key": "remark",
+      "displayName": "비고",
+      "aliases": ["비고", "REMARK", "NOTE", "메모", "특기사항", "비고사항"],
+      "priority": 80,
+      "dataType": "text"
+    }
+  ]
+}
