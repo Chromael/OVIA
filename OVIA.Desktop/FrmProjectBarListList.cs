@@ -30,6 +30,12 @@ namespace OVIA.Desktop
         private readonly Color TextDark = Color.FromArgb(28, 33, 72);
         private readonly Color TextSub = Color.FromArgb(102, 111, 135);
 
+        private const int BaseClientWidth = 1180;
+        private const int BaseClientHeight = 720;
+        private Panel scrollPanel;
+        private Panel contentPanel;
+        private bool isScrollResetQueued = false;
+
         public FrmProjectBarListList(string companyId, string userId, string projectNo, string projectName, string clientName, string projectStatus)
         {
             this.companyId = companyId == null ? "" : companyId;
@@ -50,24 +56,124 @@ namespace OVIA.Desktop
             this.Text = "OVIA 공사별 BarList";
             this.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
             this.StartPosition = FormStartPosition.CenterParent;
-            this.FormBorderStyle = FormBorderStyle.FixedSingle;
-            this.MaximizeBox = false;
+            this.FormBorderStyle = FormBorderStyle.Sizable;
+            this.MaximizeBox = true;
             this.MinimizeBox = true;
-            this.ClientSize = new Size(1180, 720);
+            this.ClientSize = new Size(BaseClientWidth, BaseClientHeight);
+            this.MinimumSize = new Size(760, 520);
             this.BackColor = SurfaceColor;
 
-            Panel bg = new Panel();
-            bg.Dock = DockStyle.Fill;
-            bg.BackColor = SurfaceColor;
-            this.Controls.Add(bg);
+            scrollPanel = new Panel();
+            scrollPanel.Dock = DockStyle.Fill;
+            scrollPanel.BackColor = SurfaceColor;
+            scrollPanel.AutoScroll = true;
+            scrollPanel.AutoScrollMinSize = new Size(BaseClientWidth, BaseClientHeight);
+            scrollPanel.Resize += ScrollPanel_Resize;
+            this.Controls.Add(scrollPanel);
 
-            BuildHeader(bg);
-            BuildProjectInfo(bg);
-            BuildToolbar(bg);
-            BuildGrid(bg);
-            BuildFooter(bg);
+            contentPanel = new Panel();
+            contentPanel.Location = new Point(0, 0);
+            contentPanel.Size = new Size(BaseClientWidth, BaseClientHeight);
+            contentPanel.BackColor = SurfaceColor;
+            scrollPanel.Controls.Add(contentPanel);
+
+            BuildHeader(contentPanel);
+            BuildProjectInfo(contentPanel);
+            BuildToolbar(contentPanel);
+            BuildGrid(contentPanel);
+            BuildFooter(contentPanel);
+            UpdateScrollableContentSize();
+            ResetScrollToTopLeft();
 
             this.ResumeLayout(false);
+        }
+
+        private void ScrollPanel_Resize(object sender, EventArgs e)
+        {
+            UpdateScrollableContentSize();
+            ResetScrollToTopLeft();
+            QueueResetScrollToTopLeft();
+        }
+
+        private void UpdateScrollableContentSize()
+        {
+            if (scrollPanel == null || contentPanel == null || scrollPanel.IsDisposed || contentPanel.IsDisposed)
+            {
+                return;
+            }
+
+            bool needScroll = this.ClientSize.Width < BaseClientWidth || this.ClientSize.Height < BaseClientHeight;
+
+            scrollPanel.SuspendLayout();
+
+            try
+            {
+                if (needScroll)
+                {
+                    scrollPanel.AutoScroll = true;
+                    scrollPanel.AutoScrollMinSize = new Size(BaseClientWidth, BaseClientHeight);
+
+                    int width = Math.Max(BaseClientWidth, scrollPanel.ClientSize.Width);
+                    int height = Math.Max(BaseClientHeight, scrollPanel.ClientSize.Height);
+
+                    contentPanel.Location = new Point(0, 0);
+                    contentPanel.Size = new Size(width, height);
+                }
+                else
+                {
+                    scrollPanel.AutoScroll = false;
+                    scrollPanel.AutoScrollMinSize = Size.Empty;
+                    contentPanel.Location = new Point(0, 0);
+                    contentPanel.Size = new Size(scrollPanel.ClientSize.Width, scrollPanel.ClientSize.Height);
+                }
+            }
+            finally
+            {
+                scrollPanel.ResumeLayout(false);
+            }
+        }
+
+        private void QueueResetScrollToTopLeft()
+        {
+            if (isScrollResetQueued || this.IsDisposed || !this.IsHandleCreated)
+            {
+                return;
+            }
+
+            isScrollResetQueued = true;
+
+            try
+            {
+                this.BeginInvoke(new MethodInvoker(delegate
+                {
+                    isScrollResetQueued = false;
+                    ResetScrollToTopLeft();
+                }));
+            }
+            catch
+            {
+                isScrollResetQueued = false;
+            }
+        }
+
+        private void ResetScrollToTopLeft()
+        {
+            if (scrollPanel == null || contentPanel == null || scrollPanel.IsDisposed || contentPanel.IsDisposed)
+            {
+                return;
+            }
+
+            scrollPanel.SuspendLayout();
+
+            try
+            {
+                scrollPanel.AutoScrollPosition = new Point(0, 0);
+                contentPanel.Location = new Point(0, 0);
+            }
+            finally
+            {
+                scrollPanel.ResumeLayout(false);
+            }
         }
 
         private void BuildHeader(Control parent)
@@ -90,10 +196,21 @@ namespace OVIA.Desktop
             desc.Location = new Point(38, 72);
             parent.Controls.Add(desc);
 
+            OviaProjectBarListButton defaultSize = new OviaProjectBarListButton();
+            defaultSize.Text = "기본크기";
+            defaultSize.Location = new Point(956, 36);
+            defaultSize.Size = new Size(92, 34);
+            defaultSize.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            defaultSize.StartColor = Color.FromArgb(55, 65, 95);
+            defaultSize.EndColor = Color.FromArgb(37, 30, 130);
+            defaultSize.Click += DefaultSize_Click;
+            parent.Controls.Add(defaultSize);
+
             OviaProjectBarListButton close = new OviaProjectBarListButton();
             close.Text = "닫기";
             close.Location = new Point(1060, 36);
             close.Size = new Size(82, 34);
+            close.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             close.StartColor = Color.FromArgb(120, 128, 150);
             close.EndColor = Color.FromArgb(85, 93, 115);
             close.Click += Close_Click;
@@ -105,6 +222,7 @@ namespace OVIA.Desktop
             OviaProjectBarListCard card = new OviaProjectBarListCard();
             card.Location = new Point(34, 105);
             card.Size = new Size(1108, 78);
+            card.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             card.SurfaceColor = SurfaceColor;
             parent.Controls.Add(card);
 
@@ -132,6 +250,7 @@ namespace OVIA.Desktop
             OviaProjectBarListCard card = new OviaProjectBarListCard();
             card.Location = new Point(34, 198);
             card.Size = new Size(1108, 92);
+            card.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             card.SurfaceColor = SurfaceColor;
             parent.Controls.Add(card);
 
@@ -170,6 +289,7 @@ namespace OVIA.Desktop
             guide.ForeColor = Color.FromArgb(210, 78, 78);
             guide.BackColor = Color.FromArgb(255, 248, 230);
             guide.Location = new Point(455, 27);
+            guide.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             card.Controls.Add(guide);
         }
 
@@ -178,13 +298,14 @@ namespace OVIA.Desktop
             grid = new DataGridView();
             grid.Location = new Point(34, 312);
             grid.Size = new Size(1108, 320);
+            grid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             grid.BackgroundColor = Color.White;
             grid.BorderStyle = BorderStyle.None;
             grid.AllowUserToAddRows = false;
             grid.AllowUserToDeleteRows = false;
             grid.AllowUserToResizeRows = false;
             grid.AllowUserToResizeColumns = true;
-            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             grid.MultiSelect = false;
             grid.RowHeadersVisible = false;
@@ -225,7 +346,10 @@ namespace OVIA.Desktop
             DataGridViewTextBoxColumn column = new DataGridViewTextBoxColumn();
             column.Name = header;
             column.HeaderText = header;
-            column.Width = width;
+            column.Width = Math.Max(5, width);
+            column.FillWeight = Math.Max(1, width);
+            column.MinimumWidth = width <= 0 ? 5 : 45;
+            column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
             column.SortMode = DataGridViewColumnSortMode.NotSortable;
             column.Resizable = DataGridViewTriState.True;
             grid.Columns.Add(column);
@@ -240,6 +364,7 @@ namespace OVIA.Desktop
             lblStatus.ForeColor = TextSub;
             lblStatus.BackColor = SurfaceColor;
             lblStatus.Location = new Point(38, 660);
+            lblStatus.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             parent.Controls.Add(lblStatus);
         }
 
@@ -585,6 +710,64 @@ namespace OVIA.Desktop
         private void RefreshButton_Click(object sender, EventArgs e)
         {
             BindBarListRows();
+        }
+
+        private void DefaultSize_Click(object sender, EventArgs e)
+        {
+            RestoreDefaultWindowSize();
+        }
+
+        private void RestoreDefaultWindowSize()
+        {
+            if (this.WindowState != FormWindowState.Normal)
+            {
+                this.WindowState = FormWindowState.Normal;
+            }
+
+            Rectangle workArea = Screen.FromControl(this).WorkingArea;
+
+            if (scrollPanel != null && !scrollPanel.IsDisposed)
+            {
+                scrollPanel.AutoScroll = false;
+                scrollPanel.AutoScrollMinSize = Size.Empty;
+                scrollPanel.AutoScrollPosition = new Point(0, 0);
+            }
+
+            if (contentPanel != null && !contentPanel.IsDisposed)
+            {
+                contentPanel.Location = new Point(0, 0);
+            }
+
+            this.ClientSize = new Size(BaseClientWidth, BaseClientHeight);
+
+            int left = this.Left;
+            int top = this.Top;
+
+            if (left < workArea.Left)
+            {
+                left = workArea.Left;
+            }
+
+            if (top < workArea.Top)
+            {
+                top = workArea.Top;
+            }
+
+            if (left + this.Width > workArea.Right)
+            {
+                left = Math.Max(workArea.Left, workArea.Right - this.Width);
+            }
+
+            if (top + this.Height > workArea.Bottom)
+            {
+                top = Math.Max(workArea.Top, workArea.Bottom - this.Height);
+            }
+
+            this.Location = new Point(left, top);
+
+            UpdateScrollableContentSize();
+            ResetScrollToTopLeft();
+            QueueResetScrollToTopLeft();
         }
 
         private void Close_Click(object sender, EventArgs e)

@@ -74,6 +74,13 @@ namespace OVIA.Desktop
         private readonly Color SurfaceColor = Color.FromArgb(244, 248, 255);
         private readonly Color TextDark = Color.FromArgb(28, 33, 72);
         private readonly Color TextSub = Color.FromArgb(102, 111, 135);
+        private readonly Color ModifiedCellTextColor = Color.FromArgb(220, 38, 38);
+
+        private const int BaseClientWidth = 1240;
+        private const int BaseClientHeight = 760;
+        private Panel scrollPanel;
+        private Panel contentPanel;
+        private bool isScrollResetQueued = false;
 
         public FrmBarList(string companyId, string userId)
             : this(companyId, userId, "", "공사 미선택", "", "", "")
@@ -111,26 +118,126 @@ namespace OVIA.Desktop
             this.Text = "OVIA " + GetScreenTitleText();
             this.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
             this.StartPosition = FormStartPosition.CenterParent;
-            this.FormBorderStyle = FormBorderStyle.FixedSingle;
-            this.MaximizeBox = false;
+            this.FormBorderStyle = FormBorderStyle.Sizable;
+            this.MaximizeBox = true;
             this.MinimizeBox = true;
-            this.ClientSize = new Size(1240, 760);
+            this.ClientSize = new Size(BaseClientWidth, BaseClientHeight);
+            this.MinimumSize = new Size(820, 540);
             this.BackColor = SurfaceColor;
             this.FormClosing += FrmBarList_FormClosing;
 
-            Panel bg = new Panel();
-            bg.Dock = DockStyle.Fill;
-            bg.BackColor = SurfaceColor;
-            this.Controls.Add(bg);
+            scrollPanel = new Panel();
+            scrollPanel.Dock = DockStyle.Fill;
+            scrollPanel.BackColor = SurfaceColor;
+            scrollPanel.AutoScroll = true;
+            scrollPanel.AutoScrollMinSize = new Size(BaseClientWidth, BaseClientHeight);
+            scrollPanel.Resize += ScrollPanel_Resize;
+            this.Controls.Add(scrollPanel);
 
-            BuildHeader(bg);
-            BuildProjectInfo(bg);
-            BuildFileBar(bg);
-            BuildSummary(bg);
-            BuildGrid(bg);
-            BuildFooter(bg);
+            contentPanel = new Panel();
+            contentPanel.Location = new Point(0, 0);
+            contentPanel.Size = new Size(BaseClientWidth, BaseClientHeight);
+            contentPanel.BackColor = SurfaceColor;
+            scrollPanel.Controls.Add(contentPanel);
+
+            BuildHeader(contentPanel);
+            BuildProjectInfo(contentPanel);
+            BuildFileBar(contentPanel);
+            BuildSummary(contentPanel);
+            BuildGrid(contentPanel);
+            BuildFooter(contentPanel);
+            UpdateScrollableContentSize();
+            ResetScrollToTopLeft();
 
             this.ResumeLayout(false);
+        }
+
+        private void ScrollPanel_Resize(object sender, EventArgs e)
+        {
+            UpdateScrollableContentSize();
+            ResetScrollToTopLeft();
+            QueueResetScrollToTopLeft();
+        }
+
+        private void UpdateScrollableContentSize()
+        {
+            if (scrollPanel == null || contentPanel == null || scrollPanel.IsDisposed || contentPanel.IsDisposed)
+            {
+                return;
+            }
+
+            bool needScroll = this.ClientSize.Width < BaseClientWidth || this.ClientSize.Height < BaseClientHeight;
+
+            scrollPanel.SuspendLayout();
+
+            try
+            {
+                if (needScroll)
+                {
+                    scrollPanel.AutoScroll = true;
+                    scrollPanel.AutoScrollMinSize = new Size(BaseClientWidth, BaseClientHeight);
+
+                    int width = Math.Max(BaseClientWidth, scrollPanel.ClientSize.Width);
+                    int height = Math.Max(BaseClientHeight, scrollPanel.ClientSize.Height);
+
+                    contentPanel.Location = new Point(0, 0);
+                    contentPanel.Size = new Size(width, height);
+                }
+                else
+                {
+                    scrollPanel.AutoScroll = false;
+                    scrollPanel.AutoScrollMinSize = Size.Empty;
+                    contentPanel.Location = new Point(0, 0);
+                    contentPanel.Size = new Size(scrollPanel.ClientSize.Width, scrollPanel.ClientSize.Height);
+                }
+            }
+            finally
+            {
+                scrollPanel.ResumeLayout(false);
+            }
+        }
+
+        private void QueueResetScrollToTopLeft()
+        {
+            if (isScrollResetQueued || this.IsDisposed || !this.IsHandleCreated)
+            {
+                return;
+            }
+
+            isScrollResetQueued = true;
+
+            try
+            {
+                this.BeginInvoke(new MethodInvoker(delegate
+                {
+                    isScrollResetQueued = false;
+                    ResetScrollToTopLeft();
+                }));
+            }
+            catch
+            {
+                isScrollResetQueued = false;
+            }
+        }
+
+        private void ResetScrollToTopLeft()
+        {
+            if (scrollPanel == null || contentPanel == null || scrollPanel.IsDisposed || contentPanel.IsDisposed)
+            {
+                return;
+            }
+
+            scrollPanel.SuspendLayout();
+
+            try
+            {
+                scrollPanel.AutoScrollPosition = new Point(0, 0);
+                contentPanel.Location = new Point(0, 0);
+            }
+            finally
+            {
+                scrollPanel.ResumeLayout(false);
+            }
         }
 
         private bool IsRegisteredBarListMode()
@@ -178,10 +285,21 @@ namespace OVIA.Desktop
             desc.Location = new Point(38, 70);
             parent.Controls.Add(desc);
 
+            OviaBarListButton defaultSize = new OviaBarListButton();
+            defaultSize.Text = "기본크기";
+            defaultSize.Location = new Point(1016, 34);
+            defaultSize.Size = new Size(92, 34);
+            defaultSize.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            defaultSize.StartColor = Color.FromArgb(55, 65, 95);
+            defaultSize.EndColor = Color.FromArgb(37, 30, 130);
+            defaultSize.Click += DefaultSize_Click;
+            parent.Controls.Add(defaultSize);
+
             OviaBarListButton close = new OviaBarListButton();
             close.Text = "닫기";
             close.Location = new Point(1120, 34);
             close.Size = new Size(82, 34);
+            close.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             close.StartColor = Color.FromArgb(120, 128, 150);
             close.EndColor = Color.FromArgb(85, 93, 115);
             close.Click += Close_Click;
@@ -193,6 +311,7 @@ namespace OVIA.Desktop
             OviaBarListCard card = new OviaBarListCard();
             card.Location = new Point(34, 100);
             card.Size = new Size(1168, 72);
+            card.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             card.SurfaceColor = SurfaceColor;
             parent.Controls.Add(card);
 
@@ -221,6 +340,7 @@ namespace OVIA.Desktop
             lblSaveState.ForeColor = TextSub;
             lblSaveState.BackColor = Color.White;
             lblSaveState.Location = new Point(980, 26);
+            lblSaveState.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             card.Controls.Add(lblSaveState);
         }
 
@@ -266,6 +386,7 @@ namespace OVIA.Desktop
             OviaBarListCard card = new OviaBarListCard();
             card.Location = new Point(34, 187);
             card.Size = new Size(1168, 100);
+            card.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             card.SurfaceColor = SurfaceColor;
             parent.Controls.Add(card);
 
@@ -281,6 +402,7 @@ namespace OVIA.Desktop
             txtFilePath = new TextBox();
             txtFilePath.Location = new Point(22, 43);
             txtFilePath.Size = new Size(570, 23);
+            txtFilePath.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             txtFilePath.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
             txtFilePath.ReadOnly = true;
             card.Controls.Add(txtFilePath);
@@ -288,6 +410,7 @@ namespace OVIA.Desktop
             OviaBarListButton autoButton = new OviaBarListButton();
             autoButton.Text = "AutoCAD에서 가져오기";
             autoButton.Location = new Point(610, 36);
+            autoButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             autoButton.Size = new Size(160, 34);
             autoButton.StartColor = BrandCyan;
             autoButton.EndColor = BrandViolet;
@@ -297,6 +420,7 @@ namespace OVIA.Desktop
             OviaBarListButton recentButton = new OviaBarListButton();
             recentButton.Text = "최근 추출";
             recentButton.Location = new Point(785, 36);
+            recentButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             recentButton.Size = new Size(92, 34);
             recentButton.StartColor = Color.FromArgb(70, 130, 230);
             recentButton.EndColor = BrandViolet;
@@ -306,6 +430,7 @@ namespace OVIA.Desktop
             OviaBarListButton openButton = new OviaBarListButton();
             openButton.Text = "CSV 선택";
             openButton.Location = new Point(890, 36);
+            openButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             openButton.Size = new Size(92, 34);
             openButton.StartColor = BrandViolet;
             openButton.EndColor = BrandIndigo;
@@ -315,6 +440,7 @@ namespace OVIA.Desktop
             OviaBarListButton saveProjectButton = new OviaBarListButton();
             saveProjectButton.Text = "검토 후 저장";
             saveProjectButton.Location = new Point(995, 36);
+            saveProjectButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             saveProjectButton.Size = new Size(120, 34);
             saveProjectButton.StartColor = Color.FromArgb(30, 160, 105);
             saveProjectButton.EndColor = Color.FromArgb(20, 120, 82);
@@ -382,13 +508,14 @@ namespace OVIA.Desktop
             EnableGridDoubleBuffering(grid);
             grid.Location = new Point(34, 402);
             grid.Size = new Size(1168, 265);
+            grid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             grid.BackgroundColor = Color.White;
             grid.BorderStyle = BorderStyle.None;
             grid.AllowUserToAddRows = false;
             grid.AllowUserToDeleteRows = true;
             grid.AllowUserToResizeRows = false;
             grid.AllowUserToResizeColumns = true;
-            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
             grid.MultiSelect = true;
             grid.RowHeadersVisible = true;
@@ -406,6 +533,7 @@ namespace OVIA.Desktop
             grid.MouseMove += Grid_MouseMove;
             grid.MouseUp += Grid_MouseUp;
             grid.CellPainting += Grid_CellPainting;
+            grid.CellFormatting += Grid_CellFormatting;
             grid.RowPostPaint += Grid_RowPostPaint;
             grid.RowHeaderMouseClick += Grid_RowHeaderMouseClick;
             grid.ColumnHeaderMouseClick += Grid_ColumnHeaderMouseClick;
@@ -493,6 +621,7 @@ namespace OVIA.Desktop
             OviaBarListButton coverButton = new OviaBarListButton();
             coverButton.Text = "갑지출력";
             coverButton.Location = new Point(34, 690);
+            coverButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             coverButton.Size = new Size(94, 34);
             coverButton.StartColor = Color.FromArgb(108, 117, 145);
             coverButton.EndColor = Color.FromArgb(78, 86, 110);
@@ -502,6 +631,7 @@ namespace OVIA.Desktop
             OviaBarListButton detailButton = new OviaBarListButton();
             detailButton.Text = "내역출력";
             detailButton.Location = new Point(140, 690);
+            detailButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             detailButton.Size = new Size(94, 34);
             detailButton.StartColor = Color.FromArgb(108, 117, 145);
             detailButton.EndColor = Color.FromArgb(78, 86, 110);
@@ -511,6 +641,7 @@ namespace OVIA.Desktop
             OviaBarListButton tagButton = new OviaBarListButton();
             tagButton.Text = "태그발행";
             tagButton.Location = new Point(246, 690);
+            tagButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             tagButton.Size = new Size(94, 34);
             tagButton.StartColor = Color.FromArgb(108, 117, 145);
             tagButton.EndColor = Color.FromArgb(78, 86, 110);
@@ -520,6 +651,7 @@ namespace OVIA.Desktop
             OviaBarListButton deleteButton = new OviaBarListButton();
             deleteButton.Text = "선택 행 삭제";
             deleteButton.Location = new Point(352, 690);
+            deleteButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             deleteButton.Size = new Size(110, 34);
             deleteButton.StartColor = Color.FromArgb(215, 85, 85);
             deleteButton.EndColor = Color.FromArgb(165, 50, 60);
@@ -529,6 +661,7 @@ namespace OVIA.Desktop
             OviaBarListButton saveCsvButton = new OviaBarListButton();
             saveCsvButton.Text = "CSV 저장";
             saveCsvButton.Location = new Point(474, 690);
+            saveCsvButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             saveCsvButton.Size = new Size(94, 34);
             saveCsvButton.StartColor = Color.FromArgb(30, 160, 105);
             saveCsvButton.EndColor = Color.FromArgb(20, 120, 82);
@@ -542,6 +675,7 @@ namespace OVIA.Desktop
             footer.ForeColor = Color.FromArgb(210, 78, 78);
             footer.BackColor = SurfaceColor;
             footer.Location = new Point(590, 700);
+            footer.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             parent.Controls.Add(footer);
         }
 
@@ -802,11 +936,13 @@ namespace OVIA.Desktop
                 }
 
                 SaveGridToCsv(filePath);
+                ResetAllRowOriginalValuesToCurrent();
 
                 isSaved = true;
                 allowExtractEditMenu = true;
                 UpdateSaveState();
                 ClearUndoRedoStates();
+                grid.Invalidate();
 
                 lblStatus.Text = "BarList 저장 완료\r\n공사별 BarList 목록에 반영되었습니다.";
                 lblStatus.ForeColor = TextSub;
@@ -967,6 +1103,7 @@ namespace OVIA.Desktop
                 cellEditBeforeSnapshot = null;
             }
 
+            RefreshModifiedCellVisual(e.RowIndex, e.ColumnIndex);
             MarkUnsaved();
             RecalculateSummary();
         }
@@ -1275,6 +1412,30 @@ namespace OVIA.Desktop
             InvalidateSelectionVisuals();
         }
 
+        private void Grid_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
+        {
+            if (grid == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            if (e.RowIndex >= grid.Rows.Count || e.ColumnIndex >= grid.Columns.Count)
+            {
+                return;
+            }
+
+            if (IsCellModified(e.RowIndex, e.ColumnIndex))
+            {
+                e.CellStyle.ForeColor = ModifiedCellTextColor;
+                e.CellStyle.SelectionForeColor = ModifiedCellTextColor;
+            }
+            else
+            {
+                e.CellStyle.ForeColor = TextDark;
+                e.CellStyle.SelectionForeColor = TextDark;
+            }
+        }
+
         private void Grid_RowPostPaint(object sender, DataGridViewRowPostPaintEventArgs e)
         {
             if (e.RowIndex < 0)
@@ -1341,6 +1502,17 @@ namespace OVIA.Desktop
             bool singleCellSelected = selectedCellCountCache <= 1;
             Color backColor = singleCellSelected ? Color.FromArgb(255, 219, 58) : Color.FromArgb(255, 248, 205);
             Color borderColor = singleCellSelected ? Color.FromArgb(170, 122, 0) : Color.FromArgb(226, 189, 67);
+
+            if (IsCellModified(e.RowIndex, e.ColumnIndex))
+            {
+                e.CellStyle.ForeColor = ModifiedCellTextColor;
+                e.CellStyle.SelectionForeColor = ModifiedCellTextColor;
+            }
+            else
+            {
+                e.CellStyle.ForeColor = TextDark;
+                e.CellStyle.SelectionForeColor = TextDark;
+            }
 
             e.Handled = true;
 
@@ -1687,11 +1859,13 @@ namespace OVIA.Desktop
             PushUndoState(CaptureGridState());
 
             List<object[]> rowValues = new List<object[]>();
+            List<object[]> rowOriginalValues = new List<object[]>();
             int i;
 
             for (i = 0; i < selectedIndexes.Count; i++)
             {
                 rowValues.Add(CloneRowValues(grid.Rows[selectedIndexes[i]]));
+                rowOriginalValues.Add(CloneRowOriginalValues(grid.Rows[selectedIndexes[i]]));
             }
 
             for (i = selectedIndexes.Count - 1; i >= 0; i--)
@@ -1704,6 +1878,7 @@ namespace OVIA.Desktop
             for (i = 0; i < rowValues.Count; i++)
             {
                 int newIndex = grid.Rows.Add(rowValues[i]);
+                SetRowOriginalValues(newIndex, rowOriginalValues[i]);
                 SelectRowCells(newIndex, true);
             }
 
@@ -1734,6 +1909,7 @@ namespace OVIA.Desktop
             for (i = 0; i < selectedIndexes.Count; i++)
             {
                 int newIndex = grid.Rows.Add(CloneRowValues(grid.Rows[selectedIndexes[i]]));
+                ResetRowOriginalValuesToCurrent(newIndex);
                 SelectRowCells(newIndex, true);
             }
 
@@ -1781,6 +1957,7 @@ namespace OVIA.Desktop
             }
 
             grid.Rows.Insert(insertIndex, emptyValues);
+            SetRowOriginalValues(insertIndex, emptyValues);
             grid.ClearSelection();
             SelectRowCells(insertIndex, true);
 
@@ -1876,6 +2053,7 @@ namespace OVIA.Desktop
 
             MarkUnsaved();
             RecalculateSummary();
+            grid.Invalidate();
         }
 
         private List<int> GetSelectedRowIndexes(bool ascending)
@@ -2132,6 +2310,138 @@ namespace OVIA.Desktop
             return values;
         }
 
+        private object[] CloneObjectArray(object[] source)
+        {
+            if (source == null)
+            {
+                return new object[0];
+            }
+
+            object[] values = new object[source.Length];
+            int i;
+
+            for (i = 0; i < source.Length; i++)
+            {
+                values[i] = source[i] == null ? "" : source[i].ToString();
+            }
+
+            return values;
+        }
+
+        private object[] CloneRowOriginalValues(DataGridViewRow row)
+        {
+            object[] originalValues = row.Tag as object[];
+
+            if (originalValues == null)
+            {
+                return CloneRowValues(row);
+            }
+
+            return CloneObjectArray(originalValues);
+        }
+
+        private void SetRowOriginalValues(int rowIndex, object[] values)
+        {
+            if (rowIndex < 0 || rowIndex >= grid.Rows.Count)
+            {
+                return;
+            }
+
+            grid.Rows[rowIndex].Tag = CloneObjectArray(values);
+        }
+
+        private void ResetRowOriginalValuesToCurrent(int rowIndex)
+        {
+            if (rowIndex < 0 || rowIndex >= grid.Rows.Count)
+            {
+                return;
+            }
+
+            grid.Rows[rowIndex].Tag = CloneRowValues(grid.Rows[rowIndex]);
+        }
+
+        private void ResetAllRowOriginalValuesToCurrent()
+        {
+            if (grid == null)
+            {
+                return;
+            }
+
+            int r;
+
+            for (r = 0; r < grid.Rows.Count; r++)
+            {
+                if (!grid.Rows[r].IsNewRow)
+                {
+                    ResetRowOriginalValuesToCurrent(r);
+                }
+            }
+        }
+
+        private bool IsCellModified(int rowIndex, int columnIndex)
+        {
+            if (grid == null || rowIndex < 0 || columnIndex < 0)
+            {
+                return false;
+            }
+
+            if (rowIndex >= grid.Rows.Count || columnIndex >= grid.Columns.Count)
+            {
+                return false;
+            }
+
+            DataGridViewRow row = grid.Rows[rowIndex];
+
+            if (row.IsNewRow)
+            {
+                return false;
+            }
+
+            object[] originalValues = row.Tag as object[];
+
+            if (originalValues == null)
+            {
+                row.Tag = CloneRowValues(row);
+                return false;
+            }
+
+            string originalText = "";
+
+            if (columnIndex < originalValues.Length && originalValues[columnIndex] != null)
+            {
+                originalText = originalValues[columnIndex].ToString();
+            }
+
+            string currentText = NormalizeCellValue(row.Cells[columnIndex].Value);
+
+            return !String.Equals(originalText, currentText, StringComparison.Ordinal);
+        }
+
+        private string NormalizeCellValue(object value)
+        {
+            if (value == null)
+            {
+                return "";
+            }
+
+            return value.ToString();
+        }
+
+        private void RefreshModifiedCellVisual(int rowIndex, int columnIndex)
+        {
+            if (grid == null || rowIndex < 0 || columnIndex < 0)
+            {
+                return;
+            }
+
+            if (rowIndex >= grid.Rows.Count || columnIndex >= grid.Columns.Count)
+            {
+                return;
+            }
+
+            grid.InvalidateCell(columnIndex, rowIndex);
+        }
+
         private int GetFirstVisibleColumnIndex()
         {
             int i;
@@ -2256,6 +2566,7 @@ namespace OVIA.Desktop
                 }
 
                 state.Rows.Add(values);
+                state.OriginalRows.Add(CloneRowOriginalValues(grid.Rows[r]));
             }
 
             return state;
@@ -2338,7 +2649,16 @@ namespace OVIA.Desktop
 
                 for (i = 0; i < state.Rows.Count; i++)
                 {
-                    grid.Rows.Add(state.Rows[i]);
+                    int newRowIndex = grid.Rows.Add(state.Rows[i]);
+
+                    if (i < state.OriginalRows.Count)
+                    {
+                        SetRowOriginalValues(newRowIndex, state.OriginalRows[i]);
+                    }
+                    else
+                    {
+                        SetRowOriginalValues(newRowIndex, state.Rows[i]);
+                    }
                 }
 
                 grid.ClearSelection();
@@ -2393,6 +2713,64 @@ namespace OVIA.Desktop
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information
             );
+        }
+
+        private void DefaultSize_Click(object sender, EventArgs e)
+        {
+            RestoreDefaultWindowSize();
+        }
+
+        private void RestoreDefaultWindowSize()
+        {
+            if (this.WindowState != FormWindowState.Normal)
+            {
+                this.WindowState = FormWindowState.Normal;
+            }
+
+            Rectangle workArea = Screen.FromControl(this).WorkingArea;
+
+            if (scrollPanel != null && !scrollPanel.IsDisposed)
+            {
+                scrollPanel.AutoScroll = false;
+                scrollPanel.AutoScrollMinSize = Size.Empty;
+                scrollPanel.AutoScrollPosition = new Point(0, 0);
+            }
+
+            if (contentPanel != null && !contentPanel.IsDisposed)
+            {
+                contentPanel.Location = new Point(0, 0);
+            }
+
+            this.ClientSize = new Size(BaseClientWidth, BaseClientHeight);
+
+            int left = this.Left;
+            int top = this.Top;
+
+            if (left < workArea.Left)
+            {
+                left = workArea.Left;
+            }
+
+            if (top < workArea.Top)
+            {
+                top = workArea.Top;
+            }
+
+            if (left + this.Width > workArea.Right)
+            {
+                left = Math.Max(workArea.Left, workArea.Right - this.Width);
+            }
+
+            if (top + this.Height > workArea.Bottom)
+            {
+                top = Math.Max(workArea.Top, workArea.Bottom - this.Height);
+            }
+
+            this.Location = new Point(left, top);
+
+            UpdateScrollableContentSize();
+            ResetScrollToTopLeft();
+            QueueResetScrollToTopLeft();
         }
 
         private void Close_Click(object sender, EventArgs e)
@@ -2541,6 +2919,8 @@ namespace OVIA.Desktop
                 DataGridViewTextBoxColumn column = new DataGridViewTextBoxColumn();
                 column.Name = header;
                 column.HeaderText = header;
+                column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+                column.MinimumWidth = 45;
                 column.SortMode = DataGridViewColumnSortMode.NotSortable;
                 column.Resizable = DataGridViewTriState.True;
                 grid.Columns.Add(column);
@@ -2565,7 +2945,8 @@ namespace OVIA.Desktop
                     }
                 }
 
-                grid.Rows.Add(cells);
+                int newRowIndex = grid.Rows.Add(cells);
+                SetRowOriginalValues(newRowIndex, cells);
             }
 
                 ApplyGridColumnStyle();
@@ -2581,9 +2962,12 @@ namespace OVIA.Desktop
         {
             int i;
 
+            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+
             for (i = 0; i < grid.Columns.Count; i++)
             {
                 string name = grid.Columns[i].HeaderText;
+                int baseWidth = 95;
 
                 if (ContainsAny(name, "No", "RowType", "SourceRowNo"))
                 {
@@ -2593,36 +2977,38 @@ namespace OVIA.Desktop
 
                 if (ContainsAny(name, "번호"))
                 {
-                    grid.Columns[i].Width = 70;
+                    baseWidth = 60;
                 }
                 else if (ContainsAny(name, "규격"))
                 {
-                    grid.Columns[i].Width = 95;
+                    baseWidth = 90;
                 }
                 else if (ContainsAny(name, "형상"))
                 {
-                    grid.Columns[i].Width = 150;
+                    baseWidth = 130;
                 }
                 else if (ContainsAny(name, "길이"))
                 {
-                    grid.Columns[i].Width = 100;
+                    baseWidth = 90;
                 }
                 else if (ContainsAny(name, "수량"))
                 {
-                    grid.Columns[i].Width = 85;
+                    baseWidth = 75;
                 }
                 else if (ContainsAny(name, "중량"))
                 {
-                    grid.Columns[i].Width = 105;
+                    baseWidth = 95;
                 }
                 else if (ContainsAny(name, "비고"))
                 {
-                    grid.Columns[i].Width = 150;
+                    baseWidth = 130;
                 }
-                else
-                {
-                    grid.Columns[i].Width = 95;
-                }
+
+                grid.Columns[i].Visible = true;
+                grid.Columns[i].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+                grid.Columns[i].FillWeight = baseWidth;
+                grid.Columns[i].MinimumWidth = 45;
+                grid.Columns[i].Width = baseWidth;
             }
         }
 
@@ -2930,6 +3316,7 @@ namespace OVIA.Desktop
     public class GridUndoSnapshot
     {
         public List<object[]> Rows = new List<object[]>();
+        public List<object[]> OriginalRows = new List<object[]>();
         public int CurrentRowIndex = 0;
         public int CurrentColumnIndex = 0;
     }
