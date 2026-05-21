@@ -200,62 +200,124 @@ namespace OVIA.AutoCAD_2027
             Database db = doc.Database;
             Editor ed = doc.Editor;
 
-            PromptPointOptions firstPointOptions = new PromptPointOptions(
-                "\nOVIA 선택박스 시작점: 표 전체 가로폭의 왼쪽, 원하는 행 구간의 위쪽 바깥을 클릭하세요: "
-            );
+            object previousOsMode = EnableOviaTableSnapMode(ed);
 
-            PromptPointResult firstPointResult = ed.GetPoint(firstPointOptions);
-
-            if (firstPointResult.Status != PromptStatus.OK)
+            try
             {
-                ed.WriteMessage("\nOVIA: 선택박스 생성이 취소되었습니다.\n");
+                PromptPointOptions firstPointOptions = new PromptPointOptions(
+                    "\nOVIA 선택박스 시작점: 표 왼쪽 경계선과 시작 행의 위쪽 가로선이 만나는 교차점에 맞춰 클릭하세요: "
+                );
+
+                firstPointOptions.AllowNone = false;
+
+                PromptPointResult firstPointResult = ed.GetPoint(firstPointOptions);
+
+                if (firstPointResult.Status != PromptStatus.OK)
+                {
+                    ed.WriteMessage("\nOVIA: 선택박스 생성이 취소되었습니다.\n");
+                    return;
+                }
+
+                PromptCornerOptions secondPointOptions = new PromptCornerOptions(
+                    "\nOVIA 선택박스 끝점: 표 오른쪽 경계선과 끝 행의 아래쪽 가로선이 만나는 교차점에 맞춰 클릭하세요: ",
+                    firstPointResult.Value
+                );
+
+                PromptPointResult secondPointResult = ed.GetCorner(secondPointOptions);
+
+                if (secondPointResult.Status != PromptStatus.OK)
+                {
+                    ed.WriteMessage("\nOVIA: 선택박스 생성이 취소되었습니다.\n");
+                    return;
+                }
+
+                Point3d boxPoint1 = firstPointResult.Value;
+                Point3d boxPoint2 = secondPointResult.Value;
+                bool isSnapped = TrySnapOviaBoxToTableLines(ed, db, firstPointResult.Value, secondPointResult.Value, out boxPoint1, out boxPoint2);
+
+                using (Transaction tr = db.TransactionManager.StartTransaction())
+                {
+                    ObjectId dashedLineTypeId = EnsureDashedLineType(db, tr);
+                    EnsureOviaBoxLayer(db, tr, dashedLineTypeId, false);
+                    DeleteExistingOviaBoxes(db, tr);
+
+                    CreateOviaBoxEntity(db, tr, boxPoint1, boxPoint2, dashedLineTypeId);
+
+                    EnsureOviaBoxLayer(db, tr, dashedLineTypeId, true);
+                    tr.Commit();
+                }
+
+                ed.WriteMessage("\n");
+                ed.WriteMessage("====================================\n");
+                ed.WriteMessage("OVIA 선택박스 생성 완료\n");
+                ed.WriteMessage("------------------------------------\n");
+                ed.WriteMessage("표시 형태 : 밝은 노란색 / 매우 두꺼운 실선\n");
+                ed.WriteMessage("박스 개수 : 기존 박스 삭제 후 1개만 유지\n");
+                ed.WriteMessage("정확 선택 : AutoCAD 객체스냅은 끝점/교차점만 임시 적용하여 내부선으로 붙는 문제를 줄임\n");
+                ed.WriteMessage("라인 스냅 : " + (isSnapped ? "표 전체를 이루는 실제 테이블 라인에 자동 보정됨" : "스냅 가능한 테이블 라인 없음, 클릭 좌표 사용") + "\n");
+                ed.WriteMessage("번호 보정 : 왼쪽 경계가 번호 컬럼 안쪽 선으로 붙으면 클릭 지점/직전 세로선까지 강제 확장\n");
+                ed.WriteMessage("주의      : 철근형상 내부의 작은 치수선이 아니라 표 외곽/행 경계선 교차점을 클릭하세요.\n");
+                ed.WriteMessage("편집 방식 : 잠금 없음, 필요 시 OVIA 전용 조정 명령으로 직사각형 유지\n");
+                ed.WriteMessage("상단 조정 : OVIABOXTOP\n");
+                ed.WriteMessage("하단 조정 : OVIABOXBOTTOM\n");
+                ed.WriteMessage("좌측 조정 : OVIABOXLEFT\n");
+                ed.WriteMessage("우측 조정 : OVIABOXRIGHT\n");
+                ed.WriteMessage("이동      : OVIABOXMOVE\n");
+                ed.WriteMessage("추출      : OVIABOXTABLE\n");
+                ed.WriteMessage("====================================\n");
+            }
+            finally
+            {
+                RestoreOviaTableSnapMode(previousOsMode);
+            }
+        }
+
+        private object EnableOviaTableSnapMode(Editor ed)
+        {
+            object previousOsMode = null;
+
+            try
+            {
+                previousOsMode = Application.GetSystemVariable("OSMODE");
+
+                /*
+                 * OVIA 정확 선택 모드:
+                 * 1   = Endpoint
+                 * 32  = Intersection
+                 *
+                 * 이전 버전에서는 Nearest(512)까지 켰기 때문에 사용자가 번호 컬럼 왼쪽을 찍어도
+                 * AutoCAD가 더 가까운 내부 세로선으로 스냅시키는 문제가 있었습니다.
+                 * 이번 버전부터는 Endpoint + Intersection만 임시 적용합니다.
+                 */
+                Application.SetSystemVariable("OSMODE", 33);
+
+                if (ed != null)
+                {
+                    ed.WriteMessage("\nOVIA 정확 선택 모드: 끝점/교차점 객체스냅을 임시 적용했습니다.\n");
+                    ed.WriteMessage("번호 컬럼 왼쪽 외곽선과 행 경계선이 만나는 교차점에서 시작하고, 오른쪽 경계선과 끝 행 경계선에서 마무리하세요.\n");
+                }
+            }
+            catch
+            {
+            }
+
+            return previousOsMode;
+        }
+
+        private void RestoreOviaTableSnapMode(object previousOsMode)
+        {
+            if (previousOsMode == null)
+            {
                 return;
             }
 
-            PromptCornerOptions secondPointOptions = new PromptCornerOptions(
-                "\nOVIA 선택박스 끝점: 표 전체 가로폭의 오른쪽, 원하는 행 구간의 아래쪽 바깥을 클릭하세요: ",
-                firstPointResult.Value
-            );
-
-            PromptPointResult secondPointResult = ed.GetCorner(secondPointOptions);
-
-            if (secondPointResult.Status != PromptStatus.OK)
+            try
             {
-                ed.WriteMessage("\nOVIA: 선택박스 생성이 취소되었습니다.\n");
-                return;
+                Application.SetSystemVariable("OSMODE", previousOsMode);
             }
-
-            Point3d boxPoint1 = firstPointResult.Value;
-            Point3d boxPoint2 = secondPointResult.Value;
-            bool isSnapped = TrySnapOviaBoxToTableLines(ed, db, firstPointResult.Value, secondPointResult.Value, out boxPoint1, out boxPoint2);
-
-            using (Transaction tr = db.TransactionManager.StartTransaction())
+            catch
             {
-                ObjectId dashedLineTypeId = EnsureDashedLineType(db, tr);
-                EnsureOviaBoxLayer(db, tr, dashedLineTypeId, false);
-                DeleteExistingOviaBoxes(db, tr);
-
-                CreateOviaBoxEntity(db, tr, boxPoint1, boxPoint2, dashedLineTypeId);
-
-                EnsureOviaBoxLayer(db, tr, dashedLineTypeId, true);
-                tr.Commit();
             }
-
-            ed.WriteMessage("\n");
-            ed.WriteMessage("====================================\n");
-            ed.WriteMessage("OVIA 선택박스 생성 완료\n");
-            ed.WriteMessage("------------------------------------\n");
-            ed.WriteMessage("표시 형태 : 밝은 노란색 / 매우 두꺼운 실선\n");
-            ed.WriteMessage("박스 개수 : 기존 박스 삭제 후 1개만 유지\n");
-            ed.WriteMessage("라인 스냅 : " + (isSnapped ? "가까운 테이블 라인에 자동 보정됨" : "스냅 가능한 테이블 라인 없음, 클릭 좌표 사용") + "\n");
-            ed.WriteMessage("편집 방식 : 잠금 없음, 필요 시 OVIA 전용 조정 명령으로 직사각형 유지\n");
-            ed.WriteMessage("상단 조정 : OVIABOXTOP\n");
-            ed.WriteMessage("하단 조정 : OVIABOXBOTTOM\n");
-            ed.WriteMessage("좌측 조정 : OVIABOXLEFT\n");
-            ed.WriteMessage("우측 조정 : OVIABOXRIGHT\n");
-            ed.WriteMessage("이동      : OVIABOXMOVE\n");
-            ed.WriteMessage("추출      : OVIABOXCSV\n");
-            ed.WriteMessage("====================================\n");
         }
 
         private bool TrySnapOviaBoxToTableLines(Editor ed, Database db, Point3d rawPoint1, Point3d rawPoint2, out Point3d snappedPoint1, out Point3d snappedPoint2)
@@ -281,60 +343,131 @@ namespace OVIA.AutoCAD_2027
                 return false;
             }
 
-            double padding = Math.Max(longSide * 0.15, 50.0);
-            double lineTolerance = Math.Max(longSide * 0.002, 1.0);
-            double snapDistance = Math.Max(longSide * 0.04, 10.0);
+            double paddingX = Math.Max(width * 0.12, 20.0);
+            double paddingY = Math.Max(height * 0.25, 20.0);
+            double axisTolerance = Math.Max(Math.Min(width, height) * 0.006, 0.5);
+            double mergeTolerance = Math.Max(Math.Min(width, height) * 0.008, 1.0);
 
-            Point3d searchPoint1 = new Point3d(minX - padding, minY - padding, 0);
-            Point3d searchPoint2 = new Point3d(maxX + padding, maxY + padding, 0);
+            Point3d searchPoint1 = new Point3d(minX - paddingX, minY - paddingY, 0);
+            Point3d searchPoint2 = new Point3d(maxX + paddingX, maxY + paddingY, 0);
 
-            PromptSelectionResult selectionResult = ed.SelectCrossingWindow(searchPoint1, searchPoint2);
+            List<OviaGridLineSegment> segments = ExtractGridLineSegmentsByWindow(ed, db, searchPoint1, searchPoint2);
 
-            if (selectionResult.Status != PromptStatus.OK || selectionResult.Value == null)
+            if (segments.Count == 0)
             {
                 return false;
             }
 
-            List<double> verticalXs = new List<double>();
-            List<double> horizontalYs = new List<double>();
+            /*
+             * 기존 단순 스냅은 철근형상 셀 내부의 작은 치수선까지 스냅 후보로 볼 수 있었습니다.
+             * 이번 방식은 같은 X/Y 좌표의 선 조각들이 선택 영역 폭/높이를 충분히 덮을 때만
+             * 실제 표 경계선으로 인정합니다.
+             */
+            double minHorizontalSegmentLength = Math.Max(width * 0.02, 0.5);
+            double minVerticalSegmentLength = Math.Max(height * 0.02, 0.5);
+            double minHorizontalCoverage = Math.Max(width * 0.55, width - (width * 0.20));
+            double minVerticalCoverage = Math.Max(height * 0.45, height - (height * 0.35));
 
-            using (Transaction tr = db.TransactionManager.StartTransaction())
-            {
-                ObjectId[] ids = selectionResult.Value.GetObjectIds();
-                int i;
+            List<double> verticalXs = ExtractCoveredGridCoordinates(
+                segments,
+                true,
+                axisTolerance,
+                mergeTolerance,
+                minVerticalSegmentLength,
+                minVerticalCoverage,
+                minY,
+                maxY
+            );
 
-                for (i = 0; i < ids.Length; i++)
-                {
-                    Entity entity = tr.GetObject(ids[i], OpenMode.ForRead, false) as Entity;
+            List<double> horizontalYs = ExtractCoveredGridCoordinates(
+                segments,
+                false,
+                axisTolerance,
+                mergeTolerance,
+                minHorizontalSegmentLength,
+                minHorizontalCoverage,
+                minX,
+                maxX
+            );
 
-                    if (entity == null)
-                    {
-                        continue;
-                    }
+            /*
+             * 번호 컬럼 왼쪽 외곽선은 도면에 따라 짧은 선 조각으로 분리되어 있어
+             * 표 전체 커버리지 기준에서는 빠질 수 있습니다.
+             * 선택박스 왼쪽 확장 판단에만 사용할 더 느슨한 세로선 후보를 별도로 수집합니다.
+             */
+            List<double> softVerticalXs = ExtractCoveredGridCoordinates(
+                segments,
+                true,
+                axisTolerance,
+                mergeTolerance,
+                minVerticalSegmentLength,
+                Math.Max(height * 0.18, 2.0),
+                minY,
+                maxY
+            );
 
-                    CollectAxisLinesFromEntity(
-                        tr,
-                        entity,
-                        Matrix3d.Identity,
-                        verticalXs,
-                        horizontalYs,
-                        lineTolerance,
-                        0
-                    );
-                }
-
-                tr.Commit();
-            }
+            List<double> leftBoundaryXs = new List<double>();
+            leftBoundaryXs.AddRange(verticalXs);
+            leftBoundaryXs.AddRange(softVerticalXs);
+            leftBoundaryXs = MergeGridCoordinates(leftBoundaryXs, mergeTolerance, true);
 
             if (verticalXs.Count == 0 && horizontalYs.Count == 0)
             {
                 return false;
             }
 
-            double x1 = SnapCoordinate(rawPoint1.X, verticalXs, snapDistance);
-            double y1 = SnapCoordinate(rawPoint1.Y, horizontalYs, snapDistance);
-            double x2 = SnapCoordinate(rawPoint2.X, verticalXs, snapDistance);
-            double y2 = SnapCoordinate(rawPoint2.Y, horizontalYs, snapDistance);
+            double xSnapDistance = Math.Max(width * 0.08, 8.0);
+            double ySnapDistance = Math.Max(height * 0.12, 8.0);
+
+            double x1 = SnapCoordinate(rawPoint1.X, verticalXs, xSnapDistance);
+            double y1 = SnapCoordinate(rawPoint1.Y, horizontalYs, ySnapDistance);
+            double x2 = SnapCoordinate(rawPoint2.X, verticalXs, xSnapDistance);
+            double y2 = SnapCoordinate(rawPoint2.Y, horizontalYs, ySnapDistance);
+
+            /*
+             * 중요 보정:
+             * AutoCAD 객체스냅이 번호 컬럼의 왼쪽 외곽선이 아니라,
+             * 번호 컬럼 오른쪽 내부 세로선으로 붙는 경우가 있습니다.
+             * 이 경우 선택박스가 번호 컬럼을 제외한 채 생성되어 번호 데이터가 누락됩니다.
+             *
+             * 따라서 스냅된 왼쪽 경계 바로 왼쪽에 가까운 표 세로선이 있으면
+             * 그 선을 실제 표의 왼쪽 외곽선으로 보고 선택박스를 한 칸 확장합니다.
+             */
+            double snappedLeft = Math.Min(x1, x2);
+            double snappedRight = Math.Max(x1, x2);
+            double snappedBottom = Math.Min(y1, y2);
+            double snappedTop = Math.Max(y1, y2);
+
+            double rawLeft = Math.Min(rawPoint1.X, rawPoint2.X);
+            double expandedLeft = ExpandLeftBoundaryToPreviousGridLine(snappedLeft, leftBoundaryXs, width);
+            expandedLeft = ExpandLeftBoundaryByClickedSide(rawLeft, expandedLeft, leftBoundaryXs, width);
+
+            if (expandedLeft < snappedLeft)
+            {
+                snappedLeft = expandedLeft;
+            }
+
+            if (rawPoint1.X <= rawPoint2.X)
+            {
+                x1 = snappedLeft;
+                x2 = snappedRight;
+            }
+            else
+            {
+                x1 = snappedRight;
+                x2 = snappedLeft;
+            }
+
+            if (rawPoint1.Y <= rawPoint2.Y)
+            {
+                y1 = snappedBottom;
+                y2 = snappedTop;
+            }
+            else
+            {
+                y1 = snappedTop;
+                y2 = snappedBottom;
+            }
 
             snappedPoint1 = new Point3d(x1, y1, rawPoint1.Z);
             snappedPoint2 = new Point3d(x2, y2, rawPoint2.Z);
@@ -618,6 +751,127 @@ namespace OVIA.AutoCAD_2027
             return best;
         }
 
+        private double ExpandLeftBoundaryToPreviousGridLine(double currentLeft, List<double> verticalXs, double selectedWidth)
+        {
+            if (verticalXs == null || verticalXs.Count == 0)
+            {
+                return currentLeft;
+            }
+
+            List<double> sortedXs = new List<double>(verticalXs);
+            sortedXs.Sort();
+
+            double mergeTolerance = Math.Max(selectedWidth * 0.002, 0.5);
+            List<double> uniqueXs = new List<double>();
+            int i;
+
+            for (i = 0; i < sortedXs.Count; i++)
+            {
+                if (uniqueXs.Count == 0 || Math.Abs(sortedXs[i] - uniqueXs[uniqueXs.Count - 1]) > mergeTolerance)
+                {
+                    uniqueXs.Add(sortedXs[i]);
+                }
+            }
+
+            double previous = currentLeft;
+            bool hasPrevious = false;
+
+            for (i = 0; i < uniqueXs.Count; i++)
+            {
+                if (uniqueXs[i] < currentLeft - mergeTolerance)
+                {
+                    previous = uniqueXs[i];
+                    hasPrevious = true;
+                    continue;
+                }
+
+                break;
+            }
+
+            if (!hasPrevious)
+            {
+                return currentLeft;
+            }
+
+            double gap = currentLeft - previous;
+
+            /*
+             * 번호 컬럼은 보통 전체 표 폭의 5~15% 정도입니다.
+             * 너무 멀리 떨어진 선까지 포함하면 좌측의 다른 표나 도면선이 들어올 수 있으므로
+             * 가까운 직전 세로선만 제한적으로 확장합니다.
+             */
+            double maxNumberColumnWidth = Math.Max(selectedWidth * 0.22, 12.0);
+
+            if (gap > mergeTolerance && gap <= maxNumberColumnWidth)
+            {
+                return previous;
+            }
+
+            return currentLeft;
+        }
+
+        private double ExpandLeftBoundaryByClickedSide(double rawLeft, double currentLeft, List<double> verticalXs, double selectedWidth)
+        {
+            if (verticalXs == null || verticalXs.Count == 0)
+            {
+                return currentLeft;
+            }
+
+            List<double> sortedXs = new List<double>(verticalXs);
+            sortedXs.Sort();
+
+            double mergeTolerance = Math.Max(selectedWidth * 0.002, 0.5);
+            double maxNumberColumnWidth = Math.Max(selectedWidth * 0.30, 18.0);
+            double best = currentLeft;
+            int i;
+
+            /*
+             * 사용자가 실제로 클릭한 X가 현재 선택박스 왼쪽 경계보다 왼쪽이라면,
+             * 사용자의 의도는 번호 컬럼 왼쪽 외곽선을 포함하는 것입니다.
+             * 따라서 rawLeft 부근 또는 currentLeft 바로 왼쪽의 세로선 중 가까운 것을 우선 선택합니다.
+             */
+            for (i = 0; i < sortedXs.Count; i++)
+            {
+                double x = sortedXs[i];
+
+                if (x >= currentLeft - mergeTolerance)
+                {
+                    break;
+                }
+
+                double gapFromCurrent = currentLeft - x;
+
+                if (gapFromCurrent <= maxNumberColumnWidth)
+                {
+                    if (best == currentLeft || x < best)
+                    {
+                        best = x;
+                    }
+                }
+            }
+
+            if (best < currentLeft)
+            {
+                return best;
+            }
+
+            /*
+             * 세로선 후보가 누락된 경우에도 사용자가 currentLeft보다 왼쪽을 클릭했다면
+             * 최소한 클릭 지점까지는 선택박스를 넓혀 번호 텍스트가 빠지지 않도록 합니다.
+             */
+            if (rawLeft < currentLeft - mergeTolerance)
+            {
+                double clickGap = currentLeft - rawLeft;
+
+                if (clickGap <= maxNumberColumnWidth)
+                {
+                    return rawLeft;
+                }
+            }
+
+            return currentLeft;
+        }
+
         [CommandMethod("OVIABOXCSV")]
         public void OviaBoxCsv()
         {
@@ -693,6 +947,29 @@ namespace OVIA.AutoCAD_2027
         [CommandMethod("OVIABOXTABLE")]
         public void OviaBoxTable()
         {
+            /*
+             * OVIA 2026-05-22:
+             * 사용자는 OVIABOXTABLE 하나만 사용합니다.
+             * 내부에서는 표 라인/셀 기반 추출을 먼저 시도하고,
+             * 실패하면 기존 문자 좌표 기반 추출로 자동 보정합니다.
+             */
+            RunSmartBoxTableExtraction("OVIABOXTABLE");
+        }
+
+
+        [CommandMethod("OVIAGRIDTABLE")]
+        public void OviaGridTable()
+        {
+            /*
+             * 개발/테스트 호환용 별칭입니다.
+             * 실제 동작은 OVIABOXTABLE과 동일하게 통합했습니다.
+             */
+            RunSmartBoxTableExtraction("OVIAGRIDTABLE");
+        }
+
+
+        private void RunSmartBoxTableExtraction(string commandName)
+        {
             Document doc = Application.DocumentManager.MdiActiveDocument;
 
             if (doc == null)
@@ -703,22 +980,22 @@ namespace OVIA.AutoCAD_2027
             Database db = doc.Database;
             Editor ed = doc.Editor;
 
-            Point3d minPoint;
-            Point3d maxPoint;
+            Point3d selectedMinPoint;
+            Point3d selectedMaxPoint;
             int boxCount = 0;
 
-            bool hasBox = GetOviaBoxExtents(db, out minPoint, out maxPoint, out boxCount);
+            bool hasBox = GetOviaBoxExtents(db, out selectedMinPoint, out selectedMaxPoint, out boxCount);
 
             if (!hasBox)
             {
                 ed.WriteMessage("\nOVIA: 도면에서 OVIA 선택박스를 찾지 못했습니다.\n");
-                ed.WriteMessage("먼저 OVIABOX 명령어로 선택박스를 생성해주세요.\n");
+                ed.WriteMessage("먼저 OVIABOX 명령어로 집계표의 가로 전체 폭과 원하는 세로 행 구간을 선택해주세요.\n");
                 return;
             }
 
             FixOviaBoxRectangle(db);
 
-            hasBox = GetOviaBoxExtents(db, out minPoint, out maxPoint, out boxCount);
+            hasBox = GetOviaBoxExtents(db, out selectedMinPoint, out selectedMaxPoint, out boxCount);
 
             if (!hasBox)
             {
@@ -726,18 +1003,48 @@ namespace OVIA.AutoCAD_2027
                 return;
             }
 
-            List<OviaTextRow> rows = ExtractRowsByWindow(ed, db, minPoint, maxPoint);
+            Point3d analysisMinPoint;
+            Point3d analysisMaxPoint;
 
-            if (rows.Count == 0)
+            CreateSmartTableAnalysisWindow(selectedMinPoint, selectedMaxPoint, out analysisMinPoint, out analysisMaxPoint);
+
+            List<OviaTextRow> selectedTextRows = ExtractRowsByWindow(ed, db, selectedMinPoint, selectedMaxPoint);
+            List<OviaTextRow> analysisTextRows = ExtractRowsByWindow(ed, db, analysisMinPoint, analysisMaxPoint);
+            List<OviaGridLineSegment> analysisGridLines = ExtractGridLineSegmentsByWindow(ed, db, analysisMinPoint, analysisMaxPoint);
+
+            if (selectedTextRows.Count == 0 && analysisTextRows.Count == 0)
             {
                 ed.WriteMessage("\nOVIA: 선택박스 안에서 Text / MText를 찾지 못했습니다.\n");
                 return;
             }
 
-            SortRowsTopToBottomLeftToRight(rows);
-            ApplySimpleRowNumbers(rows);
+            string diagnostic = "";
+            bool usedGridParser = false;
+            List<OviaBarTableRow> tableRows = BuildOviaGridTableRows(
+                analysisTextRows,
+                analysisGridLines,
+                analysisMinPoint,
+                analysisMaxPoint,
+                selectedMinPoint,
+                selectedMaxPoint,
+                out diagnostic
+            );
 
-            List<OviaBarTableRow> tableRows = BuildOviaBarTableRows(rows);
+            if (tableRows.Count > 0)
+            {
+                usedGridParser = true;
+            }
+
+            if (tableRows.Count == 0)
+            {
+                /*
+                 * 표 선 기반 분석이 실패하면 기존 좌표 기반 파서로 자동 전환합니다.
+                 * 이 경우에도 파일명은 OVIA_BoxTable로 저장하여 Desktop 자동 입력 흐름을 유지합니다.
+                 */
+                SortRowsTopToBottomLeftToRight(selectedTextRows);
+                ApplySimpleRowNumbers(selectedTextRows);
+                tableRows = BuildOviaBarTableRows(selectedTextRows);
+            }
 
             if (tableRows.Count == 0)
             {
@@ -754,10 +1061,20 @@ namespace OVIA.AutoCAD_2027
 
                 ed.WriteMessage("\n");
                 ed.WriteMessage("====================================\n");
-                ed.WriteMessage("OVIA 철근 집계표 구조화 완료\n");
+                ed.WriteMessage("OVIA 철근 집계표 스마트 추출 완료\n");
                 ed.WriteMessage("------------------------------------\n");
-                ed.WriteMessage("원본 문자 개수 : " + rows.Count.ToString() + "\n");
+                ed.WriteMessage("실행 명령     : " + commandName + "\n");
+                ed.WriteMessage("추출 방식     : " + (usedGridParser ? "표 라인/셀 기반" : "기존 문자 좌표 기반 보정") + "\n");
+                ed.WriteMessage("선택 문자 수   : " + selectedTextRows.Count.ToString() + "\n");
+                ed.WriteMessage("분석 문자 수   : " + analysisTextRows.Count.ToString() + "\n");
+                ed.WriteMessage("표 선 후보 수  : " + analysisGridLines.Count.ToString() + "\n");
                 ed.WriteMessage("변환 행 개수   : " + tableRows.Count.ToString() + "\n");
+
+                if (diagnostic != "")
+                {
+                    ed.WriteMessage("분석 정보     : " + diagnostic + "\n");
+                }
+
                 ed.WriteMessage("저장 위치     : " + filePath + "\n");
                 WriteBarTablePreview(ed, tableRows);
                 ed.WriteMessage("====================================\n");
@@ -767,6 +1084,8 @@ namespace OVIA.AutoCAD_2027
                 ed.WriteMessage("\nOVIA 집계표 CSV 저장 오류: " + ex.Message + "\n");
             }
         }
+
+
 
         [CommandMethod("OVIABOXFIX")]
         public void OviaBoxFix()
@@ -1202,6 +1521,87 @@ namespace OVIA.AutoCAD_2027
             return columns;
         }
 
+        private void CreateSmartTableAnalysisWindow(Point3d selectedMinPoint, Point3d selectedMaxPoint, out Point3d analysisMinPoint, out Point3d analysisMaxPoint)
+        {
+            double width = Math.Abs(selectedMaxPoint.X - selectedMinPoint.X);
+            double height = Math.Abs(selectedMaxPoint.Y - selectedMinPoint.Y);
+
+            if (width <= 0.0001)
+            {
+                width = 1.0;
+            }
+
+            if (height <= 0.0001)
+            {
+                height = 1.0;
+            }
+
+            /*
+             * 사용자는 보통 데이터 행 구간만 선택합니다.
+             * OVIA는 같은 표의 헤더를 찾기 위해 선택 영역 위쪽을 자동으로 확장해서 분석합니다.
+             * 출력 행은 원래 선택 영역 안의 행만 사용합니다.
+             */
+            /*
+             * 표를 선택할 때 사용자가 왼쪽 번호 컬럼 경계선을 아주 딱 맞게 찍거나,
+             * 실제 번호 텍스트의 기준점이 선택박스 경계선보다 살짝 왼쪽에 있으면
+             * 번호 컬럼이 누락될 수 있습니다.
+             * 그래서 분석 영역은 좌우로 조금 더 넓게 잡되, 출력 행은 기존 선택박스의 Y범위만 사용합니다.
+             */
+            double leftColumnSearchMargin = Math.Max(width * 0.12, 5.0);
+            double rightColumnSearchMargin = Math.Max(width * 0.04, 2.0);
+            double bottomMargin = Math.Max(height * 0.03, 1.0);
+            double headerSearchHeight = Math.Max(height * 1.60, width * 0.15);
+
+            analysisMinPoint = new Point3d(
+                selectedMinPoint.X - leftColumnSearchMargin,
+                selectedMinPoint.Y - bottomMargin,
+                selectedMinPoint.Z
+            );
+
+            analysisMaxPoint = new Point3d(
+                selectedMaxPoint.X + rightColumnSearchMargin,
+                selectedMaxPoint.Y + headerSearchHeight,
+                selectedMaxPoint.Z
+            );
+        }
+
+        private List<OviaHeaderColumn> CreateGridFallbackHeaderColumns(int columnCount)
+        {
+            List<OviaHeaderColumn> columns = new List<OviaHeaderColumn>();
+
+            if (columnCount <= 0)
+            {
+                return columns;
+            }
+
+            string[] keys;
+            string[] titles;
+
+            if (columnCount >= 8)
+            {
+                keys = new string[] { "MARK_NO", "SHAPE_NO", "SHAPE", "SPEC", "LENGTH_MM", "QUANTITY_EA", "TOTAL_LENGTH_M", "TOTAL_WEIGHT" };
+                titles = new string[] { "번호", "부호/명칭", "철근형상", "규격", "길이(mm)", "수량(EA)", "총길이(M)", "총중량(KG)" };
+            }
+            else
+            {
+                keys = new string[] { "MARK_NO", "SHAPE", "SPEC", "LENGTH_MM", "QUANTITY_EA", "TOTAL_LENGTH_M", "TOTAL_WEIGHT", "NOTE" };
+                titles = new string[] { "번호", "철근형상", "규격", "길이(mm)", "수량(EA)", "총길이(M)", "총중량(KG)", "비고" };
+            }
+
+            int limit = Math.Min(columnCount, keys.Length);
+            int i;
+
+            for (i = 0; i < limit; i++)
+            {
+                OviaHeaderColumn column = CreateHeaderColumn(keys[i], titles[i], i);
+                column.SourceColumnIndex = i;
+                columns.Add(column);
+            }
+
+            return columns;
+        }
+
+
         private OviaHeaderColumn CreateHeaderColumn(string key, string title, double x)
         {
             OviaHeaderColumn column = new OviaHeaderColumn();
@@ -1438,7 +1838,7 @@ namespace OVIA.AutoCAD_2027
 
             if (standardKey == "SHAPE_NO")
             {
-                return "형번";
+                return "부호/명칭";
             }
 
             if (standardKey == "SHAPE")
@@ -2875,6 +3275,15 @@ namespace OVIA.AutoCAD_2027
 
         private void EnsureOviaBoxLayer(Database db, Transaction tr, ObjectId dashedLineTypeId, bool isLocked)
         {
+            /*
+             * OVIA 선택박스 전용 레이어 보호 정책
+             * ------------------------------------------------------------
+             * 일반 도면 레이어는 사용자가 잠가둔 상태를 유지합니다.
+             * 대신 OVIA가 직접 생성/삭제/수정하는 선택박스는 항상 전용 레이어에만 둡니다.
+             * 이 전용 레이어가 잠겨 있거나 꺼져 있으면 OVIA가 자동으로 풀어 eOnLockedLayer 오류를 방지합니다.
+             *
+             * isLocked 매개변수는 이전 버전 호환을 위해 남겨두지만, 현재 정책에서는 항상 잠금 해제 상태로 유지합니다.
+             */
             LayerTable layerTable = tr.GetObject(db.LayerTableId, OpenMode.ForRead) as LayerTable;
 
             if (layerTable == null)
@@ -2891,6 +3300,15 @@ namespace OVIA.AutoCAD_2027
                 layer.Color = Color.FromRgb(255, 255, 0);
                 layer.LineWeight = LineWeight.LineWeight211;
                 layer.IsLocked = false;
+                layer.IsOff = false;
+
+                try
+                {
+                    layer.IsFrozen = false;
+                }
+                catch
+                {
+                }
 
                 if (!dashedLineTypeId.IsNull)
                 {
@@ -2910,6 +3328,15 @@ namespace OVIA.AutoCAD_2027
                 existingLayer.Color = Color.FromRgb(255, 255, 0);
                 existingLayer.LineWeight = LineWeight.LineWeight211;
                 existingLayer.IsLocked = false;
+                existingLayer.IsOff = false;
+
+                try
+                {
+                    existingLayer.IsFrozen = false;
+                }
+                catch
+                {
+                }
 
                 if (!dashedLineTypeId.IsNull)
                 {
@@ -2944,7 +3371,7 @@ namespace OVIA.AutoCAD_2027
                 return deletedCount;
             }
 
-            BlockTableRecord blockRecord = tr.GetObject(blockTable[blockName], OpenMode.ForWrite) as BlockTableRecord;
+            BlockTableRecord blockRecord = tr.GetObject(blockTable[blockName], OpenMode.ForRead) as BlockTableRecord;
 
             if (blockRecord == null)
             {
@@ -2953,17 +3380,48 @@ namespace OVIA.AutoCAD_2027
 
             foreach (ObjectId objectId in blockRecord)
             {
-                Entity entity = tr.GetObject(objectId, OpenMode.ForWrite, false) as Entity;
+                Entity entity = null;
+
+                try
+                {
+                    /*
+                     * 중요:
+                     * 잠긴 일반 도면 레이어의 객체를 처음부터 ForWrite로 열면 eOnLockedLayer가 발생할 수 있습니다.
+                     * 그래서 먼저 ForRead로 열고, OVIA 전용 레이어 객체인지 확인한 뒤에만 UpgradeOpen 합니다.
+                     */
+                    entity = tr.GetObject(objectId, OpenMode.ForRead, false) as Entity;
+                }
+                catch
+                {
+                    continue;
+                }
 
                 if (entity == null)
                 {
                     continue;
                 }
 
-                if (string.Equals(entity.Layer, OviaBoxLayerName, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(entity.Layer, OviaBoxLayerName, StringComparison.OrdinalIgnoreCase))
                 {
+                    continue;
+                }
+
+                try
+                {
+                    if (!entity.IsWriteEnabled)
+                    {
+                        entity.UpgradeOpen();
+                    }
+
                     entity.Erase();
                     deletedCount++;
+                }
+                catch
+                {
+                    /*
+                     * OVIA 전용 레이어가 예외적으로 잠겨 있거나 외부참조 상태인 경우에도
+                     * 일반 도면 추출 작업이 중단되지 않도록 삭제 실패 객체는 건너뜁니다.
+                     */
                 }
             }
 
@@ -3033,6 +3491,1592 @@ namespace OVIA.AutoCAD_2027
 
             return rows;
         }
+
+
+        private List<OviaBarTableRow> BuildOviaGridTableRows(
+            List<OviaTextRow> textRows,
+            List<OviaGridLineSegment> gridLines,
+            Point3d minPoint,
+            Point3d maxPoint,
+            Point3d selectedMinPoint,
+            Point3d selectedMaxPoint,
+            out string diagnostic
+        )
+        {
+            diagnostic = "";
+            List<OviaBarTableRow> result = new List<OviaBarTableRow>();
+            lastDetectedHeaderColumns = new List<OviaHeaderColumn>();
+
+            if (textRows == null || textRows.Count == 0 || gridLines == null || gridLines.Count == 0)
+            {
+                diagnostic = "문자 또는 표 선 후보가 부족합니다.";
+                return result;
+            }
+
+            double tableWidth = Math.Abs(maxPoint.X - minPoint.X);
+            double tableHeight = Math.Abs(maxPoint.Y - minPoint.Y);
+
+            if (tableWidth <= 0.0001 || tableHeight <= 0.0001)
+            {
+                diagnostic = "선택박스 크기가 올바르지 않습니다.";
+                return result;
+            }
+
+            double axisTolerance = Math.Max(Math.Min(tableWidth, tableHeight) * 0.003, 0.5);
+            double mergeTolerance = Math.Max(Math.Min(tableWidth, tableHeight) * 0.004, 1.0);
+
+            /*
+             * OVIA 2026-05-22 개선:
+             * 도면업체 표는 하나의 긴 선이 아니라 셀 단위의 짧은 선 조각으로
+             * 가로/세로 경계가 구성되는 경우가 많습니다.
+             *
+             * 기존 방식은 "개별 선 길이"가 충분히 긴 선만 표 경계로 보았기 때문에,
+             * 짧은 선 조각으로 구성된 행 경계선을 놓치고 여러 행을 하나로 합치는 문제가 있었습니다.
+             *
+             * 개선 방식은 같은 Y 또는 X 좌표에 있는 짧은 선 조각들을 먼저 묶고,
+             * 해당 좌표에서 실제로 덮고 있는 전체 길이가 표 폭/높이의 일정 비율 이상이면
+             * 표 경계선으로 인정합니다.
+             *
+             * 철근형상 칸 내부의 작은 치수선은 한 셀 안에만 있으므로
+             * 전체 표 폭/높이를 충분히 덮지 못해 표 경계선에서 제외됩니다.
+             */
+            double minHorizontalSegmentLength = Math.Max(tableWidth * 0.015, 0.5);
+            double minVerticalSegmentLength = Math.Max(tableHeight * 0.015, 0.5);
+            double minHorizontalCoverage = tableWidth * 0.50;
+            double minVerticalCoverage = tableHeight * 0.50;
+
+            List<double> verticalXs = ExtractCoveredGridCoordinates(
+                gridLines,
+                true,
+                axisTolerance,
+                mergeTolerance,
+                minVerticalSegmentLength,
+                minVerticalCoverage,
+                minPoint.Y,
+                maxPoint.Y
+            );
+
+            List<double> horizontalYs = ExtractCoveredGridCoordinates(
+                gridLines,
+                false,
+                axisTolerance,
+                mergeTolerance,
+                minHorizontalSegmentLength,
+                minHorizontalCoverage,
+                minPoint.X,
+                maxPoint.X
+            );
+
+            /*
+             * 예외 도면 대응:
+             * 표 선이 실제로 긴 단일 선으로 구성되어 있는데 커버리지 계산에서 누락되는 경우를 대비해
+             * 기존 긴 선 기반 방식으로 한 번 더 보정합니다.
+             */
+            if (verticalXs.Count < 3 || horizontalYs.Count < 3)
+            {
+                double minHorizontalLength = tableWidth * 0.45;
+                double minVerticalLength = tableHeight * 0.35;
+
+                List<double> fallbackVerticalXs = new List<double>();
+                List<double> fallbackHorizontalYs = new List<double>();
+
+                int fallbackIndex;
+
+                for (fallbackIndex = 0; fallbackIndex < gridLines.Count; fallbackIndex++)
+                {
+                    OviaGridLineSegment fallbackSegment = gridLines[fallbackIndex];
+
+                    if (fallbackSegment == null)
+                    {
+                        continue;
+                    }
+
+                    double dx = Math.Abs(fallbackSegment.X1 - fallbackSegment.X2);
+                    double dy = Math.Abs(fallbackSegment.Y1 - fallbackSegment.Y2);
+
+                    if (dx <= axisTolerance && dy >= minVerticalLength)
+                    {
+                        fallbackVerticalXs.Add((fallbackSegment.X1 + fallbackSegment.X2) / 2.0);
+                    }
+                    else if (dy <= axisTolerance && dx >= minHorizontalLength)
+                    {
+                        fallbackHorizontalYs.Add((fallbackSegment.Y1 + fallbackSegment.Y2) / 2.0);
+                    }
+                }
+
+                fallbackVerticalXs = MergeGridCoordinates(fallbackVerticalXs, mergeTolerance, true);
+                fallbackHorizontalYs = MergeGridCoordinates(fallbackHorizontalYs, mergeTolerance, false);
+
+                if (verticalXs.Count < fallbackVerticalXs.Count)
+                {
+                    verticalXs = fallbackVerticalXs;
+                }
+
+                if (horizontalYs.Count < fallbackHorizontalYs.Count)
+                {
+                    horizontalYs = fallbackHorizontalYs;
+                }
+            }
+
+            int i;
+
+            if (verticalXs.Count < 3 || horizontalYs.Count < 3)
+            {
+                diagnostic = "표 경계선 부족: 세로선 " + verticalXs.Count.ToString() + "개, 가로선 " + horizontalYs.Count.ToString() + "개";
+                return result;
+            }
+
+            string[,] cellTexts = BuildGridCellTextMatrix(textRows, verticalXs, horizontalYs, mergeTolerance);
+
+            if (cellTexts == null)
+            {
+                diagnostic = "셀 텍스트 매트릭스를 만들지 못했습니다.";
+                return result;
+            }
+
+            int headerRowIndex = DetectGridHeaderRow(cellTexts, verticalXs, horizontalYs);
+            int rowCount = horizontalYs.Count - 1;
+            int colCount = verticalXs.Count - 1;
+
+            List<OviaHeaderColumn> columns = null;
+
+            if (headerRowIndex >= 0)
+            {
+                columns = BuildGridHeaderColumns(cellTexts, verticalXs, headerRowIndex);
+            }
+
+            if (columns == null || columns.Count < 3)
+            {
+                /*
+                 * 대표님이 원하는 흐름:
+                 * 사용자는 헤더까지 매번 선택하지 않고, 필요한 데이터 행 구간만 선택합니다.
+                 * 헤더 자동 탐색이 실패하더라도 표 선 기준 컬럼 수가 확인되면
+                 * 철근 집계표 기본 순서로 임시 매핑합니다.
+                 */
+                columns = CreateGridFallbackHeaderColumns(colCount);
+                headerRowIndex = -1;
+            }
+
+            if (columns == null || columns.Count < 3)
+            {
+                diagnostic = "표준 컬럼으로 매핑 가능한 헤더가 부족합니다.";
+                return result;
+            }
+
+            lastDetectedHeaderColumns = columns;
+
+            int rowNo = 1;
+            int firstDataRowIndex = headerRowIndex >= 0 ? headerRowIndex + 1 : 0;
+            bool useSelectedRangeFilter = Math.Abs(selectedMaxPoint.Y - selectedMinPoint.Y) > 0.0001;
+
+            for (i = firstDataRowIndex; i < rowCount; i++)
+            {
+                if (useSelectedRangeFilter)
+                {
+                    double rowTopY = Math.Max(horizontalYs[i], horizontalYs[i + 1]);
+                    double rowBottomY = Math.Min(horizontalYs[i], horizontalYs[i + 1]);
+                    double rowCenterY = (rowTopY + rowBottomY) / 2.0;
+
+                    if (rowCenterY < selectedMinPoint.Y - mergeTolerance || rowCenterY > selectedMaxPoint.Y + mergeTolerance)
+                    {
+                        continue;
+                    }
+                }
+
+                string rawText = JoinGridRowText(cellTexts, i, colCount);
+
+                if (IsEmptyNoiseRow(rawText))
+                {
+                    continue;
+                }
+
+                if (IsHeaderRow(rawText))
+                {
+                    continue;
+                }
+
+                OviaBarTableRow row = new OviaBarTableRow();
+                row.No = rowNo;
+                row.SourceRowNo = i + 1;
+                row.RawText = rawText;
+                row.RowType = "DATA";
+
+                if (rawText.IndexOf("총계", StringComparison.OrdinalIgnoreCase) >= 0 || rawText.IndexOf("합계", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    row.RowType = "TOTAL";
+                }
+                else if (rawText.IndexOf("소계", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    row.RowType = "SUBTOTAL";
+                }
+
+                int c;
+
+                for (c = 0; c < colCount; c++)
+                {
+                    string value = cellTexts[i, c];
+                    value = CleanCellText(value);
+
+                    if (value == "")
+                    {
+                        continue;
+                    }
+
+                    OviaHeaderColumn column = FindGridHeaderColumnByColumnIndex(columns, c);
+
+                    if (column == null)
+                    {
+                        continue;
+                    }
+
+                    ApplyValueByStandardKey(row, column.StandardKey, value);
+                }
+
+                if (row.Spec == "")
+                {
+                    string detectedSpec = DetectSpec(rawText);
+
+                    if (detectedSpec != "")
+                    {
+                        row.Spec = detectedSpec;
+                    }
+                }
+
+                if (row.ShapeDimensionText == "" && row.ShapeText != "")
+                {
+                    row.ShapeDimensionText = ExtractNumbersText(row.ShapeText);
+                }
+
+                if (row.RowType == "SUBTOTAL" || row.RowType == "TOTAL")
+                {
+                    if (row.MarkNo == "")
+                    {
+                        row.MarkNo = row.RowType == "SUBTOTAL" ? "소계" : "총계";
+                        row.BarNo = row.MarkNo;
+                    }
+                }
+
+                if (IsMeaninglessTableRow(row))
+                {
+                    continue;
+                }
+
+                result.Add(row);
+                rowNo++;
+            }
+
+            diagnostic = "세로선 " + verticalXs.Count.ToString() + "개, 가로선 " + horizontalYs.Count.ToString() + "개, " + (headerRowIndex >= 0 ? "헤더 행 " + (headerRowIndex + 1).ToString() + "번" : "기본 컬럼 순서 적용");
+            return result;
+        }
+
+        private List<OviaGridLineSegment> ExtractGridLineSegmentsByWindow(Editor ed, Database db, Point3d point1, Point3d point2)
+        {
+            List<OviaGridLineSegment> segments = new List<OviaGridLineSegment>();
+
+            Point3d minPoint = new Point3d(
+                Math.Min(point1.X, point2.X),
+                Math.Min(point1.Y, point2.Y),
+                Math.Min(point1.Z, point2.Z)
+            );
+
+            Point3d maxPoint = new Point3d(
+                Math.Max(point1.X, point2.X),
+                Math.Max(point1.Y, point2.Y),
+                Math.Max(point1.Z, point2.Z)
+            );
+
+            PromptSelectionResult selectionResult = ed.SelectCrossingWindow(point1, point2);
+
+            if (selectionResult.Status != PromptStatus.OK || selectionResult.Value == null)
+            {
+                return segments;
+            }
+
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                ObjectId[] ids = selectionResult.Value.GetObjectIds();
+                int i;
+
+                for (i = 0; i < ids.Length; i++)
+                {
+                    Entity entity = tr.GetObject(ids[i], OpenMode.ForRead, false) as Entity;
+
+                    if (entity == null)
+                    {
+                        continue;
+                    }
+
+                    CollectGridLineSegmentsFromEntity(
+                        tr,
+                        entity,
+                        Matrix3d.Identity,
+                        segments,
+                        minPoint,
+                        maxPoint,
+                        0
+                    );
+                }
+
+                tr.Commit();
+            }
+
+            return segments;
+        }
+
+        private void CollectGridLineSegmentsFromEntity(
+            Transaction tr,
+            Entity entity,
+            Matrix3d transform,
+            List<OviaGridLineSegment> segments,
+            Point3d minPoint,
+            Point3d maxPoint,
+            int depth
+        )
+        {
+            if (entity == null || segments == null)
+            {
+                return;
+            }
+
+            if (depth > 8)
+            {
+                return;
+            }
+
+            if (string.Equals(entity.Layer, OviaBoxLayerName, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            Line line = entity as Line;
+
+            if (line != null)
+            {
+                AddGridLineSegmentCandidate(
+                    line.StartPoint.TransformBy(transform),
+                    line.EndPoint.TransformBy(transform),
+                    segments,
+                    minPoint,
+                    maxPoint,
+                    "Line"
+                );
+
+                return;
+            }
+
+            Polyline polyline = entity as Polyline;
+
+            if (polyline != null)
+            {
+                int count = polyline.NumberOfVertices;
+                int i;
+
+                for (i = 0; i < count - 1; i++)
+                {
+                    AddGridLineSegmentCandidate(
+                        polyline.GetPoint3dAt(i).TransformBy(transform),
+                        polyline.GetPoint3dAt(i + 1).TransformBy(transform),
+                        segments,
+                        minPoint,
+                        maxPoint,
+                        "Polyline"
+                    );
+                }
+
+                if (polyline.Closed && count > 1)
+                {
+                    AddGridLineSegmentCandidate(
+                        polyline.GetPoint3dAt(count - 1).TransformBy(transform),
+                        polyline.GetPoint3dAt(0).TransformBy(transform),
+                        segments,
+                        minPoint,
+                        maxPoint,
+                        "Polyline"
+                    );
+                }
+
+                return;
+            }
+
+            BlockReference blockReference = entity as BlockReference;
+
+            if (blockReference != null)
+            {
+                BlockTableRecord blockRecord = tr.GetObject(blockReference.BlockTableRecord, OpenMode.ForRead, false) as BlockTableRecord;
+
+                if (blockRecord != null)
+                {
+                    Matrix3d nextTransform = transform * blockReference.BlockTransform;
+
+                    foreach (ObjectId childId in blockRecord)
+                    {
+                        Entity childEntity = tr.GetObject(childId, OpenMode.ForRead, false) as Entity;
+
+                        if (childEntity == null)
+                        {
+                            continue;
+                        }
+
+                        CollectGridLineSegmentsFromEntity(
+                            tr,
+                            childEntity,
+                            nextTransform,
+                            segments,
+                            minPoint,
+                            maxPoint,
+                            depth + 1
+                        );
+                    }
+                }
+
+                CollectGridLineSegmentsFromExplodedBlock(
+                    blockReference,
+                    segments,
+                    minPoint,
+                    maxPoint,
+                    depth + 1
+                );
+
+                return;
+            }
+        }
+
+        private void CollectGridLineSegmentsFromExplodedBlock(
+            BlockReference blockReference,
+            List<OviaGridLineSegment> segments,
+            Point3d minPoint,
+            Point3d maxPoint,
+            int depth
+        )
+        {
+            if (blockReference == null || segments == null)
+            {
+                return;
+            }
+
+            if (depth > 8)
+            {
+                return;
+            }
+
+            DBObjectCollection explodedObjects = new DBObjectCollection();
+
+            try
+            {
+                blockReference.Explode(explodedObjects);
+            }
+            catch
+            {
+                return;
+            }
+
+            foreach (DBObject dbObject in explodedObjects)
+            {
+                Entity explodedEntity = dbObject as Entity;
+
+                if (explodedEntity == null)
+                {
+                    if (dbObject != null)
+                    {
+                        dbObject.Dispose();
+                    }
+
+                    continue;
+                }
+
+                try
+                {
+                    Line line = explodedEntity as Line;
+
+                    if (line != null)
+                    {
+                        AddGridLineSegmentCandidate(line.StartPoint, line.EndPoint, segments, minPoint, maxPoint, "ExplodedLine");
+                        continue;
+                    }
+
+                    Polyline polyline = explodedEntity as Polyline;
+
+                    if (polyline != null)
+                    {
+                        int count = polyline.NumberOfVertices;
+                        int i;
+
+                        for (i = 0; i < count - 1; i++)
+                        {
+                            AddGridLineSegmentCandidate(
+                                polyline.GetPoint3dAt(i),
+                                polyline.GetPoint3dAt(i + 1),
+                                segments,
+                                minPoint,
+                                maxPoint,
+                                "ExplodedPolyline"
+                            );
+                        }
+
+                        if (polyline.Closed && count > 1)
+                        {
+                            AddGridLineSegmentCandidate(
+                                polyline.GetPoint3dAt(count - 1),
+                                polyline.GetPoint3dAt(0),
+                                segments,
+                                minPoint,
+                                maxPoint,
+                                "ExplodedPolyline"
+                            );
+                        }
+
+                        continue;
+                    }
+
+                    BlockReference nestedBlock = explodedEntity as BlockReference;
+
+                    if (nestedBlock != null)
+                    {
+                        CollectGridLineSegmentsFromExplodedBlock(nestedBlock, segments, minPoint, maxPoint, depth + 1);
+                        continue;
+                    }
+                }
+                finally
+                {
+                    explodedEntity.Dispose();
+                }
+            }
+        }
+
+        private void AddGridLineSegmentCandidate(
+            Point3d point1,
+            Point3d point2,
+            List<OviaGridLineSegment> segments,
+            Point3d minPoint,
+            Point3d maxPoint,
+            string sourceType
+        )
+        {
+            if (segments == null)
+            {
+                return;
+            }
+
+            if (!IsPointInsideWindow(point1, minPoint, maxPoint) && !IsPointInsideWindow(point2, minPoint, maxPoint))
+            {
+                return;
+            }
+
+            OviaGridLineSegment segment = new OviaGridLineSegment();
+            segment.X1 = point1.X;
+            segment.Y1 = point1.Y;
+            segment.X2 = point2.X;
+            segment.Y2 = point2.Y;
+            segment.SourceType = sourceType == null ? "" : sourceType;
+            segments.Add(segment);
+        }
+
+        private List<double> ExtractCoveredGridCoordinates(
+            List<OviaGridLineSegment> segments,
+            bool vertical,
+            double axisTolerance,
+            double mergeTolerance,
+            double minSegmentLength,
+            double minCoverageLength,
+            double rangeStart,
+            double rangeEnd
+        )
+        {
+            List<OviaGridAxisSegment> candidates = new List<OviaGridAxisSegment>();
+
+            if (segments == null || segments.Count == 0)
+            {
+                return new List<double>();
+            }
+
+            double rangeMin = Math.Min(rangeStart, rangeEnd);
+            double rangeMax = Math.Max(rangeStart, rangeEnd);
+
+            int i;
+
+            for (i = 0; i < segments.Count; i++)
+            {
+                OviaGridLineSegment segment = segments[i];
+
+                if (segment == null)
+                {
+                    continue;
+                }
+
+                double dx = Math.Abs(segment.X1 - segment.X2);
+                double dy = Math.Abs(segment.Y1 - segment.Y2);
+
+                if (vertical)
+                {
+                    if (dx > axisTolerance || dy < minSegmentLength)
+                    {
+                        continue;
+                    }
+
+                    OviaGridAxisSegment candidate = new OviaGridAxisSegment();
+                    candidate.Coordinate = (segment.X1 + segment.X2) / 2.0;
+                    candidate.Start = Math.Max(rangeMin, Math.Min(segment.Y1, segment.Y2));
+                    candidate.End = Math.Min(rangeMax, Math.Max(segment.Y1, segment.Y2));
+
+                    if (candidate.End > candidate.Start)
+                    {
+                        candidates.Add(candidate);
+                    }
+                }
+                else
+                {
+                    if (dy > axisTolerance || dx < minSegmentLength)
+                    {
+                        continue;
+                    }
+
+                    OviaGridAxisSegment candidate = new OviaGridAxisSegment();
+                    candidate.Coordinate = (segment.Y1 + segment.Y2) / 2.0;
+                    candidate.Start = Math.Max(rangeMin, Math.Min(segment.X1, segment.X2));
+                    candidate.End = Math.Min(rangeMax, Math.Max(segment.X1, segment.X2));
+
+                    if (candidate.End > candidate.Start)
+                    {
+                        candidates.Add(candidate);
+                    }
+                }
+            }
+
+            if (candidates.Count == 0)
+            {
+                return new List<double>();
+            }
+
+            candidates.Sort(delegate (OviaGridAxisSegment a, OviaGridAxisSegment b)
+            {
+                if (a.Coordinate < b.Coordinate)
+                {
+                    return -1;
+                }
+
+                if (a.Coordinate > b.Coordinate)
+                {
+                    return 1;
+                }
+
+                return 0;
+            });
+
+            List<double> result = new List<double>();
+            int index = 0;
+
+            while (index < candidates.Count)
+            {
+                List<OviaGridAxisSegment> cluster = new List<OviaGridAxisSegment>();
+                double baseCoordinate = candidates[index].Coordinate;
+
+                while (index < candidates.Count && Math.Abs(candidates[index].Coordinate - baseCoordinate) <= mergeTolerance)
+                {
+                    cluster.Add(candidates[index]);
+                    index++;
+                }
+
+                if (cluster.Count == 0)
+                {
+                    continue;
+                }
+
+                double coordinateSum = 0;
+                int coordinateCount = 0;
+
+                for (i = 0; i < cluster.Count; i++)
+                {
+                    coordinateSum += cluster[i].Coordinate;
+                    coordinateCount++;
+                }
+
+                double coveredLength = GetMergedIntervalLength(cluster, mergeTolerance);
+
+                if (coveredLength >= minCoverageLength)
+                {
+                    result.Add(coordinateSum / (double)coordinateCount);
+                }
+            }
+
+            result = MergeGridCoordinates(result, mergeTolerance, true);
+
+            if (!vertical)
+            {
+                result.Reverse();
+            }
+
+            return result;
+        }
+
+        private double GetMergedIntervalLength(List<OviaGridAxisSegment> intervals, double tolerance)
+        {
+            if (intervals == null || intervals.Count == 0)
+            {
+                return 0;
+            }
+
+            intervals.Sort(delegate (OviaGridAxisSegment a, OviaGridAxisSegment b)
+            {
+                if (a.Start < b.Start)
+                {
+                    return -1;
+                }
+
+                if (a.Start > b.Start)
+                {
+                    return 1;
+                }
+
+                return 0;
+            });
+
+            double total = 0;
+            double currentStart = intervals[0].Start;
+            double currentEnd = intervals[0].End;
+
+            int i;
+
+            for (i = 1; i < intervals.Count; i++)
+            {
+                if (intervals[i].Start <= currentEnd + tolerance)
+                {
+                    if (intervals[i].End > currentEnd)
+                    {
+                        currentEnd = intervals[i].End;
+                    }
+                }
+                else
+                {
+                    total += Math.Max(0, currentEnd - currentStart);
+                    currentStart = intervals[i].Start;
+                    currentEnd = intervals[i].End;
+                }
+            }
+
+            total += Math.Max(0, currentEnd - currentStart);
+
+            return total;
+        }
+
+        private List<double> MergeGridCoordinates(List<double> values, double tolerance, bool ascending)
+        {
+            List<double> result = new List<double>();
+
+            if (values == null || values.Count == 0)
+            {
+                return result;
+            }
+
+            values.Sort();
+
+            int i = 0;
+
+            while (i < values.Count)
+            {
+                double sum = values[i];
+                int count = 1;
+                int j = i + 1;
+
+                while (j < values.Count && Math.Abs(values[j] - values[i]) <= tolerance)
+                {
+                    sum += values[j];
+                    count++;
+                    j++;
+                }
+
+                result.Add(sum / (double)count);
+                i = j;
+            }
+
+            if (!ascending)
+            {
+                result.Reverse();
+            }
+
+            return result;
+        }
+
+        private string[,] BuildGridCellTextMatrix(
+            List<OviaTextRow> textRows,
+            List<double> verticalXs,
+            List<double> horizontalYs,
+            double tolerance
+        )
+        {
+            int rowCount = horizontalYs.Count - 1;
+            int colCount = verticalXs.Count - 1;
+
+            if (rowCount <= 0 || colCount <= 0)
+            {
+                return null;
+            }
+
+            List<OviaTextRow>[,] cellRows = new List<OviaTextRow>[rowCount, colCount];
+            int r;
+            int c;
+
+            for (r = 0; r < rowCount; r++)
+            {
+                for (c = 0; c < colCount; c++)
+                {
+                    cellRows[r, c] = new List<OviaTextRow>();
+                }
+            }
+
+            int i;
+
+            for (i = 0; i < textRows.Count; i++)
+            {
+                OviaTextRow text = textRows[i];
+
+                if (text == null || CleanCellText(text.TextValue) == "")
+                {
+                    continue;
+                }
+
+                int rowIndex = FindGridRowIndex(horizontalYs, text.Y, tolerance);
+                int colIndex = FindGridColumnIndex(verticalXs, text.X, tolerance);
+
+                if (rowIndex < 0 || colIndex < 0)
+                {
+                    continue;
+                }
+
+                cellRows[rowIndex, colIndex].Add(text);
+            }
+
+            string[,] cellTexts = new string[rowCount, colCount];
+
+            for (r = 0; r < rowCount; r++)
+            {
+                for (c = 0; c < colCount; c++)
+                {
+                    cellTexts[r, c] = JoinGridCellTexts(cellRows[r, c]);
+                }
+            }
+
+            return cellTexts;
+        }
+
+        private int FindGridColumnIndex(List<double> verticalXs, double x, double tolerance)
+        {
+            if (verticalXs == null || verticalXs.Count < 2)
+            {
+                return -1;
+            }
+
+            int i;
+
+            for (i = 0; i < verticalXs.Count - 1; i++)
+            {
+                double left = Math.Min(verticalXs[i], verticalXs[i + 1]);
+                double right = Math.Max(verticalXs[i], verticalXs[i + 1]);
+
+                if (x >= left - tolerance && x <= right + tolerance)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private int FindGridRowIndex(List<double> horizontalYs, double y, double tolerance)
+        {
+            if (horizontalYs == null || horizontalYs.Count < 2)
+            {
+                return -1;
+            }
+
+            int i;
+
+            for (i = 0; i < horizontalYs.Count - 1; i++)
+            {
+                double top = Math.Max(horizontalYs[i], horizontalYs[i + 1]);
+                double bottom = Math.Min(horizontalYs[i], horizontalYs[i + 1]);
+
+                if (y <= top + tolerance && y >= bottom - tolerance)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private string JoinGridCellTexts(List<OviaTextRow> rows)
+        {
+            if (rows == null || rows.Count == 0)
+            {
+                return "";
+            }
+
+            rows.Sort(delegate (OviaTextRow a, OviaTextRow b)
+            {
+                if (Math.Abs(b.Y - a.Y) > Math.Max(Math.Max(a.Height, b.Height) * 0.4, 0.5))
+                {
+                    return b.Y.CompareTo(a.Y);
+                }
+
+                return a.X.CompareTo(b.X);
+            });
+
+            StringBuilder sb = new StringBuilder();
+            int i;
+
+            for (i = 0; i < rows.Count; i++)
+            {
+                string value = CleanCellText(rows[i].TextValue);
+
+                if (value == "")
+                {
+                    continue;
+                }
+
+                if (sb.Length > 0)
+                {
+                    sb.Append(" ");
+                }
+
+                sb.Append(value);
+            }
+
+            return sb.ToString().Trim();
+        }
+
+        private string JoinGridRowText(string[,] cellTexts, int rowIndex, int colCount)
+        {
+            StringBuilder sb = new StringBuilder();
+            int c;
+
+            for (c = 0; c < colCount; c++)
+            {
+                string value = cellTexts[rowIndex, c];
+
+                if (value == null || value.Trim() == "")
+                {
+                    continue;
+                }
+
+                if (sb.Length > 0)
+                {
+                    sb.Append(" ");
+                }
+
+                sb.Append(value.Trim());
+            }
+
+            return sb.ToString();
+        }
+
+        private int DetectGridHeaderRow(string[,] cellTexts, List<double> verticalXs, List<double> horizontalYs)
+        {
+            if (cellTexts == null)
+            {
+                return -1;
+            }
+
+            int rowCount = horizontalYs.Count - 1;
+            int colCount = verticalXs.Count - 1;
+            int bestRow = -1;
+            int bestScore = 0;
+            int r;
+
+            for (r = 0; r < rowCount; r++)
+            {
+                List<OviaHeaderColumn> columns = BuildGridHeaderColumns(cellTexts, verticalXs, r);
+                int score = GetHeaderScore(columns);
+
+                if (HasImportantHeader(columns))
+                {
+                    score += 2;
+                }
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestRow = r;
+                }
+            }
+
+            if (bestScore < 4)
+            {
+                return -1;
+            }
+
+            return bestRow;
+        }
+
+        private List<OviaHeaderColumn> BuildGridHeaderColumns(string[,] cellTexts, List<double> verticalXs, int headerRowIndex)
+        {
+            List<OviaHeaderColumn> columns = new List<OviaHeaderColumn>();
+
+            if (cellTexts == null || verticalXs == null || verticalXs.Count < 2)
+            {
+                return columns;
+            }
+
+            int colCount = verticalXs.Count - 1;
+            int c;
+            bool hasShapeNoHeader = false;
+
+            for (c = 0; c < colCount; c++)
+            {
+                string titleCheck = CleanHeaderText(cellTexts[headerRowIndex, c]);
+                string normalizedCheck = NormalizeGridHeaderText(titleCheck);
+
+                if (normalizedCheck.IndexOf("형번", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    normalizedCheck.IndexOf("형상번호", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    normalizedCheck.IndexOf("SHAPENO", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    normalizedCheck.IndexOf("SHAPECODE", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    hasShapeNoHeader = true;
+                    break;
+                }
+            }
+
+            for (c = 0; c < colCount; c++)
+            {
+                string title = CleanHeaderText(cellTexts[headerRowIndex, c]);
+
+                if (title == "")
+                {
+                    continue;
+                }
+
+                string standardKey = ClassifyGridHeaderTitleByColumnValues(title, cellTexts, headerRowIndex, c, hasShapeNoHeader);
+
+                if (standardKey == "")
+                {
+                    continue;
+                }
+
+                OviaHeaderColumn existing = FindGridHeaderColumnByColumnIndex(columns, c);
+
+                if (existing != null)
+                {
+                    continue;
+                }
+
+                OviaHeaderColumn column = new OviaHeaderColumn();
+                column.StandardKey = standardKey;
+                column.OriginalTitle = GetGridOutputHeaderTitle(title, standardKey);
+                column.X = (verticalXs[c] + verticalXs[c + 1]) / 2.0;
+                column.LeftX = Math.Min(verticalXs[c], verticalXs[c + 1]);
+                column.RightX = Math.Max(verticalXs[c], verticalXs[c + 1]);
+                column.SourceColumnIndex = c;
+
+                columns.Add(column);
+            }
+
+            return columns;
+        }
+
+        private string ClassifyGridHeaderTitleByColumnValues(string title, string[,] cellTexts, int headerRowIndex, int columnIndex, bool hasShapeNoHeader)
+        {
+            string normalizedTitle = NormalizeGridHeaderText(title);
+
+            if (normalizedTitle == "")
+            {
+                return "";
+            }
+
+            string pattern = DetectGridColumnValuePattern(cellTexts, headerRowIndex, columnIndex);
+
+            /*
+             * OVIA 조건부 매핑 핵심 규칙
+             * ------------------------------------------------------------
+             * CAD 도면에서 "부호"라는 헤더는 업체마다 의미가 다릅니다.
+             *  - 아래 값이 1, 2, 3, 4처럼 순번이면 OVIA 표준 컬럼 "번호"
+             *  - 아래 값이 G1005, D1002처럼 문자+숫자 형번이면 "부호/명칭"
+             *
+             * 따라서 헤더명만 보고 고정하지 않고, 실제 데이터 값을 함께 분석합니다.
+             */
+            if (IsAmbiguousMarkHeader(normalizedTitle))
+            {
+                if (pattern == "sequential_number" || pattern == "integer_number")
+                {
+                    return "MARK_NO";
+                }
+
+                if (pattern == "alpha_numeric_mark")
+                {
+                    return "SHAPE_NO";
+                }
+
+                if (hasShapeNoHeader)
+                {
+                    return "MARK_NO";
+                }
+
+                if (normalizedTitle.IndexOf("명칭", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    normalizedTitle.IndexOf("NAME", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return "SHAPE_NO";
+                }
+
+                return "MARK_NO";
+            }
+
+            if (normalizedTitle.IndexOf("형번", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                normalizedTitle.IndexOf("형상번호", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                normalizedTitle.IndexOf("형상코드", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                normalizedTitle.IndexOf("SHAPENO", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                normalizedTitle.IndexOf("SHAPECODE", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "SHAPE_NO";
+            }
+
+            return ClassifyGridHeaderTitle(title, hasShapeNoHeader);
+        }
+
+        private bool IsAmbiguousMarkHeader(string normalizedTitle)
+        {
+            if (normalizedTitle == null)
+            {
+                return false;
+            }
+
+            if (normalizedTitle.IndexOf("부호", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                normalizedTitle.IndexOf("명칭", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                normalizedTitle == "MARK" ||
+                normalizedTitle == "BARMARK" ||
+                normalizedTitle == "BARNO" ||
+                normalizedTitle == "ITEM" ||
+                normalizedTitle == "SYMBOL" ||
+                normalizedTitle == "CODE")
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private string DetectGridColumnValuePattern(string[,] cellTexts, int headerRowIndex, int columnIndex)
+        {
+            if (cellTexts == null)
+            {
+                return "unknown";
+            }
+
+            int rowCount = cellTexts.GetLength(0);
+            int nonEmptyCount = 0;
+            int integerCount = 0;
+            int alphaNumericMarkCount = 0;
+            int rebarSpecCount = 0;
+            List<int> integerValues = new List<int>();
+
+            int startRow = headerRowIndex + 1;
+            int endRow = Math.Min(rowCount - 1, headerRowIndex + 30);
+            int r;
+
+            for (r = startRow; r <= endRow; r++)
+            {
+                string value = "";
+
+                try
+                {
+                    value = cellTexts[r, columnIndex];
+                }
+                catch
+                {
+                    value = "";
+                }
+
+                value = CleanCellText(value);
+
+                if (value == "")
+                {
+                    continue;
+                }
+
+                if (IsSummaryText(value) || IsHeaderRow(value))
+                {
+                    continue;
+                }
+
+                nonEmptyCount++;
+
+                string compact = NormalizeGridHeaderText(value);
+                string firstToken = GetFirstMeaningfulToken(value);
+
+                if (IsSimpleIntegerToken(firstToken))
+                {
+                    integerCount++;
+                    int n;
+                    if (Int32.TryParse(firstToken.Replace(",", ""), out n))
+                    {
+                        integerValues.Add(n);
+                    }
+                }
+                else if (IsAlphaNumericMarkToken(firstToken) || IsAlphaNumericMarkToken(compact))
+                {
+                    alphaNumericMarkCount++;
+                }
+
+                if (IsRebarSpecToken(firstToken) || IsRebarSpecToken(compact))
+                {
+                    rebarSpecCount++;
+                }
+            }
+
+            if (nonEmptyCount == 0)
+            {
+                return "unknown";
+            }
+
+            double integerRatio = (double)integerCount / (double)nonEmptyCount;
+            double markRatio = (double)alphaNumericMarkCount / (double)nonEmptyCount;
+            double specRatio = (double)rebarSpecCount / (double)nonEmptyCount;
+
+            if (integerRatio >= 0.70)
+            {
+                if (IsMostlySequentialIntegers(integerValues))
+                {
+                    return "sequential_number";
+                }
+
+                return "integer_number";
+            }
+
+            if (markRatio >= 0.50 && specRatio < 0.50)
+            {
+                return "alpha_numeric_mark";
+            }
+
+            if (specRatio >= 0.60)
+            {
+                return "rebar_spec";
+            }
+
+            return "unknown";
+        }
+
+        private string GetFirstMeaningfulToken(string value)
+        {
+            value = value == null ? "" : value.Trim();
+
+            if (value == "")
+            {
+                return "";
+            }
+
+            string[] tokens = value.Split(new char[] { ' ', '\t', '\r', '\n', '/', '|', ',' }, StringSplitOptions.RemoveEmptyEntries);
+
+            if (tokens == null || tokens.Length == 0)
+            {
+                return value;
+            }
+
+            return tokens[0].Trim();
+        }
+
+        private bool IsSimpleIntegerToken(string value)
+        {
+            value = value == null ? "" : value.Trim();
+
+            if (value == "")
+            {
+                return false;
+            }
+
+            value = value.Replace(",", "");
+
+            return Regex.IsMatch(value, @"^[0-9]{1,5}$");
+        }
+
+        private bool IsAlphaNumericMarkToken(string value)
+        {
+            value = value == null ? "" : value.Trim();
+
+            if (value == "")
+            {
+                return false;
+            }
+
+            value = value.Replace(" ", "");
+            value = value.Replace("-", "");
+            value = value.Replace("_", "");
+
+            if (!Regex.IsMatch(value, @"[A-Z가-힣]") || !Regex.IsMatch(value, @"[0-9]"))
+            {
+                return false;
+            }
+
+            if (IsRebarSpecToken(value))
+            {
+                return false;
+            }
+
+            return Regex.IsMatch(value, @"^[A-Z가-힣]{1,6}[0-9][A-Z0-9가-힣]*$");
+        }
+
+        private bool IsRebarSpecToken(string value)
+        {
+            value = value == null ? "" : value.Trim();
+
+            if (value == "")
+            {
+                return false;
+            }
+
+            value = value.ToUpperInvariant();
+            value = value.Replace(" ", "");
+            value = value.Replace("-", "");
+            value = value.Replace("_", "");
+
+            if (Regex.IsMatch(value, @"^(SD|SHD|HD|UHD|D)[0-9]{1,3}$"))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool IsMostlySequentialIntegers(List<int> values)
+        {
+            if (values == null || values.Count < 2)
+            {
+                return values != null && values.Count == 1;
+            }
+
+            values.Sort();
+
+            int sequentialSteps = 0;
+            int totalSteps = 0;
+            int i;
+
+            for (i = 1; i < values.Count; i++)
+            {
+                if (values[i] == values[i - 1])
+                {
+                    continue;
+                }
+
+                totalSteps++;
+
+                if (values[i] == values[i - 1] + 1)
+                {
+                    sequentialSteps++;
+                }
+            }
+
+            if (totalSteps == 0)
+            {
+                return true;
+            }
+
+            return ((double)sequentialSteps / (double)totalSteps) >= 0.60;
+        }
+
+        private bool IsSummaryText(string value)
+        {
+            value = value == null ? "" : value.Trim();
+
+            if (value.IndexOf("소계", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("합계", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("총계", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("TOTAL", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private string NormalizeGridHeaderText(string title)
+        {
+            if (title == null)
+            {
+                return "";
+            }
+
+            string value = title.ToUpperInvariant();
+            value = value.Replace(" ", "");
+            value = value.Replace("\t", "");
+            value = value.Replace("\r", "");
+            value = value.Replace("\n", "");
+            value = value.Replace("_", "");
+            value = value.Replace("-", "");
+            value = value.Replace(".", "");
+            value = value.Replace("(", "");
+            value = value.Replace(")", "");
+            value = value.Replace("[", "");
+            value = value.Replace("]", "");
+
+            return value;
+        }
+
+        private string ClassifyGridHeaderTitle(string title, bool hasShapeNoHeader)
+        {
+            string value = NormalizeGridHeaderText(title);
+
+            if (value == "")
+            {
+                return "";
+            }
+
+            if (value.IndexOf("비고", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("NOTE", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("REMARK", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "NOTE";
+            }
+
+            if (value.IndexOf("총중량", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("중량", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("WEIGHT", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("WT", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "TOTAL_WEIGHT";
+            }
+
+            if (value.IndexOf("총길이", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("총연장", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("연장", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("TOTALLENGTH", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "TOTAL_LENGTH_M";
+            }
+
+            if (value.IndexOf("수량", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("본수", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("개수", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("QTY", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("EA", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "QUANTITY_EA";
+            }
+
+            if (value.IndexOf("길이", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("LENGTH", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "LENGTH_MM";
+            }
+
+            if (value.IndexOf("철근규격", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("규격", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("강종", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("SIZE", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("DIA", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "SPEC";
+            }
+
+            if (value.IndexOf("형번", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("형상번호", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("형상코드", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("SHAPENO", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("SHAPECODE", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "SHAPE_NO";
+            }
+
+            if (value.IndexOf("철근형상", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("형상", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("SHAPE", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "SHAPE";
+            }
+
+            if (value.IndexOf("번호", StringComparison.OrdinalIgnoreCase) >= 0 || value == "NO" || value == "N")
+            {
+                return "MARK_NO";
+            }
+
+            if (value.IndexOf("부호", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                if (hasShapeNoHeader)
+                {
+                    return "";
+                }
+
+                return "MARK_NO";
+            }
+
+            if (value.IndexOf("MARK", StringComparison.OrdinalIgnoreCase) >= 0 || value.IndexOf("BARNO", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "MARK_NO";
+            }
+
+            return "";
+        }
+
+        private string GetGridOutputHeaderTitle(string originalTitle, string standardKey)
+        {
+            if (standardKey == "MARK_NO")
+            {
+                return "번호";
+            }
+
+            if (standardKey == "SHAPE_NO")
+            {
+                return "부호/명칭";
+            }
+
+            if (standardKey == "SHAPE")
+            {
+                return "철근형상";
+            }
+
+            if (standardKey == "SPEC")
+            {
+                return "규격";
+            }
+
+            if (standardKey == "LENGTH_MM")
+            {
+                return "길이(mm)";
+            }
+
+            if (standardKey == "QUANTITY_EA")
+            {
+                return "수량(EA)";
+            }
+
+            if (standardKey == "TOTAL_LENGTH_M")
+            {
+                return "총길이(M)";
+            }
+
+            if (standardKey == "TOTAL_WEIGHT")
+            {
+                if (originalTitle != null && originalTitle.ToUpperInvariant().IndexOf("KG", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return "총중량(KG)";
+                }
+
+                return "총중량";
+            }
+
+            if (standardKey == "NOTE")
+            {
+                return "비고";
+            }
+
+            return NormalizeHeaderTitleForOutput(originalTitle, standardKey);
+        }
+
+        private OviaHeaderColumn FindGridHeaderColumnByColumnIndex(List<OviaHeaderColumn> columns, int columnIndex)
+        {
+            if (columns == null)
+            {
+                return null;
+            }
+
+            int i;
+
+            for (i = 0; i < columns.Count; i++)
+            {
+                if (columns[i].SourceColumnIndex == columnIndex)
+                {
+                    return columns[i];
+                }
+            }
+
+            return null;
+        }
+
 
         [CommandMethod("OVIABOXDEBUG")]
         public void OviaBoxDebug()
@@ -3166,7 +5210,7 @@ namespace OVIA.AutoCAD_2027
 
             if (dbText != null)
             {
-                Point3d position = dbText.Position.TransformBy(transform);
+                Point3d position = GetTextReferencePoint(entity, dbText.Position, transform);
 
                 if (IsPointInsideWindow(position, minPoint, maxPoint))
                 {
@@ -3188,7 +5232,7 @@ namespace OVIA.AutoCAD_2027
 
             if (mText != null)
             {
-                Point3d position = mText.Location.TransformBy(transform);
+                Point3d position = GetTextReferencePoint(entity, mText.Location, transform);
 
                 if (IsPointInsideWindow(position, minPoint, maxPoint))
                 {
@@ -3210,7 +5254,7 @@ namespace OVIA.AutoCAD_2027
 
             if (attributeReference != null)
             {
-                Point3d position = attributeReference.Position.TransformBy(transform);
+                Point3d position = GetTextReferencePoint(entity, attributeReference.Position, transform);
 
                 if (IsPointInsideWindow(position, minPoint, maxPoint))
                 {
@@ -3359,7 +5403,7 @@ namespace OVIA.AutoCAD_2027
 
                     if (dbText != null)
                     {
-                        Point3d position = dbText.Position;
+                        Point3d position = GetTextReferencePoint(explodedEntity, dbText.Position, Matrix3d.Identity);
 
                         if (IsPointInsideWindow(position, minPoint, maxPoint))
                         {
@@ -3381,7 +5425,7 @@ namespace OVIA.AutoCAD_2027
 
                     if (mText != null)
                     {
-                        Point3d position = mText.Location;
+                        Point3d position = GetTextReferencePoint(explodedEntity, mText.Location, Matrix3d.Identity);
 
                         if (IsPointInsideWindow(position, minPoint, maxPoint))
                         {
@@ -3403,7 +5447,7 @@ namespace OVIA.AutoCAD_2027
 
                     if (attributeReference != null)
                     {
-                        Point3d position = attributeReference.Position;
+                        Point3d position = GetTextReferencePoint(explodedEntity, attributeReference.Position, Matrix3d.Identity);
 
                         if (IsPointInsideWindow(position, minPoint, maxPoint))
                         {
@@ -3441,6 +5485,59 @@ namespace OVIA.AutoCAD_2027
                     explodedEntity.Dispose();
                 }
             }
+        }
+
+        /*
+         * OVIA 2026-05-23 개선:
+         * AutoCAD DBText는 가운데 정렬/맞춤 정렬 상태일 때 Position 값이
+         * 사용자가 보는 글자의 중심이 아니라 기준점 또는 정렬점으로 잡힐 수 있습니다.
+         *
+         * 기존에는 Position/Location만 기준으로 셀을 찾았기 때문에,
+         * 번호 컬럼처럼 폭이 좁고 가운데 정렬된 숫자가 선택박스 안에 보여도
+         * 실제 기준점이 셀 밖으로 판정되어 번호가 누락되는 문제가 있었습니다.
+         *
+         * 이제는 가능한 경우 Entity.GeometricExtents의 중심점을 사용합니다.
+         * 실패할 때만 기존 Position/Location 값을 사용합니다.
+         */
+        private Point3d GetTextReferencePoint(Entity entity, Point3d fallbackPoint, Matrix3d transform)
+        {
+            Point3d transformedFallback = fallbackPoint;
+
+            try
+            {
+                transformedFallback = fallbackPoint.TransformBy(transform);
+            }
+            catch
+            {
+                transformedFallback = fallbackPoint;
+            }
+
+            if (entity == null)
+            {
+                return transformedFallback;
+            }
+
+            try
+            {
+                Extents3d extents = entity.GeometricExtents;
+
+                Point3d minPoint = extents.MinPoint.TransformBy(transform);
+                Point3d maxPoint = extents.MaxPoint.TransformBy(transform);
+
+                double x = (minPoint.X + maxPoint.X) / 2.0;
+                double y = (minPoint.Y + maxPoint.Y) / 2.0;
+                double z = (minPoint.Z + maxPoint.Z) / 2.0;
+
+                if (!Double.IsNaN(x) && !Double.IsNaN(y) && !Double.IsInfinity(x) && !Double.IsInfinity(y))
+                {
+                    return new Point3d(x, y, z);
+                }
+            }
+            catch
+            {
+            }
+
+            return transformedFallback;
         }
 
         private void AddOviaTextRow(
@@ -4025,6 +6122,23 @@ namespace OVIA.AutoCAD_2027
         public double X = 0;
         public double LeftX = 0;
         public double RightX = 0;
+        public int SourceColumnIndex = -1;
+    }
+
+    public class OviaGridAxisSegment
+    {
+        public double Coordinate = 0;
+        public double Start = 0;
+        public double End = 0;
+    }
+
+    public class OviaGridLineSegment
+    {
+        public double X1 = 0;
+        public double Y1 = 0;
+        public double X2 = 0;
+        public double Y2 = 0;
+        public string SourceType = "";
     }
 
     public class OviaHeaderMap

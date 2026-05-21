@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="OviaCommands - 복사본.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="accoremgd">
       <HintPath>C:\Program Files\Autodesk\AutoCAD 2027\accoremgd.dll</HintPath>
     </Reference>

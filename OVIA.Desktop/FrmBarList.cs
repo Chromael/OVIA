@@ -866,7 +866,7 @@ namespace OVIA.Desktop
 
             autoCadWatcher = new FileSystemWatcher();
             autoCadWatcher.Path = desktop;
-            autoCadWatcher.Filter = "OVIA_BoxTable_*.csv";
+            autoCadWatcher.Filter = "*.csv";
             autoCadWatcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime;
             autoCadWatcher.Created += AutoCadWatcher_Changed;
             autoCadWatcher.Changed += AutoCadWatcher_Changed;
@@ -3047,7 +3047,11 @@ namespace OVIA.Desktop
                 return "";
             }
 
-            string[] files = Directory.GetFiles(desktop, "OVIA_BoxTable_*.csv");
+            /*
+             * OVIABOXTABLE은 이제 스마트 통합 추출 명령입니다.
+             * 과거 테스트용 OVIAGRIDTABLE 파일명도 자동 입력 대상에 포함해 둡니다.
+             */
+            string[] files = Directory.GetFiles(desktop, "OVIA_*Table_*.csv");
 
             if (files == null || files.Length == 0)
             {
@@ -3059,6 +3063,13 @@ namespace OVIA.Desktop
 
             for (i = 0; i < files.Length; i++)
             {
+                string fileName = Path.GetFileName(files[i]);
+
+                if (!IsOviaAutoCadTableCsvFile(fileName))
+                {
+                    continue;
+                }
+
                 DateTime t = File.GetLastWriteTime(files[i]);
 
                 if (t >= startTime)
@@ -3081,6 +3092,18 @@ namespace OVIA.Desktop
             });
 
             return candidates[0];
+        }
+
+        private bool IsOviaAutoCadTableCsvFile(string fileName)
+        {
+            if (fileName == null)
+            {
+                return false;
+            }
+
+            return fileName.StartsWith("OVIA_BoxTable_", StringComparison.OrdinalIgnoreCase)
+                || fileName.StartsWith("OVIA_GridTable_", StringComparison.OrdinalIgnoreCase)
+                || fileName.StartsWith("OVIA_GridTable_Fallback_", StringComparison.OrdinalIgnoreCase);
         }
 
         private void LoadCsv(string filePath, bool loadAsSaved)
@@ -4153,8 +4176,8 @@ namespace OVIA.Desktop
 
             store.AddColumn("no", "번호", "number_or_text", 100, "NO", "NO.", "No", "No.", "순번", "번호", "번", "숫자");
             store.AddColumn("part", "부위", "text", 100, "부위", "위치", "층", "구간", "시공부위", "ZONE", "AREA", "LOCATION");
-            store.AddColumn("mark", "부호/명칭", "text", 100, "부호", "명칭", "부호명", "부호 및 명칭", "BAR MARK", "MARK", "기호", "철근명", "ITEM");
-            store.AddColumn("shape", "철근형상", "text_or_image", 100, "형상", "철근형상", "SHAPE", "BENT", "BAR SHAPE", "절곡형상", "형상번호", "형번", "SHAPE NO");
+            store.AddColumn("mark", "부호/명칭", "text", 100, "부호", "명칭", "부호명", "부호 및 명칭", "형번", "형상번호", "형상코드", "BAR MARK", "MARK", "SHAPE NO", "SHAPE CODE", "기호", "철근명", "ITEM");
+            store.AddColumn("shape", "철근형상", "text_or_image", 100, "형상", "철근형상", "SHAPE", "BENT", "BAR SHAPE", "절곡형상");
             store.AddColumn("dia", "규격", "rebar_diameter", 100, "규격", "DIA", "D", "직경", "철근규격", "BAR DIA", "SIZE", "강종");
             store.AddColumn("length_mm", "길이(mm)", "number", 100, "길이", "L", "LENGTH", "절단길이", "산출길이", "MM", "길이MM", "길이(MM)");
             store.AddColumn("qty_ea", "수량(EA)", "number", 100, "수량", "EA", "QTY", "QUANTITY", "개수", "갯수", "본수", "수량EA", "수량(EA)");
