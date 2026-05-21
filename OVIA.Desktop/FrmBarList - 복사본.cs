@@ -5,7 +5,6 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.IO;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
@@ -17,14 +16,6 @@ namespace OVIA.Desktop
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
 
-        [DllImport("user32.dll")]
-        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
-
-        private const int WM_SETREDRAW = 0x000B;
-        private const int HeaderDragNone = 0;
-        private const int HeaderDragRow = 1;
-        private const int HeaderDragColumn = 2;
-
         private readonly string companyId;
         private readonly string userId;
         private readonly string projectNo;
@@ -34,20 +25,6 @@ namespace OVIA.Desktop
 
         private DataGridView grid;
         private ContextMenuStrip gridContextMenu;
-        private ToolStripMenuItem undoMenuItem;
-        private ToolStripMenuItem redoMenuItem;
-        private List<GridUndoSnapshot> undoStates = new List<GridUndoSnapshot>();
-        private List<GridUndoSnapshot> redoStates = new List<GridUndoSnapshot>();
-        private GridUndoSnapshot cellEditBeforeSnapshot = null;
-        private bool isRestoringGridState = false;
-        private int gridRedrawLockCount = 0;
-        private bool isBulkGridSelecting = false;
-        private int selectedCellCountCache = 0;
-        private int headerDragMode = HeaderDragNone;
-        private int headerDragStartIndex = -1;
-        private int headerDragLastIndex = -1;
-        private int headerSelectionVersion = 0;
-        private const int MaxUndoCount = 30;
         private bool allowExtractEditMenu = false;
         private TextBox txtFilePath;
         private Label lblRowCount;
@@ -66,7 +43,6 @@ namespace OVIA.Desktop
         private bool isSaved = true;
         private bool isClosingByButton = false;
         private readonly string initialFilePath;
-        private string savedProjectFilePath = "";
 
         private readonly Color BrandIndigo = Color.FromArgb(37, 30, 130);
         private readonly Color BrandViolet = Color.FromArgb(91, 49, 225);
@@ -94,7 +70,6 @@ namespace OVIA.Desktop
             this.clientName = clientName == null ? "" : clientName;
             this.projectStatus = projectStatus == null ? "" : projectStatus;
             this.initialFilePath = initialFilePath == null ? "" : initialFilePath;
-            this.savedProjectFilePath = this.initialFilePath;
 
             BuildUI();
 
@@ -108,7 +83,7 @@ namespace OVIA.Desktop
         {
             this.SuspendLayout();
 
-            this.Text = "OVIA " + GetScreenTitleText();
+            this.Text = "OVIA BarList";
             this.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
@@ -133,35 +108,10 @@ namespace OVIA.Desktop
             this.ResumeLayout(false);
         }
 
-        private bool IsRegisteredBarListMode()
-        {
-            return initialFilePath.Trim() != "" && File.Exists(initialFilePath);
-        }
-
-        private string GetScreenTitleText()
-        {
-            if (IsRegisteredBarListMode())
-            {
-                return "BarList";
-            }
-
-            return "신규 BarList 등록";
-        }
-
-        private string GetScreenDescriptionText()
-        {
-            if (IsRegisteredBarListMode())
-            {
-                return "저장된 BarList를 열었습니다. 출고, 입금완료, 종료 처리 전까지 수정 후 다시 저장할 수 있습니다.";
-            }
-
-            return "공사를 선택한 뒤 AutoCAD에서 철근 집계표를 선택하면 BarList 후보가 자동 입력됩니다.";
-        }
-
         private void BuildHeader(Control parent)
         {
             Label title = new Label();
-            title.Text = GetScreenTitleText();
+            title.Text = "BarList";
             title.AutoSize = true;
             title.Font = new Font("맑은 고딕", 22F, FontStyle.Bold);
             title.ForeColor = TextDark;
@@ -170,7 +120,7 @@ namespace OVIA.Desktop
             parent.Controls.Add(title);
 
             Label desc = new Label();
-            desc.Text = GetScreenDescriptionText();
+            desc.Text = "공사를 선택한 뒤 AutoCAD에서 철근 집계표를 선택하면 BarList 후보가 자동 입력됩니다.";
             desc.AutoSize = true;
             desc.Font = new Font("맑은 고딕", 10F, FontStyle.Regular);
             desc.ForeColor = TextSub;
@@ -379,7 +329,6 @@ namespace OVIA.Desktop
         private void BuildGrid(Control parent)
         {
             grid = new DataGridView();
-            EnableGridDoubleBuffering(grid);
             grid.Location = new Point(34, 402);
             grid.Size = new Size(1168, 265);
             grid.BackgroundColor = Color.White;
@@ -389,28 +338,12 @@ namespace OVIA.Desktop
             grid.AllowUserToResizeRows = false;
             grid.AllowUserToResizeColumns = true;
             grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
-            grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
+            grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             grid.MultiSelect = true;
-            grid.RowHeadersVisible = true;
-            grid.RowHeadersWidth = 48;
-            grid.RowHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
-            grid.RowHeadersDefaultCellStyle.BackColor = Color.FromArgb(242, 245, 252);
-            grid.RowHeadersDefaultCellStyle.ForeColor = TextSub;
-            grid.RowHeadersDefaultCellStyle.Font = new Font("맑은 고딕", 8.5F, FontStyle.Regular);
-            grid.EditMode = DataGridViewEditMode.EditProgrammatically;
-            grid.CellBeginEdit += Grid_CellBeginEdit;
+            grid.RowHeadersVisible = false;
+            grid.EditMode = DataGridViewEditMode.EditOnEnter;
             grid.CellEndEdit += Grid_CellEndEdit;
             grid.CellMouseDown += Grid_CellMouseDown;
-            grid.CellDoubleClick += Grid_CellDoubleClick;
-            grid.MouseDown += Grid_MouseDown;
-            grid.MouseMove += Grid_MouseMove;
-            grid.MouseUp += Grid_MouseUp;
-            grid.CellPainting += Grid_CellPainting;
-            grid.RowPostPaint += Grid_RowPostPaint;
-            grid.RowHeaderMouseClick += Grid_RowHeaderMouseClick;
-            grid.ColumnHeaderMouseClick += Grid_ColumnHeaderMouseClick;
-            grid.SelectionChanged += Grid_SelectionChanged;
-            grid.KeyDown += Grid_KeyDown;
 
             grid.EnableHeadersVisualStyles = false;
             grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(242, 245, 252);
@@ -420,7 +353,7 @@ namespace OVIA.Desktop
 
             grid.DefaultCellStyle.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
             grid.DefaultCellStyle.ForeColor = TextDark;
-            grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(255, 248, 205);
+            grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(230, 241, 255);
             grid.DefaultCellStyle.SelectionForeColor = TextDark;
             grid.RowTemplate.Height = 28;
 
@@ -434,16 +367,6 @@ namespace OVIA.Desktop
             gridContextMenu = new ContextMenuStrip();
             gridContextMenu.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
             gridContextMenu.Opening += GridContextMenu_Opening;
-
-            undoMenuItem = new ToolStripMenuItem("되돌리기(Ctrl + Z)");
-            undoMenuItem.Click += ContextUndo_Click;
-            gridContextMenu.Items.Add(undoMenuItem);
-
-            redoMenuItem = new ToolStripMenuItem("다시 실행(Shift + Ctrl + Z)");
-            redoMenuItem.Click += ContextRedo_Click;
-            gridContextMenu.Items.Add(redoMenuItem);
-
-            gridContextMenu.Items.Add(new ToolStripSeparator());
 
             ToolStripMenuItem selectAllItem = new ToolStripMenuItem("전체선택");
             selectAllItem.Click += ContextSelectAll_Click;
@@ -789,30 +712,18 @@ namespace OVIA.Desktop
                 string dir = GetProjectBarListDirectory();
                 Directory.CreateDirectory(dir);
 
-                string filePath;
-
-                if (savedProjectFilePath.Trim() != "" && File.Exists(savedProjectFilePath))
-                {
-                    filePath = savedProjectFilePath;
-                }
-                else
-                {
-                    string fileName = "BarList_" + projectNo + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".csv";
-                    filePath = Path.Combine(dir, fileName);
-                }
+                string fileName = "BarList_" + projectNo + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".csv";
+                string filePath = Path.Combine(dir, fileName);
 
                 SaveGridToCsv(filePath);
 
                 isSaved = true;
-                allowExtractEditMenu = true;
+                allowExtractEditMenu = false;
                 UpdateSaveState();
-                ClearUndoRedoStates();
 
                 lblStatus.Text = "BarList 저장 완료\r\n공사별 BarList 목록에 반영되었습니다.";
                 lblStatus.ForeColor = TextSub;
                 txtFilePath.Text = filePath;
-                lastLoadedFilePath = filePath;
-                savedProjectFilePath = filePath;
             }
             catch (Exception ex)
             {
@@ -911,12 +822,10 @@ namespace OVIA.Desktop
 
         private void DeleteRows_Click(object sender, EventArgs e)
         {
-            List<int> selectedIndexes = GetSelectedRowIndexes(false);
-
-            if (selectedIndexes.Count == 0)
+            if (grid.SelectedRows.Count == 0)
             {
                 MessageBox.Show(
-                    "삭제할 행 또는 셀 영역을 선택해주세요.",
+                    "삭제할 행을 선택해주세요.",
                     "OVIA",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information
@@ -925,110 +834,28 @@ namespace OVIA.Desktop
                 return;
             }
 
-            GridUndoSnapshot undoState = CaptureGridState();
-            PushUndoState(undoState);
-
             int i;
 
-            for (i = 0; i < selectedIndexes.Count; i++)
+            for (i = grid.SelectedRows.Count - 1; i >= 0; i--)
             {
-                if (selectedIndexes[i] >= 0 && selectedIndexes[i] < grid.Rows.Count && !grid.Rows[selectedIndexes[i]].IsNewRow)
+                if (!grid.SelectedRows[i].IsNewRow)
                 {
-                    grid.Rows.RemoveAt(selectedIndexes[i]);
+                    grid.Rows.Remove(grid.SelectedRows[i]);
                 }
             }
 
             MarkUnsaved();
             RecalculateSummary();
-            grid.Invalidate();
-        }
-
-        private void Grid_CellBeginEdit(object sender, DataGridViewCellCancelEventArgs e)
-        {
-            if (isRestoringGridState)
-            {
-                return;
-            }
-
-            if (!CanUseExtractEditMenu())
-            {
-                e.Cancel = true;
-                return;
-            }
-
-            cellEditBeforeSnapshot = CaptureGridState();
         }
 
         private void Grid_CellEndEdit(object sender, DataGridViewCellEventArgs e)
         {
-            if (!isRestoringGridState && cellEditBeforeSnapshot != null)
-            {
-                PushUndoState(cellEditBeforeSnapshot);
-                cellEditBeforeSnapshot = null;
-            }
-
             MarkUnsaved();
             RecalculateSummary();
         }
 
-        private void Grid_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
-        {
-            if (!CanUseExtractEditMenu())
-            {
-                return;
-            }
-
-            if (e.RowIndex < 0 || e.ColumnIndex < 0)
-            {
-                return;
-            }
-
-            if (!grid.Columns[e.ColumnIndex].Visible)
-            {
-                return;
-            }
-
-            grid.CurrentCell = grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
-            grid.BeginEdit(true);
-        }
-
         private void Grid_CellMouseDown(object sender, DataGridViewCellMouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Left)
-            {
-                if (e.ColumnIndex == -1 && e.RowIndex >= 0)
-                {
-                    StartRowHeaderSelection(e.RowIndex);
-                    QueueHeaderSelectionRefresh();
-                    return;
-                }
-
-                if (e.RowIndex == -1 && e.ColumnIndex >= 0)
-                {
-                    StartColumnHeaderSelection(e.ColumnIndex);
-                    QueueHeaderSelectionRefresh();
-                    return;
-                }
-
-                if (e.RowIndex == -1 && e.ColumnIndex == -1)
-                {
-                    BeginGridSelectionUpdate();
-
-                    try
-                    {
-                        grid.SelectAll();
-                    }
-                    finally
-                    {
-                        EndGridSelectionUpdate();
-                    }
-
-                    return;
-                }
-
-                return;
-            }
-
             if (e.Button != MouseButtons.Right)
             {
                 return;
@@ -1039,565 +866,15 @@ namespace OVIA.Desktop
                 return;
             }
 
-            if (!grid.Columns[e.ColumnIndex].Visible)
+            if (!grid.Rows[e.RowIndex].Selected)
             {
-                return;
+                grid.ClearSelection();
+                grid.Rows[e.RowIndex].Selected = true;
             }
 
-            DataGridViewCell clickedCell = grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
-
-            if (!clickedCell.Selected)
+            if (grid.Columns[e.ColumnIndex].Visible)
             {
-                BeginGridSelectionUpdate();
-
-                try
-                {
-                    grid.ClearSelection();
-                    clickedCell.Selected = true;
-                }
-                finally
-                {
-                    EndGridSelectionUpdate();
-                }
-            }
-
-            grid.CurrentCell = clickedCell;
-            InvalidateSelectionVisuals();
-        }
-
-        private void Grid_MouseDown(object sender, MouseEventArgs e)
-        {
-            if (e.Button != MouseButtons.Left || grid == null)
-            {
-                return;
-            }
-
-            DataGridView.HitTestInfo hit = grid.HitTest(e.X, e.Y);
-
-            if (hit.Type == DataGridViewHitTestType.RowHeader && hit.RowIndex >= 0)
-            {
-                StartRowHeaderSelection(hit.RowIndex);
-                QueueHeaderSelectionRefresh();
-                return;
-            }
-
-            if (hit.Type == DataGridViewHitTestType.ColumnHeader && hit.ColumnIndex >= 0)
-            {
-                StartColumnHeaderSelection(hit.ColumnIndex);
-                QueueHeaderSelectionRefresh();
-                return;
-            }
-
-            if (hit.Type == DataGridViewHitTestType.TopLeftHeader)
-            {
-                headerDragMode = HeaderDragNone;
-                BeginGridSelectionUpdate();
-
-                try
-                {
-                    grid.SelectAll();
-                }
-                finally
-                {
-                    EndGridSelectionUpdate();
-                }
-
-                return;
-            }
-
-            headerDragMode = HeaderDragNone;
-            headerDragStartIndex = -1;
-            headerDragLastIndex = -1;
-        }
-
-        private void Grid_MouseMove(object sender, MouseEventArgs e)
-        {
-            if (grid == null || e.Button != MouseButtons.Left)
-            {
-                return;
-            }
-
-            if (headerDragMode == HeaderDragNone || headerDragStartIndex < 0)
-            {
-                return;
-            }
-
-            DataGridView.HitTestInfo hit = grid.HitTest(e.X, e.Y);
-
-            if (headerDragMode == HeaderDragRow && hit.RowIndex >= 0 && hit.RowIndex < grid.Rows.Count)
-            {
-                if (hit.RowIndex != headerDragLastIndex)
-                {
-                    headerDragLastIndex = hit.RowIndex;
-                    headerSelectionVersion++;
-                    SelectRowRange(headerDragStartIndex, hit.RowIndex, false);
-                }
-
-                return;
-            }
-
-            if (headerDragMode == HeaderDragColumn && hit.ColumnIndex >= 0 && hit.ColumnIndex < grid.Columns.Count)
-            {
-                if (hit.ColumnIndex != headerDragLastIndex)
-                {
-                    headerDragLastIndex = hit.ColumnIndex;
-                    headerSelectionVersion++;
-                    SelectColumnRange(headerDragStartIndex, hit.ColumnIndex, false);
-                }
-            }
-        }
-
-        private void Grid_MouseUp(object sender, MouseEventArgs e)
-        {
-            headerDragMode = HeaderDragNone;
-            headerDragStartIndex = -1;
-            headerDragLastIndex = -1;
-            InvalidateSelectionVisuals();
-        }
-
-        private void StartRowHeaderSelection(int rowIndex)
-        {
-            if (grid == null || rowIndex < 0 || rowIndex >= grid.Rows.Count || grid.Rows[rowIndex].IsNewRow)
-            {
-                return;
-            }
-
-            headerSelectionVersion++;
-            headerDragMode = HeaderDragRow;
-            headerDragStartIndex = rowIndex;
-            headerDragLastIndex = rowIndex;
-            SelectRowRange(rowIndex, rowIndex, false);
-        }
-
-        private void StartColumnHeaderSelection(int columnIndex)
-        {
-            if (grid == null || columnIndex < 0 || columnIndex >= grid.Columns.Count || !grid.Columns[columnIndex].Visible)
-            {
-                return;
-            }
-
-            headerSelectionVersion++;
-            headerDragMode = HeaderDragColumn;
-            headerDragStartIndex = columnIndex;
-            headerDragLastIndex = columnIndex;
-            SelectColumnRange(columnIndex, columnIndex, false);
-        }
-
-        private void QueueHeaderSelectionRefresh()
-        {
-            int capturedMode = headerDragMode;
-            int capturedStartIndex = headerDragStartIndex;
-            int capturedLastIndex = headerDragLastIndex;
-            int capturedVersion = headerSelectionVersion;
-
-            try
-            {
-                grid.BeginInvoke(new MethodInvoker(delegate
-                {
-                    if (grid == null || grid.IsDisposed)
-                    {
-                        return;
-                    }
-
-                    if (capturedVersion != headerSelectionVersion)
-                    {
-                        return;
-                    }
-
-                    if (capturedMode == HeaderDragRow && capturedStartIndex >= 0)
-                    {
-                        SelectRowRange(capturedStartIndex, capturedLastIndex < 0 ? capturedStartIndex : capturedLastIndex, false);
-                    }
-                    else if (capturedMode == HeaderDragColumn && capturedStartIndex >= 0)
-                    {
-                        SelectColumnRange(capturedStartIndex, capturedLastIndex < 0 ? capturedStartIndex : capturedLastIndex, false);
-                    }
-                }));
-            }
-            catch
-            {
-            }
-        }
-
-        private void Grid_RowHeaderMouseClick(object sender, DataGridViewCellMouseEventArgs e)
-        {
-            if (e.Button != MouseButtons.Left)
-            {
-                return;
-            }
-
-            StartRowHeaderSelection(e.RowIndex);
-            headerDragMode = HeaderDragNone;
-            headerDragStartIndex = -1;
-            headerDragLastIndex = -1;
-        }
-
-        private void Grid_ColumnHeaderMouseClick(object sender, DataGridViewCellMouseEventArgs e)
-        {
-            if (e.Button != MouseButtons.Left)
-            {
-                return;
-            }
-
-            StartColumnHeaderSelection(e.ColumnIndex);
-            headerDragMode = HeaderDragNone;
-            headerDragStartIndex = -1;
-            headerDragLastIndex = -1;
-        }
-
-        private void Grid_KeyDown(object sender, KeyEventArgs e)
-        {
-            if (e.Control && !e.Shift && e.KeyCode == Keys.Z)
-            {
-                UndoGridAction();
-                e.Handled = true;
-                e.SuppressKeyPress = true;
-                return;
-            }
-
-            if (e.Control && e.Shift && e.KeyCode == Keys.Z)
-            {
-                RedoGridAction();
-                e.Handled = true;
-                e.SuppressKeyPress = true;
-                return;
-            }
-        }
-
-        private void Grid_SelectionChanged(object sender, EventArgs e)
-        {
-            if (grid == null || isBulkGridSelecting)
-            {
-                return;
-            }
-
-            RefreshSelectionVisualCache();
-            InvalidateSelectionVisuals();
-        }
-
-        private void Grid_RowPostPaint(object sender, DataGridViewRowPostPaintEventArgs e)
-        {
-            if (e.RowIndex < 0)
-            {
-                return;
-            }
-
-            string rowNumber = (e.RowIndex + 1).ToString();
-            Rectangle headerBounds = new Rectangle(e.RowBounds.Left, e.RowBounds.Top, grid.RowHeadersWidth, e.RowBounds.Height);
-            bool rowSelected = IsRowFullySelected(e.RowIndex);
-            Color headerBack = rowSelected ? Color.FromArgb(255, 235, 112) : Color.FromArgb(242, 245, 252);
-            Color headerFore = rowSelected ? TextDark : TextSub;
-
-            using (SolidBrush brush = new SolidBrush(headerBack))
-            {
-                e.Graphics.FillRectangle(brush, headerBounds);
-            }
-
-            using (Pen pen = new Pen(rowSelected ? Color.FromArgb(188, 136, 0) : Color.FromArgb(220, 225, 235), rowSelected ? 2F : 1F))
-            {
-                e.Graphics.DrawRectangle(pen, headerBounds.Left, headerBounds.Top, headerBounds.Width - 1, headerBounds.Height - 1);
-            }
-
-            TextRenderer.DrawText(
-                e.Graphics,
-                rowNumber,
-                grid.RowHeadersDefaultCellStyle.Font,
-                headerBounds,
-                headerFore,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding
-            );
-        }
-
-        private void Grid_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
-        {
-            if (grid == null)
-            {
-                return;
-            }
-
-            if (e.RowIndex == -1 && e.ColumnIndex >= 0)
-            {
-                PaintColumnHeaderIfSelected(e);
-                return;
-            }
-
-            if (e.RowIndex < 0 || e.ColumnIndex < 0)
-            {
-                return;
-            }
-
-            if (e.RowIndex >= grid.Rows.Count || e.ColumnIndex >= grid.Columns.Count)
-            {
-                return;
-            }
-
-            DataGridViewCell cell = grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
-
-            if (!cell.Selected)
-            {
-                return;
-            }
-
-            bool singleCellSelected = selectedCellCountCache <= 1;
-            Color backColor = singleCellSelected ? Color.FromArgb(255, 219, 58) : Color.FromArgb(255, 248, 205);
-            Color borderColor = singleCellSelected ? Color.FromArgb(170, 122, 0) : Color.FromArgb(226, 189, 67);
-
-            e.Handled = true;
-
-            using (SolidBrush brush = new SolidBrush(backColor))
-            {
-                e.Graphics.FillRectangle(brush, e.CellBounds);
-            }
-
-            e.PaintContent(e.CellBounds);
-
-            Rectangle rect = new Rectangle(e.CellBounds.Left, e.CellBounds.Top, e.CellBounds.Width - 1, e.CellBounds.Height - 1);
-
-            if (singleCellSelected)
-            {
-                using (Pen pen = new Pen(borderColor, 3F))
-                {
-                    e.Graphics.DrawRectangle(pen, rect);
-                }
-            }
-            else
-            {
-                using (Pen innerPen = new Pen(Color.FromArgb(242, 214, 126), 1F))
-                {
-                    e.Graphics.DrawRectangle(innerPen, rect);
-                }
-
-                using (Pen outerPen = new Pen(borderColor, 2F))
-                {
-                    if (!IsGridCellSelected(e.RowIndex - 1, e.ColumnIndex))
-                    {
-                        e.Graphics.DrawLine(outerPen, rect.Left, rect.Top, rect.Right, rect.Top);
-                    }
-
-                    if (!IsGridCellSelected(e.RowIndex + 1, e.ColumnIndex))
-                    {
-                        e.Graphics.DrawLine(outerPen, rect.Left, rect.Bottom, rect.Right, rect.Bottom);
-                    }
-
-                    if (!IsGridCellSelected(e.RowIndex, e.ColumnIndex - 1))
-                    {
-                        e.Graphics.DrawLine(outerPen, rect.Left, rect.Top, rect.Left, rect.Bottom);
-                    }
-
-                    if (!IsGridCellSelected(e.RowIndex, e.ColumnIndex + 1))
-                    {
-                        e.Graphics.DrawLine(outerPen, rect.Right, rect.Top, rect.Right, rect.Bottom);
-                    }
-                }
-            }
-        }
-
-        private void PaintColumnHeaderIfSelected(DataGridViewCellPaintingEventArgs e)
-        {
-            if (e.ColumnIndex < 0 || e.ColumnIndex >= grid.Columns.Count)
-            {
-                return;
-            }
-
-            if (!grid.Columns[e.ColumnIndex].Visible)
-            {
-                return;
-            }
-
-            if (!IsColumnFullySelected(e.ColumnIndex))
-            {
-                return;
-            }
-
-            e.Handled = true;
-
-            using (SolidBrush brush = new SolidBrush(Color.FromArgb(255, 235, 112)))
-            {
-                e.Graphics.FillRectangle(brush, e.CellBounds);
-            }
-
-            using (Pen pen = new Pen(Color.FromArgb(188, 136, 0), 2F))
-            {
-                e.Graphics.DrawRectangle(pen, e.CellBounds.Left, e.CellBounds.Top, e.CellBounds.Width - 1, e.CellBounds.Height - 1);
-            }
-
-            TextRenderer.DrawText(
-                e.Graphics,
-                grid.Columns[e.ColumnIndex].HeaderText,
-                grid.ColumnHeadersDefaultCellStyle.Font,
-                e.CellBounds,
-                TextDark,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis
-            );
-        }
-
-        private bool IsGridCellSelected(int rowIndex, int columnIndex)
-        {
-            if (grid == null)
-            {
-                return false;
-            }
-
-            if (rowIndex < 0 || columnIndex < 0 || rowIndex >= grid.Rows.Count || columnIndex >= grid.Columns.Count)
-            {
-                return false;
-            }
-
-            if (!grid.Columns[columnIndex].Visible)
-            {
-                return false;
-            }
-
-            return grid.Rows[rowIndex].Cells[columnIndex].Selected;
-        }
-
-        private bool IsRowFullySelected(int rowIndex)
-        {
-            if (grid == null || rowIndex < 0 || rowIndex >= grid.Rows.Count || grid.Rows[rowIndex].IsNewRow)
-            {
-                return false;
-            }
-
-            int visibleCount = 0;
-            int i;
-
-            for (i = 0; i < grid.Columns.Count; i++)
-            {
-                if (grid.Columns[i].Visible)
-                {
-                    visibleCount++;
-
-                    if (!grid.Rows[rowIndex].Cells[i].Selected)
-                    {
-                        return false;
-                    }
-                }
-            }
-
-            return visibleCount > 0;
-        }
-
-        private bool IsColumnFullySelected(int columnIndex)
-        {
-            if (grid == null || columnIndex < 0 || columnIndex >= grid.Columns.Count || !grid.Columns[columnIndex].Visible)
-            {
-                return false;
-            }
-
-            int visibleRowCount = 0;
-            int r;
-
-            for (r = 0; r < grid.Rows.Count; r++)
-            {
-                if (!grid.Rows[r].IsNewRow)
-                {
-                    visibleRowCount++;
-
-                    if (!grid.Rows[r].Cells[columnIndex].Selected)
-                    {
-                        return false;
-                    }
-                }
-            }
-
-            return visibleRowCount > 0;
-        }
-
-        private void RefreshSelectionVisualCache()
-        {
-            if (grid == null)
-            {
-                selectedCellCountCache = 0;
-                return;
-            }
-
-            try
-            {
-                selectedCellCountCache = grid.SelectedCells.Count;
-            }
-            catch
-            {
-                selectedCellCountCache = 0;
-            }
-        }
-
-        private void InvalidateSelectionVisuals()
-        {
-            if (grid == null || grid.IsDisposed)
-            {
-                return;
-            }
-
-            try
-            {
-                grid.Invalidate(new Rectangle(0, 0, grid.Width, grid.ColumnHeadersHeight + 2));
-                grid.Invalidate(new Rectangle(0, 0, grid.RowHeadersWidth + 2, grid.Height));
-            }
-            catch
-            {
-            }
-        }
-
-        private void EnableGridDoubleBuffering(DataGridView targetGrid)
-        {
-            if (targetGrid == null)
-            {
-                return;
-            }
-
-            try
-            {
-                PropertyInfo propertyInfo = typeof(DataGridView).GetProperty("DoubleBuffered", BindingFlags.Instance | BindingFlags.NonPublic);
-
-                if (propertyInfo != null)
-                {
-                    propertyInfo.SetValue(targetGrid, true, null);
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        private void BeginGridSelectionUpdate()
-        {
-            if (grid == null || grid.IsDisposed)
-            {
-                return;
-            }
-
-            gridRedrawLockCount++;
-            isBulkGridSelecting = true;
-
-            if (gridRedrawLockCount == 1 && grid.IsHandleCreated)
-            {
-                SendMessage(grid.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
-            }
-        }
-
-        private void EndGridSelectionUpdate()
-        {
-            if (grid == null || grid.IsDisposed)
-            {
-                return;
-            }
-
-            if (gridRedrawLockCount > 0)
-            {
-                gridRedrawLockCount--;
-            }
-
-            if (gridRedrawLockCount == 0)
-            {
-                isBulkGridSelecting = false;
-                RefreshSelectionVisualCache();
-
-                if (grid.IsHandleCreated)
-                {
-                    SendMessage(grid.Handle, WM_SETREDRAW, new IntPtr(1), IntPtr.Zero);
-                }
-
-                grid.Invalidate();
+                grid.CurrentCell = grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
             }
         }
 
@@ -1606,13 +883,12 @@ namespace OVIA.Desktop
             if (!CanUseExtractEditMenu())
             {
                 e.Cancel = true;
-                lblStatus.Text = "BarList 데이터가 있을 때만 우클릭 편집 메뉴를 사용할 수 있습니다.";
+                lblStatus.Text = "우클릭 편집 메뉴는 CAD에서 막 추출한 BarList 후보 데이터에서만 사용할 수 있습니다.";
                 lblStatus.ForeColor = TextSub;
                 return;
             }
 
-            EnsureAtLeastOneCellSelected();
-            RefreshUndoRedoMenuState();
+            EnsureAtLeastOneRowSelected();
         }
 
         private bool CanUseExtractEditMenu()
@@ -1630,9 +906,9 @@ namespace OVIA.Desktop
             return true;
         }
 
-        private void EnsureAtLeastOneCellSelected()
+        private void EnsureAtLeastOneRowSelected()
         {
-            if (grid.SelectedCells.Count > 0)
+            if (grid.SelectedRows.Count > 0)
             {
                 return;
             }
@@ -1643,11 +919,10 @@ namespace OVIA.Desktop
             }
 
             int rowIndex = grid.CurrentCell.RowIndex;
-            int columnIndex = grid.CurrentCell.ColumnIndex;
 
-            if (rowIndex >= 0 && rowIndex < grid.Rows.Count && columnIndex >= 0 && columnIndex < grid.Columns.Count && !grid.Rows[rowIndex].IsNewRow)
+            if (rowIndex >= 0 && rowIndex < grid.Rows.Count && !grid.Rows[rowIndex].IsNewRow)
             {
-                grid.Rows[rowIndex].Cells[columnIndex].Selected = true;
+                grid.Rows[rowIndex].Selected = true;
             }
         }
 
@@ -1658,15 +933,15 @@ namespace OVIA.Desktop
                 return;
             }
 
-            BeginGridSelectionUpdate();
+            int i;
+            grid.ClearSelection();
 
-            try
+            for (i = 0; i < grid.Rows.Count; i++)
             {
-                grid.SelectAll();
-            }
-            finally
-            {
-                EndGridSelectionUpdate();
+                if (!grid.Rows[i].IsNewRow)
+                {
+                    grid.Rows[i].Selected = true;
+                }
             }
         }
 
@@ -1683,8 +958,6 @@ namespace OVIA.Desktop
             {
                 return;
             }
-
-            PushUndoState(CaptureGridState());
 
             List<object[]> rowValues = new List<object[]>();
             int i;
@@ -1704,7 +977,7 @@ namespace OVIA.Desktop
             for (i = 0; i < rowValues.Count; i++)
             {
                 int newIndex = grid.Rows.Add(rowValues[i]);
-                SelectRowCells(newIndex, true);
+                grid.Rows[newIndex].Selected = true;
             }
 
             MarkUnsaved();
@@ -1725,8 +998,6 @@ namespace OVIA.Desktop
                 return;
             }
 
-            PushUndoState(CaptureGridState());
-
             grid.ClearSelection();
 
             int i;
@@ -1734,7 +1005,7 @@ namespace OVIA.Desktop
             for (i = 0; i < selectedIndexes.Count; i++)
             {
                 int newIndex = grid.Rows.Add(CloneRowValues(grid.Rows[selectedIndexes[i]]));
-                SelectRowCells(newIndex, true);
+                grid.Rows[newIndex].Selected = true;
             }
 
             MarkUnsaved();
@@ -1770,8 +1041,6 @@ namespace OVIA.Desktop
                 insertIndex = grid.Rows.Count;
             }
 
-            PushUndoState(CaptureGridState());
-
             object[] emptyValues = new object[grid.Columns.Count];
             int i;
 
@@ -1782,7 +1051,7 @@ namespace OVIA.Desktop
 
             grid.Rows.Insert(insertIndex, emptyValues);
             grid.ClearSelection();
-            SelectRowCells(insertIndex, true);
+            grid.Rows[insertIndex].Selected = true;
 
             int firstVisibleColumn = GetFirstVisibleColumnIndex();
 
@@ -1827,14 +1096,12 @@ namespace OVIA.Desktop
                 return;
             }
 
-            EnsureAtLeastOneCellSelected();
+            EnsureAtLeastOneRowSelected();
 
-            List<int> selectedIndexes = GetSelectedRowIndexes(true);
-
-            if (selectedIndexes.Count == 0)
+            if (grid.SelectedRows.Count == 0)
             {
                 MessageBox.Show(
-                    "변경할 행 또는 셀 영역을 먼저 선택해주세요.",
+                    "변경할 행을 먼저 선택해주세요.",
                     "OVIA",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information
@@ -1860,13 +1127,12 @@ namespace OVIA.Desktop
             string beforeText = GetFirstSelectedValue(columnIndex);
             string newValue;
 
-            if (!OviaTextReplaceDialog.ShowDialog(this, displayName + " 일괄 변경", "선택된 " + selectedIndexes.Count.ToString() + "개 행의 [" + grid.Columns[columnIndex].HeaderText + "] 값을 변경합니다.", beforeText, out newValue))
+            if (!OviaTextReplaceDialog.ShowDialog(this, displayName + " 일괄 변경", "선택된 " + grid.SelectedRows.Count.ToString() + "개 행의 [" + grid.Columns[columnIndex].HeaderText + "] 값을 변경합니다.", beforeText, out newValue))
             {
                 return;
             }
 
-            PushUndoState(CaptureGridState());
-
+            List<int> selectedIndexes = GetSelectedRowIndexes(true);
             int i;
 
             for (i = 0; i < selectedIndexes.Count; i++)
@@ -1885,17 +1151,10 @@ namespace OVIA.Desktop
 
             for (i = 0; i < grid.SelectedRows.Count; i++)
             {
-                AddRowIndexIfMissing(indexes, grid.SelectedRows[i].Index);
-            }
-
-            for (i = 0; i < grid.SelectedCells.Count; i++)
-            {
-                AddRowIndexIfMissing(indexes, grid.SelectedCells[i].RowIndex);
-            }
-
-            if (indexes.Count == 0 && grid.CurrentCell != null)
-            {
-                AddRowIndexIfMissing(indexes, grid.CurrentCell.RowIndex);
+                if (!grid.SelectedRows[i].IsNewRow)
+                {
+                    indexes.Add(grid.SelectedRows[i].Index);
+                }
             }
 
             indexes.Sort();
@@ -1906,217 +1165,6 @@ namespace OVIA.Desktop
             }
 
             return indexes;
-        }
-
-        private void AddRowIndexIfMissing(List<int> indexes, int rowIndex)
-        {
-            if (rowIndex < 0 || rowIndex >= grid.Rows.Count)
-            {
-                return;
-            }
-
-            if (grid.Rows[rowIndex].IsNewRow)
-            {
-                return;
-            }
-
-            if (!indexes.Contains(rowIndex))
-            {
-                indexes.Add(rowIndex);
-            }
-        }
-
-        private void SelectRowCells(int rowIndex, bool append)
-        {
-            BeginGridSelectionUpdate();
-
-            try
-            {
-                if (!append)
-                {
-                    grid.ClearSelection();
-                }
-
-                SelectRowCellsInternal(rowIndex);
-                SetCurrentCellToRow(rowIndex);
-            }
-            finally
-            {
-                EndGridSelectionUpdate();
-            }
-        }
-
-        private void SelectColumnCells(int columnIndex, bool append)
-        {
-            BeginGridSelectionUpdate();
-
-            try
-            {
-                if (!append)
-                {
-                    grid.ClearSelection();
-                }
-
-                SelectColumnCellsInternal(columnIndex);
-                SetCurrentCellToColumn(columnIndex);
-            }
-            finally
-            {
-                EndGridSelectionUpdate();
-            }
-        }
-
-        private void SelectRowRange(int startRowIndex, int endRowIndex, bool append)
-        {
-            if (grid == null)
-            {
-                return;
-            }
-
-            int from = Math.Min(startRowIndex, endRowIndex);
-            int to = Math.Max(startRowIndex, endRowIndex);
-
-            if (from < 0)
-            {
-                from = 0;
-            }
-
-            if (to >= grid.Rows.Count)
-            {
-                to = grid.Rows.Count - 1;
-            }
-
-            BeginGridSelectionUpdate();
-
-            try
-            {
-                if (!append)
-                {
-                    grid.ClearSelection();
-                }
-
-                int r;
-
-                for (r = from; r <= to; r++)
-                {
-                    SelectRowCellsInternal(r);
-                }
-
-                SetCurrentCellToRow(startRowIndex);
-            }
-            finally
-            {
-                EndGridSelectionUpdate();
-            }
-        }
-
-        private void SelectColumnRange(int startColumnIndex, int endColumnIndex, bool append)
-        {
-            if (grid == null)
-            {
-                return;
-            }
-
-            int from = Math.Min(startColumnIndex, endColumnIndex);
-            int to = Math.Max(startColumnIndex, endColumnIndex);
-
-            if (from < 0)
-            {
-                from = 0;
-            }
-
-            if (to >= grid.Columns.Count)
-            {
-                to = grid.Columns.Count - 1;
-            }
-
-            BeginGridSelectionUpdate();
-
-            try
-            {
-                if (!append)
-                {
-                    grid.ClearSelection();
-                }
-
-                int c;
-
-                for (c = from; c <= to; c++)
-                {
-                    SelectColumnCellsInternal(c);
-                }
-
-                SetCurrentCellToColumn(startColumnIndex);
-            }
-            finally
-            {
-                EndGridSelectionUpdate();
-            }
-        }
-
-        private void SelectRowCellsInternal(int rowIndex)
-        {
-            if (grid == null || rowIndex < 0 || rowIndex >= grid.Rows.Count || grid.Rows[rowIndex].IsNewRow)
-            {
-                return;
-            }
-
-            int i;
-
-            for (i = 0; i < grid.Columns.Count; i++)
-            {
-                if (grid.Columns[i].Visible)
-                {
-                    grid.Rows[rowIndex].Cells[i].Selected = true;
-                }
-            }
-        }
-
-        private void SelectColumnCellsInternal(int columnIndex)
-        {
-            if (grid == null || columnIndex < 0 || columnIndex >= grid.Columns.Count || !grid.Columns[columnIndex].Visible)
-            {
-                return;
-            }
-
-            int r;
-
-            for (r = 0; r < grid.Rows.Count; r++)
-            {
-                if (!grid.Rows[r].IsNewRow)
-                {
-                    grid.Rows[r].Cells[columnIndex].Selected = true;
-                }
-            }
-        }
-
-        private void SetCurrentCellToRow(int rowIndex)
-        {
-            int firstVisibleColumn = GetFirstVisibleColumnIndex();
-
-            if (firstVisibleColumn >= 0 && rowIndex >= 0 && rowIndex < grid.Rows.Count && !grid.Rows[rowIndex].IsNewRow)
-            {
-                grid.CurrentCell = grid.Rows[rowIndex].Cells[firstVisibleColumn];
-            }
-        }
-
-        private void SetCurrentCellToColumn(int columnIndex)
-        {
-            if (columnIndex < 0 || columnIndex >= grid.Columns.Count || !grid.Columns[columnIndex].Visible)
-            {
-                return;
-            }
-
-            int r;
-
-            for (r = 0; r < grid.Rows.Count; r++)
-            {
-                if (!grid.Rows[r].IsNewRow)
-                {
-                    grid.CurrentCell = grid.Rows[r].Cells[columnIndex];
-                    return;
-                }
-            }
         }
 
         private object[] CloneRowValues(DataGridViewRow row)
@@ -2190,187 +1238,6 @@ namespace OVIA.Desktop
             }
 
             return value.ToString();
-        }
-
-        private void ContextUndo_Click(object sender, EventArgs e)
-        {
-            UndoGridAction();
-        }
-
-        private void ContextRedo_Click(object sender, EventArgs e)
-        {
-            RedoGridAction();
-        }
-
-        private void RefreshUndoRedoMenuState()
-        {
-            if (undoMenuItem != null)
-            {
-                undoMenuItem.Enabled = undoStates.Count > 0;
-            }
-
-            if (redoMenuItem != null)
-            {
-                redoMenuItem.Enabled = redoStates.Count > 0;
-            }
-        }
-
-        private void ClearUndoRedoStates()
-        {
-            undoStates.Clear();
-            redoStates.Clear();
-            cellEditBeforeSnapshot = null;
-            RefreshUndoRedoMenuState();
-        }
-
-        private GridUndoSnapshot CaptureGridState()
-        {
-            GridUndoSnapshot state = new GridUndoSnapshot();
-
-            if (grid == null)
-            {
-                return state;
-            }
-
-            if (grid.CurrentCell != null)
-            {
-                state.CurrentRowIndex = grid.CurrentCell.RowIndex;
-                state.CurrentColumnIndex = grid.CurrentCell.ColumnIndex;
-            }
-
-            int r;
-            int c;
-
-            for (r = 0; r < grid.Rows.Count; r++)
-            {
-                if (grid.Rows[r].IsNewRow)
-                {
-                    continue;
-                }
-
-                object[] values = new object[grid.Columns.Count];
-
-                for (c = 0; c < grid.Columns.Count; c++)
-                {
-                    values[c] = grid.Rows[r].Cells[c].Value == null ? "" : grid.Rows[r].Cells[c].Value.ToString();
-                }
-
-                state.Rows.Add(values);
-            }
-
-            return state;
-        }
-
-        private void PushUndoState(GridUndoSnapshot state)
-        {
-            if (state == null || isRestoringGridState)
-            {
-                return;
-            }
-
-            undoStates.Add(state);
-
-            while (undoStates.Count > MaxUndoCount)
-            {
-                undoStates.RemoveAt(0);
-            }
-
-            redoStates.Clear();
-            RefreshUndoRedoMenuState();
-        }
-
-        private void UndoGridAction()
-        {
-            if (!CanUseExtractEditMenu() || undoStates.Count == 0)
-            {
-                return;
-            }
-
-            GridUndoSnapshot currentState = CaptureGridState();
-            GridUndoSnapshot previousState = undoStates[undoStates.Count - 1];
-            undoStates.RemoveAt(undoStates.Count - 1);
-            redoStates.Add(currentState);
-
-            RestoreGridState(previousState);
-            MarkUnsaved();
-            RecalculateSummary();
-            RefreshUndoRedoMenuState();
-
-            lblStatus.Text = "이전 작업으로 되돌렸습니다.";
-            lblStatus.ForeColor = TextSub;
-        }
-
-        private void RedoGridAction()
-        {
-            if (!CanUseExtractEditMenu() || redoStates.Count == 0)
-            {
-                return;
-            }
-
-            GridUndoSnapshot currentState = CaptureGridState();
-            GridUndoSnapshot nextState = redoStates[redoStates.Count - 1];
-            redoStates.RemoveAt(redoStates.Count - 1);
-            undoStates.Add(currentState);
-
-            RestoreGridState(nextState);
-            MarkUnsaved();
-            RecalculateSummary();
-            RefreshUndoRedoMenuState();
-
-            lblStatus.Text = "되돌린 작업을 다시 실행했습니다.";
-            lblStatus.ForeColor = TextSub;
-        }
-
-        private void RestoreGridState(GridUndoSnapshot state)
-        {
-            if (grid == null || state == null)
-            {
-                return;
-            }
-
-            isRestoringGridState = true;
-
-            try
-            {
-                grid.Rows.Clear();
-
-                int i;
-
-                for (i = 0; i < state.Rows.Count; i++)
-                {
-                    grid.Rows.Add(state.Rows[i]);
-                }
-
-                grid.ClearSelection();
-
-                if (grid.Rows.Count > 0 && grid.Columns.Count > 0)
-                {
-                    int rowIndex = state.CurrentRowIndex;
-                    int columnIndex = state.CurrentColumnIndex;
-
-                    if (rowIndex < 0 || rowIndex >= grid.Rows.Count)
-                    {
-                        rowIndex = 0;
-                    }
-
-                    if (columnIndex < 0 || columnIndex >= grid.Columns.Count || !grid.Columns[columnIndex].Visible)
-                    {
-                        columnIndex = GetFirstVisibleColumnIndex();
-                    }
-
-                    if (columnIndex >= 0)
-                    {
-                        grid.Rows[rowIndex].Cells[columnIndex].Selected = true;
-                        grid.CurrentCell = grid.Rows[rowIndex].Cells[columnIndex];
-                    }
-                }
-            }
-            finally
-            {
-                isRestoringGridState = false;
-            }
-
-            grid.Invalidate();
         }
 
         private void OutputPlaceholder_Click(object sender, EventArgs e)
@@ -2488,8 +1355,7 @@ namespace OVIA.Desktop
                 }
 
                 BindCsvRows(rows);
-                allowExtractEditMenu = true;
-                ClearUndoRedoStates();
+                allowExtractEditMenu = !loadAsSaved;
                 txtFilePath.Text = filePath;
                 lastLoadedFilePath = filePath;
 
@@ -2499,7 +1365,7 @@ namespace OVIA.Desktop
                 {
                     isSaved = true;
                     UpdateSaveState();
-                    lblStatus.Text = "저장된 BarList 열기\r\n수정 후 [검토 후 저장]을 누르면 기존 BarList에 반영됩니다.";
+                    lblStatus.Text = "저장된 BarList 상세 열기\r\n" + Path.GetFileName(filePath);
                     lblStatus.ForeColor = TextSub;
                 }
                 else
@@ -2518,13 +1384,8 @@ namespace OVIA.Desktop
 
         private void BindCsvRows(List<List<string>> rows)
         {
-            BeginGridSelectionUpdate();
-            grid.SuspendLayout();
-
-            try
-            {
-                grid.Columns.Clear();
-                grid.Rows.Clear();
+            grid.Columns.Clear();
+            grid.Rows.Clear();
 
             List<string> headers = rows[0];
             int i;
@@ -2568,13 +1429,7 @@ namespace OVIA.Desktop
                 grid.Rows.Add(cells);
             }
 
-                ApplyGridColumnStyle();
-            }
-            finally
-            {
-                grid.ResumeLayout();
-                EndGridSelectionUpdate();
-            }
+            ApplyGridColumnStyle();
         }
 
         private void ApplyGridColumnStyle()
@@ -2925,13 +1780,6 @@ namespace OVIA.Desktop
 
             return false;
         }
-    }
-
-    public class GridUndoSnapshot
-    {
-        public List<object[]> Rows = new List<object[]>();
-        public int CurrentRowIndex = 0;
-        public int CurrentColumnIndex = 0;
     }
 
     public class OviaTextReplaceDialog : Form

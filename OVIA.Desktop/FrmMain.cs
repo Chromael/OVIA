@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -11,6 +12,15 @@ namespace OVIA.Desktop
 {
     public class FrmMain : Form
     {
+        private const int WM_NCLBUTTONDOWN = 0xA1;
+        private const int HTCAPTION = 0x2;
+
+        [DllImport("user32.dll")]
+        private static extern bool ReleaseCapture();
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
         private readonly string companyId;
         private readonly string userId;
 
@@ -20,6 +30,8 @@ namespace OVIA.Desktop
         private Label lblAutoCadRunNote;
         private OviaStatusLamp autoCadStatusLamp;
         private Timer autoCadStatusTimer;
+        private FrmProjectManager projectManagerForm;
+        private FrmBarList barListForm;
 
         private readonly Color BrandIndigo = Color.FromArgb(37, 30, 130);
         private readonly Color BrandViolet = Color.FromArgb(91, 49, 225);
@@ -55,6 +67,7 @@ namespace OVIA.Desktop
             bg.StartColor = Color.FromArgb(249, 251, 255);
             bg.EndColor = Color.FromArgb(235, 242, 253);
             this.Controls.Add(bg);
+            EnableDashboardDrag(bg);
 
             BuildSidePanel(bg);
             BuildHeader(bg);
@@ -74,6 +87,7 @@ namespace OVIA.Desktop
             side.Size = new Size(250, 680);
             side.BackColor = Color.FromArgb(28, 24, 93);
             parent.Controls.Add(side);
+            EnableDashboardDrag(side);
 
             Label logo = new Label();
             logo.Text = "OVIA";
@@ -82,6 +96,7 @@ namespace OVIA.Desktop
             logo.ForeColor = Color.White;
             logo.Location = new Point(34, 36);
             side.Controls.Add(logo);
+            EnableDashboardDrag(logo);
 
             Label sub = new Label();
             sub.Text = "Engineering Workflow";
@@ -90,6 +105,7 @@ namespace OVIA.Desktop
             sub.ForeColor = Color.FromArgb(190, 196, 235);
             sub.Location = new Point(38, 86);
             side.Controls.Add(sub);
+            EnableDashboardDrag(sub);
 
             AddMenu(side, "대시보드", 150, true);
             OviaMenuButton projectMenu = AddMenu(side, "공사관리", 205, false);
@@ -111,6 +127,7 @@ namespace OVIA.Desktop
             account.ForeColor = Color.FromArgb(215, 220, 248);
             account.Location = new Point(34, 580);
             side.Controls.Add(account);
+            EnableDashboardDrag(account);
         }
 
         private OviaMenuButton AddMenu(Control parent, string text, int top, bool selected)
@@ -135,6 +152,7 @@ namespace OVIA.Desktop
             title.BackColor = SurfaceColor;
             title.Location = new Point(300, 45);
             parent.Controls.Add(title);
+            EnableDashboardDrag(title);
 
             Label desc = new Label();
             desc.Text = "로그인에 성공했습니다. AutoCAD 연결과 도면 추출 기능을 준비합니다.";
@@ -144,12 +162,14 @@ namespace OVIA.Desktop
             desc.BackColor = SurfaceColor;
             desc.Location = new Point(304, 90);
             parent.Controls.Add(desc);
+            EnableDashboardDrag(desc);
 
             Panel cadStatusBox = new Panel();
             cadStatusBox.Location = new Point(735, 50);
             cadStatusBox.Size = new Size(175, 40);
             cadStatusBox.BackColor = SurfaceColor;
             parent.Controls.Add(cadStatusBox);
+            EnableDashboardDrag(cadStatusBox);
 
             autoCadStatusLamp = new OviaStatusLamp();
             autoCadStatusLamp.Location = new Point(0, 8);
@@ -349,6 +369,79 @@ namespace OVIA.Desktop
             footer.BackColor = SurfaceColor;
             footer.Location = new Point(300, 635);
             parent.Controls.Add(footer);
+            EnableDashboardDrag(footer);
+        }
+
+        private void EnableDashboardDrag(Control control)
+        {
+            if (control == null)
+            {
+                return;
+            }
+
+            control.MouseDown += DashboardDrag_MouseDown;
+        }
+
+        private void DashboardDrag_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            if (this.WindowState == FormWindowState.Maximized)
+            {
+                return;
+            }
+
+            ReleaseCapture();
+            SendMessage(this.Handle, WM_NCLBUTTONDOWN, new IntPtr(HTCAPTION), IntPtr.Zero);
+        }
+
+        private void RestoreAndActivate(Form form)
+        {
+            if (form == null || form.IsDisposed)
+            {
+                return;
+            }
+
+            if (form.WindowState == FormWindowState.Minimized)
+            {
+                form.WindowState = FormWindowState.Normal;
+            }
+
+            form.Show();
+            form.Activate();
+        }
+
+        private Point GetChildWindowLocation(Size childSize)
+        {
+            int x = this.Left + 160;
+            int y = this.Top + 100;
+
+            Screen screen = Screen.FromControl(this);
+
+            if (x + childSize.Width > screen.WorkingArea.Right)
+            {
+                x = screen.WorkingArea.Right - childSize.Width - 20;
+            }
+
+            if (y + childSize.Height > screen.WorkingArea.Bottom)
+            {
+                y = screen.WorkingArea.Bottom - childSize.Height - 20;
+            }
+
+            if (x < screen.WorkingArea.Left)
+            {
+                x = screen.WorkingArea.Left + 20;
+            }
+
+            if (y < screen.WorkingArea.Top)
+            {
+                y = screen.WorkingArea.Top + 20;
+            }
+
+            return new Point(x, y);
         }
 
         private void DetectAutoCad_Click(object sender, EventArgs e)
@@ -389,14 +482,40 @@ namespace OVIA.Desktop
 
         private void OpenProjectManager_Click(object sender, EventArgs e)
         {
-            FrmProjectManager form = new FrmProjectManager(companyId, userId);
-            form.ShowDialog(this);
+            if (projectManagerForm != null && !projectManagerForm.IsDisposed)
+            {
+                RestoreAndActivate(projectManagerForm);
+                return;
+            }
+
+            projectManagerForm = new FrmProjectManager(companyId, userId);
+            projectManagerForm.StartPosition = FormStartPosition.Manual;
+            projectManagerForm.Location = GetChildWindowLocation(projectManagerForm.Size);
+            projectManagerForm.FormClosed += delegate
+            {
+                projectManagerForm = null;
+            };
+            projectManagerForm.Show(this);
+            projectManagerForm.Activate();
         }
 
         private void OpenBarList_Click(object sender, EventArgs e)
         {
-            FrmBarList form = new FrmBarList(companyId, userId);
-            form.ShowDialog(this);
+            if (barListForm != null && !barListForm.IsDisposed)
+            {
+                RestoreAndActivate(barListForm);
+                return;
+            }
+
+            barListForm = new FrmBarList(companyId, userId);
+            barListForm.StartPosition = FormStartPosition.Manual;
+            barListForm.Location = GetChildWindowLocation(barListForm.Size);
+            barListForm.FormClosed += delegate
+            {
+                barListForm = null;
+            };
+            barListForm.Show(this);
+            barListForm.Activate();
         }
 
         private void ExtractReady_Click(object sender, EventArgs e)
@@ -480,6 +599,18 @@ namespace OVIA.Desktop
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            if (projectManagerForm != null && !projectManagerForm.IsDisposed)
+            {
+                projectManagerForm.Close();
+                projectManagerForm = null;
+            }
+
+            if (barListForm != null && !barListForm.IsDisposed)
+            {
+                barListForm.Close();
+                barListForm = null;
+            }
+
             if (autoCadStatusTimer != null)
             {
                 autoCadStatusTimer.Stop();

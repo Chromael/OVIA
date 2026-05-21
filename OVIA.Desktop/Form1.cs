@@ -4,6 +4,7 @@ using System.Drawing.Drawing2D;
 using System.Diagnostics;
 using System.Drawing.Text;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace OVIA.Desktop
@@ -446,6 +447,11 @@ namespace OVIA.Desktop
         private TextBox innerTextBox;
         private bool focused;
 
+        private const int EM_HIDEBALLOONTIP = 0x1504;
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
         public string Placeholder = "";
         public bool IsPassword = false;
         public Color BorderColor = Color.FromArgb(216, 223, 238);
@@ -498,6 +504,8 @@ namespace OVIA.Desktop
 
             innerTextBox.Enter += InnerTextBox_Enter;
             innerTextBox.Leave += InnerTextBox_Leave;
+            innerTextBox.KeyDown += InnerTextBox_CapsLockStateChanged;
+            innerTextBox.KeyUp += InnerTextBox_CapsLockStateChanged;
 
             this.Controls.Add(innerTextBox);
         }
@@ -563,6 +571,7 @@ namespace OVIA.Desktop
         private void InnerTextBox_Enter(object sender, EventArgs e)
         {
             focused = true;
+            RefreshPasswordCapsLockBalloon();
 
             if (innerTextBox.Text == Placeholder && innerTextBox.ForeColor.ToArgb() == PlaceholderColor.ToArgb())
             {
@@ -581,6 +590,7 @@ namespace OVIA.Desktop
         private void InnerTextBox_Leave(object sender, EventArgs e)
         {
             focused = false;
+            HidePasswordCapsLockBalloon();
 
             if (innerTextBox.Text.Trim() == "")
             {
@@ -588,6 +598,57 @@ namespace OVIA.Desktop
             }
 
             this.Invalidate();
+        }
+
+        private void InnerTextBox_CapsLockStateChanged(object sender, KeyEventArgs e)
+        {
+            RefreshPasswordCapsLockBalloon();
+        }
+
+        private void RefreshPasswordCapsLockBalloon()
+        {
+            if (!IsPassword || innerTextBox == null || !innerTextBox.IsHandleCreated)
+            {
+                return;
+            }
+
+            if (!innerTextBox.Focused || !Control.IsKeyLocked(Keys.CapsLock))
+            {
+                HidePasswordCapsLockBalloon();
+
+                try
+                {
+                    this.BeginInvoke(new MethodInvoker(delegate
+                    {
+                        if (innerTextBox != null && innerTextBox.IsHandleCreated)
+                        {
+                            if (!innerTextBox.Focused || !Control.IsKeyLocked(Keys.CapsLock))
+                            {
+                                HidePasswordCapsLockBalloon();
+                            }
+                        }
+                    }));
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private void HidePasswordCapsLockBalloon()
+        {
+            if (innerTextBox == null || !innerTextBox.IsHandleCreated)
+            {
+                return;
+            }
+
+            try
+            {
+                SendMessage(innerTextBox.Handle, EM_HIDEBALLOONTIP, IntPtr.Zero, IntPtr.Zero);
+            }
+            catch
+            {
+            }
         }
 
         private void ApplyPlaceholder()
