@@ -61,6 +61,8 @@ namespace OVIA.Desktop
         private Label lblSaveState;
         private ToolTip windowToolTip;
         private OviaBarListMappingStore mappingStore;
+        private RebarShapeRepository shapeRepository;
+        private RebarShapeRenderer shapeRenderer = new RebarShapeRenderer();
         private int lastMappingMatchCount = 0;
         private int lastMappingTotalHeaderCount = 0;
         private string lastMappingVersion = "";
@@ -111,6 +113,8 @@ namespace OVIA.Desktop
             this.projectStatus = projectStatus == null ? "" : projectStatus;
             this.initialFilePath = initialFilePath == null ? "" : initialFilePath;
             this.savedProjectFilePath = this.initialFilePath;
+
+            shapeRepository = RebarShapeRepository.CreateDefault();
 
             BuildUI();
 
@@ -704,7 +708,7 @@ namespace OVIA.Desktop
             grid.DefaultCellStyle.ForeColor = TextDark;
             grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(255, 248, 205);
             grid.DefaultCellStyle.SelectionForeColor = TextDark;
-            grid.RowTemplate.Height = 28;
+            grid.RowTemplate.Height = 62;
 
             BuildGridContextMenu();
 
@@ -1280,6 +1284,12 @@ namespace OVIA.Desktop
                 return;
             }
 
+            if (IsRebarShapeColumn(e.ColumnIndex))
+            {
+                OpenShapePickerForCell(e.RowIndex, e.ColumnIndex);
+                return;
+            }
+
             grid.CurrentCell = grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
             grid.BeginEdit(true);
         }
@@ -1644,6 +1654,12 @@ namespace OVIA.Desktop
 
             if (e.RowIndex >= grid.Rows.Count || e.ColumnIndex >= grid.Columns.Count)
             {
+                return;
+            }
+
+            if (IsRebarShapeColumn(e.ColumnIndex))
+            {
+                PaintRebarShapeGridCell(e);
                 return;
             }
 
@@ -3215,11 +3231,356 @@ namespace OVIA.Desktop
                 }
 
                 ApplyGridColumnStyle();
+
+                // 형상번호 표시 컬럼은 CSV 바인딩 후 자동으로 추가됩니다.
+                // 컬럼이 추가된 뒤 기존 row.Tag 원본값 배열이 밀리면 모든 컬럼이 수정된 것처럼 빨간색으로 보입니다.
+                // CSV를 새로 불러온 직후에는 현재 화면 상태를 원본값으로 다시 잡아야 합니다.
+                ResetAllRowOriginalValuesToCurrent();
             }
             finally
             {
                 grid.ResumeLayout();
                 EndGridSelectionUpdate();
+            }
+        }
+
+        private bool IsRebarShapeColumn(int columnIndex)
+        {
+            if (grid == null || columnIndex < 0 || columnIndex >= grid.Columns.Count)
+            {
+                return false;
+            }
+
+            return IsRebarShapeHeader(grid.Columns[columnIndex].HeaderText);
+        }
+
+        private bool IsRebarShapeHeader(string header)
+        {
+            if (header == null)
+            {
+                return false;
+            }
+
+            string value = header.Trim();
+
+            if (value == "")
+            {
+                return false;
+            }
+
+            if (ContainsAny(value, "형번", "형상번호", "ShapeCodeRaw", "ShapeVector", "ShapeSvg", "ShapeSource", "ShapeReview"))
+            {
+                return false;
+            }
+
+            return value.IndexOf("철근형상", StringComparison.OrdinalIgnoreCase) >= 0
+                || value.Equals("형상", StringComparison.OrdinalIgnoreCase)
+                || value.Equals("Shape", StringComparison.OrdinalIgnoreCase)
+                || value.Equals("BENT", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private RebarShapeRepository GetShapeRepository()
+        {
+            if (shapeRepository == null)
+            {
+                shapeRepository = RebarShapeRepository.CreateDefault();
+            }
+
+            return shapeRepository;
+        }
+
+        private void PaintRebarShapeGridCell(DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            object value = grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value;
+            string rawText = value == null ? "" : value.ToString();
+            string shapeNoText = GetShapeNumberText(e.RowIndex);
+            RebarShapeInfo shape = GetShapeRepository().FindByRawValue(rawText);
+
+            if (shape == null && shapeNoText != "")
+            {
+                shape = GetShapeRepository().FindByRawValue(shapeNoText);
+                if (shape != null)
+                {
+                    rawText = shape.DisplayCode;
+                }
+            }
+
+            bool selected = grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Selected;
+
+            e.Paint(e.ClipBounds, DataGridViewPaintParts.Background);
+            string dimensionText = GetShapeDimensionText(e.RowIndex);
+            shapeRenderer.DrawShape(e.Graphics, e.CellBounds, shape, rawText, selected, dimensionText);
+            e.Handled = true;
+        }
+
+        private void OpenShapePickerForCell(int rowIndex, int columnIndex)
+        {
+            if (grid == null || rowIndex < 0 || columnIndex < 0 || rowIndex >= grid.Rows.Count || columnIndex >= grid.Columns.Count)
+            {
+                return;
+            }
+
+            if (grid.Rows[rowIndex].IsNewRow)
+            {
+                return;
+            }
+
+            string currentValue = GetCellText(rowIndex, columnIndex);
+            FrmShapePicker picker = new FrmShapePicker(GetShapeRepository(), currentValue);
+
+            if (picker.ShowDialog(this) != DialogResult.OK || picker.SelectedShape == null)
+            {
+                return;
+            }
+
+            PushUndoState(CaptureGridState());
+            grid.Rows[rowIndex].Cells[columnIndex].Value = picker.SelectedShape.DisplayCode;
+            SetShapeMetaCellIfExists(rowIndex, new string[] { "형상번호", "OVIA_형상번호", "OVIA 형상번호", "OVIA형상번호" }, picker.SelectedShape.DisplayCode);
+            SetShapeMetaCellIfExists(rowIndex, new string[] { "OVIA_형상치수", "OVIA 형상치수", "OVIA형상치수" }, picker.SelectedDimensionText);
+            SetShapeDimensionColumnsIfExists(rowIndex, picker.SelectedDimensionText);
+            RefreshModifiedCellVisual(rowIndex, columnIndex);
+            MarkUnsaved();
+            RecalculateSummary();
+            lblStatus.Text = "철근 형상 " + picker.SelectedShape.DisplayName + "을(를) 선택했습니다.";
+            lblStatus.ForeColor = TextSub;
+            grid.InvalidateCell(columnIndex, rowIndex);
+        }
+
+        private string GetShapeNumberText(int rowIndex)
+        {
+            return GetFirstExistingCellText(rowIndex, new string[] { "형상번호", "OVIA_형상번호", "OVIA 형상번호", "OVIA형상번호", "ShapeCode", "ShapeNo", "ShapeCodeRaw" });
+        }
+
+        private string GetShapeDimensionText(int rowIndex)
+        {
+            if (grid == null || rowIndex < 0 || rowIndex >= grid.Rows.Count)
+            {
+                return "";
+            }
+
+            string value = GetFirstExistingCellText(rowIndex, new string[] { "OVIA_형상치수", "OVIA 형상치수", "OVIA형상치수", "형상치수" });
+
+            if (value != "")
+            {
+                return value;
+            }
+
+            return BuildDimensionTextFromIndividualColumns(rowIndex);
+        }
+
+        private string GetFirstExistingCellText(int rowIndex, string[] headerNames)
+        {
+            if (grid == null || headerNames == null || rowIndex < 0 || rowIndex >= grid.Rows.Count)
+            {
+                return "";
+            }
+
+            int i;
+
+            for (i = 0; i < grid.Columns.Count; i++)
+            {
+                string header = grid.Columns[i].HeaderText == null ? "" : grid.Columns[i].HeaderText.Trim();
+                string name = grid.Columns[i].Name == null ? "" : grid.Columns[i].Name.Trim();
+                int j;
+
+                for (j = 0; j < headerNames.Length; j++)
+                {
+                    string target = headerNames[j] == null ? "" : headerNames[j].Trim();
+
+                    if (target == "")
+                    {
+                        continue;
+                    }
+
+                    if (header.Equals(target, StringComparison.OrdinalIgnoreCase) || name.Equals(target, StringComparison.OrdinalIgnoreCase))
+                    {
+                        object cellValue = grid.Rows[rowIndex].Cells[i].Value;
+                        return cellValue == null ? "" : cellValue.ToString().Trim();
+                    }
+                }
+            }
+
+            return "";
+        }
+
+        private string BuildDimensionTextFromIndividualColumns(int rowIndex)
+        {
+            string[] keys = new string[] { "A", "B", "C", "D", "E", "F", "G", "H", "R1", "R2", "R3", "R4" };
+            StringBuilder sb = new StringBuilder();
+            int i;
+
+            for (i = 0; i < keys.Length; i++)
+            {
+                string value = GetFirstExistingCellText(rowIndex, GetDimensionHeaderCandidates(keys[i]));
+
+                if (value == "" || value == "0")
+                {
+                    continue;
+                }
+
+                if (sb.Length > 0)
+                {
+                    sb.Append("; ");
+                }
+
+                sb.Append(keys[i]);
+                sb.Append("=");
+                sb.Append(value);
+            }
+
+            return sb.ToString();
+        }
+
+        private void SetShapeDimensionColumnsIfExists(int rowIndex, string dimensionText)
+        {
+            Dictionary<string, string> values = ParseShapeDimensionText(dimensionText);
+            string[] keys = new string[] { "A", "B", "C", "D", "E", "F", "G", "H", "R1", "R2", "R3", "R4" };
+            int i;
+
+            for (i = 0; i < keys.Length; i++)
+            {
+                string value;
+
+                if (values.TryGetValue(keys[i], out value))
+                {
+                    SetShapeMetaCellIfExists(rowIndex, GetDimensionHeaderCandidates(keys[i]), value);
+                }
+            }
+        }
+
+        private string[] GetDimensionHeaderCandidates(string key)
+        {
+            return new string[]
+            {
+                key,
+                key + "값",
+                key + " 값",
+                key + "_값",
+                "OVIA_" + key,
+                "OVIA " + key,
+                "OVIA_" + key + "값",
+                "OVIA " + key + "값"
+            };
+        }
+
+        private Dictionary<string, string> ParseShapeDimensionText(string dimensionText)
+        {
+            Dictionary<string, string> result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            if (dimensionText == null)
+            {
+                return result;
+            }
+
+            string text = dimensionText.Trim();
+
+            if (text == "")
+            {
+                return result;
+            }
+
+            text = text.Replace("\r", ";").Replace("\n", ";").Replace(",", ";");
+            string[] parts = text.Split(';');
+            int i;
+
+            for (i = 0; i < parts.Length; i++)
+            {
+                string part = parts[i] == null ? "" : parts[i].Trim();
+
+                if (part == "")
+                {
+                    continue;
+                }
+
+                int pos = part.IndexOf('=');
+
+                if (pos < 0)
+                {
+                    pos = part.IndexOf(':');
+                }
+
+                if (pos <= 0)
+                {
+                    continue;
+                }
+
+                string key = NormalizeShapeDimensionKey(part.Substring(0, pos));
+                string value = part.Substring(pos + 1).Trim();
+
+                if (key == "" || value == "")
+                {
+                    continue;
+                }
+
+                if (!result.ContainsKey(key))
+                {
+                    result.Add(key, value);
+                }
+                else
+                {
+                    result[key] = value;
+                }
+            }
+
+            return result;
+        }
+
+        private string NormalizeShapeDimensionKey(string key)
+        {
+            if (key == null)
+            {
+                return "";
+            }
+
+            key = key.Trim().ToUpperInvariant();
+            key = key.Replace(" ", "");
+            key = key.Replace("값", "");
+
+            if (key == "R")
+            {
+                return "R1";
+            }
+
+            return key;
+        }
+
+        private void SetShapeMetaCellIfExists(int rowIndex, string[] headerNames, string value)
+        {
+            if (grid == null || rowIndex < 0 || rowIndex >= grid.Rows.Count || headerNames == null)
+            {
+                return;
+            }
+
+            int i;
+
+            for (i = 0; i < grid.Columns.Count; i++)
+            {
+                string header = grid.Columns[i].HeaderText == null ? "" : grid.Columns[i].HeaderText.Trim();
+                string name = grid.Columns[i].Name == null ? "" : grid.Columns[i].Name.Trim();
+                int j;
+
+                for (j = 0; j < headerNames.Length; j++)
+                {
+                    string target = headerNames[j] == null ? "" : headerNames[j].Trim();
+
+                    if (target == "")
+                    {
+                        continue;
+                    }
+
+                    if (header.Equals(target, StringComparison.OrdinalIgnoreCase) || name.Equals(target, StringComparison.OrdinalIgnoreCase))
+                    {
+                        grid.Rows[rowIndex].Cells[i].Value = value == null ? "" : value;
+                        RefreshModifiedCellVisual(rowIndex, i);
+                        grid.InvalidateCell(i, rowIndex);
+                        return;
+                    }
+                }
             }
         }
 
@@ -3270,10 +3631,132 @@ namespace OVIA.Desktop
             return "매핑 " + lastMappingMatchCount.ToString() + "/" + lastMappingTotalHeaderCount.ToString() + "개 적용  |  사전 " + versionText;
         }
 
+        private void EnsureShapeNumberColumnExists()
+        {
+            if (grid == null)
+            {
+                return;
+            }
+
+            int shapeColumnIndex = FindFirstRebarShapeColumnIndex();
+
+            if (shapeColumnIndex < 0)
+            {
+                return;
+            }
+
+            int existingIndex = FindShapeNumberColumnIndex();
+
+            if (existingIndex < 0)
+            {
+                DataGridViewTextBoxColumn column = new DataGridViewTextBoxColumn();
+                column.Name = "OVIA_ShapeNoVisible";
+                column.HeaderText = "형상번호";
+                column.SortMode = DataGridViewColumnSortMode.NotSortable;
+                column.ReadOnly = false;
+                column.MinimumWidth = 55;
+                column.Width = 70;
+                column.FillWeight = 70;
+                grid.Columns.Insert(shapeColumnIndex, column);
+                existingIndex = column.Index;
+
+                if (shapeColumnIndex >= existingIndex)
+                {
+                    shapeColumnIndex++;
+                }
+            }
+
+            PopulateShapeNumberColumn(existingIndex, shapeColumnIndex);
+        }
+
+        private int FindFirstRebarShapeColumnIndex()
+        {
+            if (grid == null)
+            {
+                return -1;
+            }
+
+            int i;
+
+            for (i = 0; i < grid.Columns.Count; i++)
+            {
+                if (IsRebarShapeHeader(grid.Columns[i].HeaderText))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private int FindShapeNumberColumnIndex()
+        {
+            if (grid == null)
+            {
+                return -1;
+            }
+
+            int i;
+
+            for (i = 0; i < grid.Columns.Count; i++)
+            {
+                string header = grid.Columns[i].HeaderText == null ? "" : grid.Columns[i].HeaderText.Trim();
+                string name = grid.Columns[i].Name == null ? "" : grid.Columns[i].Name.Trim();
+
+                if (header.Equals("형상번호", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("OVIA_ShapeNoVisible", StringComparison.OrdinalIgnoreCase))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private void PopulateShapeNumberColumn(int shapeNumberColumnIndex, int shapeColumnIndex)
+        {
+            if (grid == null || shapeNumberColumnIndex < 0 || shapeNumberColumnIndex >= grid.Columns.Count)
+            {
+                return;
+            }
+
+            int r;
+
+            for (r = 0; r < grid.Rows.Count; r++)
+            {
+                if (grid.Rows[r].IsNewRow)
+                {
+                    continue;
+                }
+
+                string current = GetCellText(r, shapeNumberColumnIndex);
+
+                if (current != "")
+                {
+                    continue;
+                }
+
+                string rawShape = "";
+
+                if (shapeColumnIndex >= 0 && shapeColumnIndex < grid.Columns.Count)
+                {
+                    rawShape = GetCellText(r, shapeColumnIndex);
+                }
+
+                RebarShapeInfo shape = GetShapeRepository().FindByRawValue(rawShape);
+
+                if (shape != null)
+                {
+                    grid.Rows[r].Cells[shapeNumberColumnIndex].Value = shape.DisplayCode;
+                }
+            }
+        }
+
         private void ApplyGridColumnStyle()
         {
             int i;
 
+            EnsureShapeNumberColumnExists();
             grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             grid.ScrollBars = ScrollBars.Vertical;
 
@@ -3282,13 +3765,20 @@ namespace OVIA.Desktop
                 string name = grid.Columns[i].HeaderText;
                 int baseWidth = 95;
 
-                if (ContainsAny(name, "No", "RowType", "SourceRowNo"))
+                if (name.Equals("형상번호", StringComparison.OrdinalIgnoreCase))
+                {
+                    baseWidth = 70;
+                }
+                else if (ContainsAny(name, "No", "RowType", "SourceRowNo", "ShapeVectorFile", "ShapeSvgPath", "ShapeSource", "ShapeReviewStatus"))
                 {
                     grid.Columns[i].Visible = false;
                     continue;
                 }
-
-                if (ContainsAny(name, "번호"))
+                else if (IsRebarShapeHeader(name))
+                {
+                    baseWidth = 150;
+                }
+                else if (ContainsAny(name, "번호"))
                 {
                     baseWidth = 60;
                 }
@@ -3322,6 +3812,16 @@ namespace OVIA.Desktop
                 grid.Columns[i].FillWeight = baseWidth;
                 grid.Columns[i].MinimumWidth = 45;
                 grid.Columns[i].Width = baseWidth;
+            }
+
+            int r;
+
+            for (r = 0; r < grid.Rows.Count; r++)
+            {
+                if (!grid.Rows[r].IsNewRow)
+                {
+                    grid.Rows[r].Height = 62;
+                }
             }
         }
 
