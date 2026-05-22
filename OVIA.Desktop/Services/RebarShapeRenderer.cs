@@ -57,13 +57,17 @@ namespace OVIA.Desktop
             }
 
             bool hasCommands = shape.Commands != null && shape.Commands.Count > 0;
+
+            if (hasCommands && IsCleanVectorTokenVerified(shape))
+            {
+                DrawCommandVector(g, inner, shape, dimensionValues);
+                return;
+            }
+
             bool preferSourceImage = ShouldPreferSourceImage(shape);
 
             if (preferSourceImage && DrawSourceImage(g, inner, shape))
             {
-                // PDF 참조 이미지는 실제 형상 기준입니다.
-                // 잘못된 좌표로 숫자를 덮어쓰면 철근 가공 오작업 위험이 있으므로,
-                // 검수 완료된 clean vector가 아닌 경우에는 이미지 위에 임의 숫자 오버레이를 하지 않습니다.
                 return;
             }
 
@@ -82,9 +86,24 @@ namespace OVIA.Desktop
         }
 
 
+        private bool IsCleanVectorTokenVerified(RebarShapeInfo shape)
+        {
+            if (shape == null || shape.VectorStatus == null)
+            {
+                return false;
+            }
+
+            return shape.VectorStatus.IndexOf("CLEAN_VECTOR_TOKEN_VERIFIED", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         private bool ShouldPreferSourceImage(RebarShapeInfo shape)
         {
             if (shape == null)
+            {
+                return false;
+            }
+
+            if (IsCleanVectorTokenVerified(shape))
             {
                 return false;
             }
@@ -378,6 +397,8 @@ namespace OVIA.Desktop
 
         private void DrawCommandTextOverlay(Graphics g, Rectangle inner, RebarShapeInfo shape, Dictionary<string, string> dimensionValues)
         {
+            // 이전 버전의 PDF 글자 흰색 덮어쓰기 방식은 사용하지 않습니다.
+            // 이 메서드는 호환용으로만 남기며, 배경 사각형을 절대 그리지 않습니다.
             if (shape == null || shape.Commands == null || shape.Commands.Count == 0 || dimensionValues == null || dimensionValues.Count == 0)
             {
                 return;
@@ -398,7 +419,6 @@ namespace OVIA.Desktop
 
                 using (Font font = new Font("맑은 고딕", Math.Max(7F, 8.5F * scale), FontStyle.Bold, GraphicsUnit.Point))
                 using (SolidBrush textBrush = new SolidBrush(Color.FromArgb(20, 20, 20)))
-                using (SolidBrush backBrush = new SolidBrush(Color.FromArgb(245, 255, 255, 255)))
                 {
                     int i;
 
@@ -423,8 +443,6 @@ namespace OVIA.Desktop
                         SizeF size = g.MeasureString(valueText, font);
                         float x = X(cmd.X1, offsetX, scale) - size.Width / 2F;
                         float y = Y(cmd.Y1, offsetY, scale) - size.Height / 2F;
-                        RectangleF backRect = new RectangleF(x - 1F, y - 1F, size.Width + 2F, size.Height + 2F);
-                        g.FillRectangle(backBrush, backRect);
                         g.DrawString(valueText, font, textBrush, x, y);
                     }
                 }

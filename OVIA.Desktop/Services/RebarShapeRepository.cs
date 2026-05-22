@@ -31,6 +31,7 @@ namespace OVIA.Desktop
             }
 
             repository.LoadShapeFieldOverridesIfExists();
+            repository.LoadCleanVectorTokenDefinitions();
             repository.RebuildAliasMap();
             return repository;
         }
@@ -248,6 +249,109 @@ namespace OVIA.Desktop
             {
                 // 필드 보정 파일이 깨져도 형상 선택 화면 전체가 죽으면 안 됩니다.
             }
+        }
+
+        private void LoadCleanVectorTokenDefinitions()
+        {
+            // 대표님 확정 기준:
+            // 흰색 박스로 PDF 알파벳을 덮는 방식은 사용하지 않습니다.
+            // 검수된 형상은 "순수 라인/곡선 벡터 + 텍스트 토큰"으로만 그립니다.
+            // 아래 5개는 구조 검증용 1차 샘플입니다. 이후 동일 구조로 2,000개 형상을 확장합니다.
+
+            RegisterCleanVectorTokenShape(1, "A", new RebarShapeCommand[] {
+                RebarShapeCommand.Line(45F, 45F, 135F, 45F),
+                RebarShapeCommand.TextLabel(90F, 31F, "A", false)
+            });
+
+            RegisterCleanVectorTokenShape(2, "A|B", new RebarShapeCommand[] {
+                RebarShapeCommand.Line(58F, 43F, 118F, 43F),
+                RebarShapeCommand.Line(118F, 43F, 118F, 72F),
+                RebarShapeCommand.TextLabel(48F, 54F, "A", false),
+                RebarShapeCommand.TextLabel(88F, 29F, "B", false)
+            });
+
+            RegisterCleanVectorTokenShape(15, "A|B|C|D|E", new RebarShapeCommand[] {
+                RebarShapeCommand.Line(54F, 32F, 70F, 32F),
+                RebarShapeCommand.Line(70F, 32F, 70F, 55F),
+                RebarShapeCommand.Line(70F, 55F, 110F, 55F),
+                RebarShapeCommand.Line(110F, 55F, 110F, 32F),
+                RebarShapeCommand.Line(110F, 32F, 126F, 32F),
+                RebarShapeCommand.TextLabel(57F, 20F, "A", false),
+                RebarShapeCommand.TextLabel(62F, 45F, "B", false),
+                RebarShapeCommand.TextLabel(90F, 70F, "C", false),
+                RebarShapeCommand.TextLabel(118F, 45F, "D", false),
+                RebarShapeCommand.TextLabel(123F, 20F, "E", false)
+            });
+
+            RegisterCleanVectorTokenShape(74, "A|B|C|D|R1", new RebarShapeCommand[] {
+                RebarShapeCommand.Line(48F, 70F, 48F, 52F),
+                RebarShapeCommand.Arc(62F, 52F, 14F, 180F, 90F),
+                RebarShapeCommand.Line(62F, 38F, 118F, 38F),
+                RebarShapeCommand.Arc(118F, 52F, 14F, 270F, 90F),
+                RebarShapeCommand.Line(132F, 52F, 132F, 70F),
+                RebarShapeCommand.TextLabel(38F, 60F, "A", false),
+                RebarShapeCommand.TextLabel(60F, 29F, "B", false),
+                RebarShapeCommand.TextLabel(90F, 25F, "C", false),
+                RebarShapeCommand.TextLabel(120F, 29F, "B", false),
+                RebarShapeCommand.TextLabel(142F, 60F, "D", false),
+                RebarShapeCommand.TextLabel(90F, 53F, "R1", false)
+            });
+
+            RegisterCleanVectorTokenShape(274, "A|B|C|D|R1|R2", new RebarShapeCommand[] {
+                RebarShapeCommand.Line(50F, 72F, 50F, 42F),
+                RebarShapeCommand.Line(50F, 42F, 103F, 42F),
+                RebarShapeCommand.Arc(103F, 50F, 8F, 270F, 90F),
+                RebarShapeCommand.Line(111F, 50F, 111F, 72F),
+                RebarShapeCommand.TextLabel(40F, 57F, "A", false),
+                RebarShapeCommand.TextLabel(75F, 29F, "B", false),
+                RebarShapeCommand.TextLabel(116F, 40F, "C", false),
+                RebarShapeCommand.TextLabel(121F, 61F, "D", false),
+                RebarShapeCommand.TextLabel(86F, 49F, "R1", false),
+                RebarShapeCommand.TextLabel(96F, 63F, "R2", false)
+            });
+        }
+
+        private void RegisterCleanVectorTokenShape(int shapeNo, string fields, RebarShapeCommand[] commands)
+        {
+            RebarShapeInfo shape = FindBuiltInShapeByNo(shapeNo);
+
+            if (shape == null)
+            {
+                return;
+            }
+
+            shape.FieldsText = fields == null ? "" : fields;
+            shape.OptionText = HasRoundField(fields) ? "ROUND" : "";
+            shape.VectorStatus = "CLEAN_VECTOR_TOKEN_VERIFIED";
+            shape.Commands.Clear();
+
+            if (commands == null)
+            {
+                return;
+            }
+
+            int i;
+
+            for (i = 0; i < commands.Length; i++)
+            {
+                if (commands[i] != null)
+                {
+                    shape.Commands.Add(commands[i]);
+                }
+            }
+        }
+
+        private bool HasRoundField(string fields)
+        {
+            if (fields == null)
+            {
+                return false;
+            }
+
+            return fields.IndexOf("R1", StringComparison.OrdinalIgnoreCase) >= 0
+                || fields.IndexOf("R2", StringComparison.OrdinalIgnoreCase) >= 0
+                || fields.IndexOf("R3", StringComparison.OrdinalIgnoreCase) >= 0
+                || fields.IndexOf("R4", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private string FindShapeFieldOverridesFile()
