@@ -362,13 +362,14 @@ namespace OVIA.Desktop
                         else if (type == "TEXT")
                         {
                             string text = cmd.Text == null ? "" : cmd.Text;
+                            string dimensionKey = NormalizeDimensionKey(text);
                             bool isDimensionValue = false;
 
                             if (dimensionValues != null)
                             {
                                 string valueText;
 
-                                if (dimensionValues.TryGetValue(NormalizeDimensionKey(text), out valueText) && valueText != "")
+                                if (dimensionValues.TryGetValue(dimensionKey, out valueText) && valueText != "")
                                 {
                                     text = valueText;
                                     isDimensionValue = true;
@@ -377,7 +378,17 @@ namespace OVIA.Desktop
 
                             Brush brush = cmd.IsRedText ? redBrush : (isDimensionValue ? new SolidBrush(Color.FromArgb(20, 20, 20)) : textBrush);
                             SizeF size = g.MeasureString(text, font);
-                            g.DrawString(text, font, brush, X(cmd.X1, offsetX, scale) - size.Width / 2F, Y(cmd.Y1, offsetY, scale) - size.Height / 2F);
+                            PointF center = new PointF(X(cmd.X1, offsetX, scale), Y(cmd.Y1, offsetY, scale));
+
+                            // R1/R2/R3/R4 값은 반경 토큰의 위치 자체가 의미를 가지므로 자동 이동시키지 않습니다.
+                            // 길이값(A~H)만 선과 너무 겹칠 때 선 바깥쪽으로 살짝 보정합니다.
+                            if (isDimensionValue && !dimensionKey.StartsWith("R", StringComparison.OrdinalIgnoreCase))
+                            {
+                                RectangleF drawArea = new RectangleF(offsetX, offsetY, drawWidth, drawHeight);
+                                center = AdjustTextCenterAwayFromShapeLines(center, size, shape, drawArea, offsetX, offsetY, scale);
+                            }
+
+                            g.DrawString(text, font, brush, center.X - size.Width / 2F, center.Y - size.Height / 2F);
 
                             if (isDimensionValue && !cmd.IsRedText)
                             {
@@ -394,6 +405,118 @@ namespace OVIA.Desktop
             }
         }
 
+
+
+        private PointF AdjustTextCenterAwayFromShapeLines(PointF center, SizeF size, RebarShapeInfo shape, RectangleF drawArea, float offsetX, float offsetY, float scale)
+        {
+            if (shape == null || shape.Commands == null)
+            {
+                return center;
+            }
+
+            RebarShapeCommand nearest = null;
+            double nearestDistance = Double.MaxValue;
+            int i;
+
+            for (i = 0; i < shape.Commands.Count; i++)
+            {
+                RebarShapeCommand line = shape.Commands[i];
+
+                if (line == null || line.CommandType == null || !line.CommandType.Equals("LINE", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                PointF p1 = new PointF(X(line.X1, offsetX, scale), Y(line.Y1, offsetY, scale));
+                PointF p2 = new PointF(X(line.X2, offsetX, scale), Y(line.Y2, offsetY, scale));
+                double distance = DistancePointToSegment(center, p1, p2);
+
+                if (distance < nearestDistance)
+                {
+                    nearestDistance = distance;
+                    nearest = line;
+                }
+            }
+
+            float threshold = Math.Max(5F, size.Height * 0.70F);
+
+            if (nearest == null || nearestDistance > threshold)
+            {
+                return center;
+            }
+
+            PointF lp1 = new PointF(X(nearest.X1, offsetX, scale), Y(nearest.Y1, offsetY, scale));
+            PointF lp2 = new PointF(X(nearest.X2, offsetX, scale), Y(nearest.Y2, offsetY, scale));
+            float dx = lp2.X - lp1.X;
+            float dy = lp2.Y - lp1.Y;
+            PointF adjusted = center;
+
+            if (Math.Abs(dx) >= Math.Abs(dy))
+            {
+                adjusted.Y = Math.Min(center.Y, (lp1.Y + lp2.Y) / 2F - size.Height * 0.75F - 2F);
+            }
+            else
+            {
+                float lineX = (lp1.X + lp2.X) / 2F;
+
+                if (center.X <= lineX)
+                {
+                    adjusted.X = lineX - size.Width * 0.65F - 4F;
+                }
+                else
+                {
+                    adjusted.X = lineX + size.Width * 0.65F + 4F;
+                }
+            }
+
+            adjusted.X = Clamp(adjusted.X, drawArea.Left + size.Width / 2F, drawArea.Right - size.Width / 2F);
+            adjusted.Y = Clamp(adjusted.Y, drawArea.Top + size.Height / 2F, drawArea.Bottom - size.Height / 2F);
+            return adjusted;
+        }
+
+        private double DistancePointToSegment(PointF p, PointF a, PointF b)
+        {
+            double dx = b.X - a.X;
+            double dy = b.Y - a.Y;
+
+            if (Math.Abs(dx) < 0.0001 && Math.Abs(dy) < 0.0001)
+            {
+                double sx = p.X - a.X;
+                double sy = p.Y - a.Y;
+                return Math.Sqrt(sx * sx + sy * sy);
+            }
+
+            double t = ((p.X - a.X) * dx + (p.Y - a.Y) * dy) / (dx * dx + dy * dy);
+
+            if (t < 0) t = 0;
+            if (t > 1) t = 1;
+
+            double px = a.X + t * dx;
+            double py = a.Y + t * dy;
+            double ex = p.X - px;
+            double ey = p.Y - py;
+            return Math.Sqrt(ex * ex + ey * ey);
+        }
+
+        private float Clamp(float value, float min, float max)
+        {
+            if (min > max)
+            {
+                return value;
+            }
+
+            if (value < min)
+            {
+                return min;
+            }
+
+            if (value > max)
+            {
+                return max;
+            }
+
+            return value;
+        }
 
         private void DrawCommandTextOverlay(Graphics g, Rectangle inner, RebarShapeInfo shape, Dictionary<string, string> dimensionValues)
         {

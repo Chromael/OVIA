@@ -41,6 +41,11 @@ namespace OVIA.Desktop
         public decimal SelectedTotalLength { get; private set; }
 
         public FrmShapePicker(RebarShapeRepository repository, string currentValue)
+            : this(repository, currentValue, "")
+        {
+        }
+
+        public FrmShapePicker(RebarShapeRepository repository, string currentValue, string currentDimensionText)
         {
             this.repository = repository == null ? RebarShapeRepository.CreateDefault() : repository;
             this.allShapes = this.repository.GetUserSelectableShapes();
@@ -58,10 +63,86 @@ namespace OVIA.Desktop
             SelectedDimensionText = "";
             SelectedTotalLength = 0M;
 
+            string safeCurrentValue = currentValue == null ? "" : currentValue.Trim();
+            PreloadDimensionValues(safeCurrentValue, currentDimensionText);
+
             BuildUI();
-            txtSearch.Text = currentValue == null ? "" : currentValue.Trim();
+            txtSearch.Text = safeCurrentValue;
             lblShapeCodeValue.Text = "";
             ApplyFilter();
+        }
+
+        private void PreloadDimensionValues(string currentValue, string currentDimensionText)
+        {
+            if (currentDimensionText == null || currentDimensionText.Trim() == "")
+            {
+                return;
+            }
+
+            RebarShapeInfo shape = repository.FindByRawValue(currentValue);
+
+            if (shape == null || shape.ShapeNo <= 0)
+            {
+                return;
+            }
+
+            Dictionary<string, string> parsed = ParseDimensionText(currentDimensionText);
+
+            if (parsed.Count == 0)
+            {
+                return;
+            }
+
+            if (dimensionValueCache.ContainsKey(shape.ShapeNo))
+            {
+                dimensionValueCache[shape.ShapeNo] = parsed;
+            }
+            else
+            {
+                dimensionValueCache.Add(shape.ShapeNo, parsed);
+            }
+        }
+
+        private Dictionary<string, string> ParseDimensionText(string text)
+        {
+            Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            if (text == null)
+            {
+                return values;
+            }
+
+            string[] parts = text.Split(new char[] { ';', '|', ',' }, StringSplitOptions.RemoveEmptyEntries);
+            int i;
+
+            for (i = 0; i < parts.Length; i++)
+            {
+                string part = parts[i] == null ? "" : parts[i].Trim();
+
+                if (part == "")
+                {
+                    continue;
+                }
+
+                int eq = part.IndexOf('=');
+
+                if (eq <= 0)
+                {
+                    continue;
+                }
+
+                string key = part.Substring(0, eq).Trim().ToUpperInvariant();
+                string value = part.Substring(eq + 1).Trim();
+
+                if (key == "" || value == "")
+                {
+                    continue;
+                }
+
+                values[key] = value;
+            }
+
+            return values;
         }
 
         private void BuildUI()

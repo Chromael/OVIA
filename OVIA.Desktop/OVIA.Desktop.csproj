@@ -70,6 +70,7 @@
     <Compile Include="Models\RebarShapeInfo.cs" />
     <Compile Include="Services\RebarShapeRepository.cs" />
     <Compile Include="Services\RebarShapeRenderer.cs" />
+    <Compile Include="Services\CadShapeRenderer.cs" />
     <Compile Include="Controls\RebarShapePreviewControl.cs" />
     <Compile Include="FrmShapePicker.cs">
       <SubType>Form</SubType>
