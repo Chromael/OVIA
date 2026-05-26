@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
@@ -63,7 +64,7 @@ namespace OVIA.Desktop
             this.MaximizeBox = true;
             this.MinimizeBox = true;
             this.ClientSize = new Size(BaseClientWidth, BaseClientHeight);
-            this.MinimumSize = new Size(760, 520);
+            this.MinimumSize = new Size(1100, 750);
             this.BackColor = SurfaceColor;
             this.FormClosing += FrmProjectBarListList_FormClosing;
 
@@ -384,18 +385,9 @@ namespace OVIA.Desktop
             newButton.Click += NewButton_Click;
             card.Controls.Add(newButton);
 
-            OviaProjectBarListButton openButton = new OviaProjectBarListButton();
-            openButton.Text = "선택 BarList 열기";
-            openButton.Location = new Point(180, 28);
-            openButton.Size = new Size(145, 36);
-            openButton.StartColor = BrandViolet;
-            openButton.EndColor = BrandIndigo;
-            openButton.Click += OpenButton_Click;
-            card.Controls.Add(openButton);
-
             OviaProjectBarListButton refreshButton = new OviaProjectBarListButton();
             refreshButton.Text = "새로고침";
-            refreshButton.Location = new Point(338, 28);
+            refreshButton.Location = new Point(180, 28);
             refreshButton.Size = new Size(95, 36);
             refreshButton.StartColor = Color.FromArgb(108, 117, 145);
             refreshButton.EndColor = Color.FromArgb(78, 86, 110);
@@ -405,11 +397,11 @@ namespace OVIA.Desktop
             Label guide = new Label();
             guide.Text = "주의: AutoCAD에서 가져온 데이터는 반드시 도면의 BarList와 비교 확인 후 저장하세요. 저장 전 후보 데이터는 이 목록에 표시되지 않습니다.";
             guide.AutoSize = false;
-            guide.Size = new Size(620, 38);
+            guide.Size = new Size(780, 38);
             guide.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
             guide.ForeColor = Color.FromArgb(210, 78, 78);
             guide.BackColor = Color.FromArgb(255, 248, 230);
-            guide.Location = new Point(455, 27);
+            guide.Location = new Point(295, 27);
             guide.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             card.Controls.Add(guide);
         }
@@ -438,6 +430,7 @@ namespace OVIA.Desktop
             grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(242, 245, 252);
             grid.ColumnHeadersDefaultCellStyle.ForeColor = TextDark;
             grid.ColumnHeadersDefaultCellStyle.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
+            grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             grid.ColumnHeadersHeight = 34;
 
             grid.DefaultCellStyle.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
@@ -460,7 +453,36 @@ namespace OVIA.Desktop
 
             grid.Columns["FilePath"].Visible = false;
 
+            ApplyGridColumnAlignment();
+
             parent.Controls.Add(grid);
+        }
+
+        private void ApplyGridColumnAlignment()
+        {
+            SetColumnAlignment("상태", DataGridViewContentAlignment.MiddleCenter);
+            SetColumnAlignment("등록일", DataGridViewContentAlignment.MiddleCenter);
+            SetColumnAlignment("수정일", DataGridViewContentAlignment.MiddleCenter);
+            SetColumnAlignment("행수", DataGridViewContentAlignment.MiddleCenter);
+            SetColumnAlignment("작성자", DataGridViewContentAlignment.MiddleCenter);
+
+            SetColumnAlignment("제목", DataGridViewContentAlignment.MiddleLeft);
+            SetColumnAlignment("비고", DataGridViewContentAlignment.MiddleLeft);
+
+            SetColumnAlignment("총수량", DataGridViewContentAlignment.MiddleRight);
+            SetColumnAlignment("총길이(M)", DataGridViewContentAlignment.MiddleRight);
+            SetColumnAlignment("중량(Ton)", DataGridViewContentAlignment.MiddleRight);
+        }
+
+        private void SetColumnAlignment(string columnName, DataGridViewContentAlignment alignment)
+        {
+            if (grid == null || !grid.Columns.Contains(columnName))
+            {
+                return;
+            }
+
+            grid.Columns[columnName].HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            grid.Columns[columnName].DefaultCellStyle.Alignment = alignment;
         }
 
         private void AddColumn(string header, int width)
@@ -775,8 +797,39 @@ namespace OVIA.Desktop
 
         private void NewButton_Click(object sender, EventArgs e)
         {
+            if (!IsAutoCadRunning())
+            {
+                MessageBox.Show(
+                    "현재 AutoCAD가 실행중이지 않습니다. AutoCAD를 먼저 실행하세요",
+                    "OVIA AutoCAD 확인",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+
+                if (lblStatus != null)
+                {
+                    lblStatus.Text = "AutoCAD 실행 필요";
+                    lblStatus.ForeColor = Color.FromArgb(210, 78, 78);
+                }
+
+                return;
+            }
+
             FrmBarList form = new FrmBarList(companyId, userId, projectNo, projectName, clientName, projectStatus);
             ShowReplacementWindow(form);
+        }
+
+        private bool IsAutoCadRunning()
+        {
+            try
+            {
+                Process[] processes = Process.GetProcessesByName("acad");
+                return processes != null && processes.Length > 0;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private void OpenButton_Click(object sender, EventArgs e)

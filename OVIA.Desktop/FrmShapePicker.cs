@@ -1,8 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
+using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 namespace OVIA.Desktop
@@ -12,6 +14,9 @@ namespace OVIA.Desktop
         private readonly RebarShapeRepository repository;
         private readonly List<RebarShapeInfo> allShapes;
         private readonly RebarShapeRenderer renderer;
+        private readonly CadShapeRenderer cadRenderer;
+        private readonly string cadShapeJsonPath;
+        private readonly bool hasCadShapeOption;
         private readonly Dictionary<string, TextBox> dimensionBoxes;
         private readonly Dictionary<string, Label> dimensionLabels;
         private readonly Dictionary<int, Dictionary<string, string>> dimensionValueCache;
@@ -19,6 +24,8 @@ namespace OVIA.Desktop
         private RebarShapeInfo currentEditingShape;
         private int lastSelectedIndex;
         private bool isApplyingShapeFields;
+        private string initialSelectedRawValue;
+        private bool initialSelectionApplied;
 
         private TextBox txtSearch;
         private Label lblShapeCodeValue;
@@ -37,6 +44,7 @@ namespace OVIA.Desktop
         private Button btnCancel;
 
         public RebarShapeInfo SelectedShape { get; private set; }
+        public bool SelectedCadShapeOriginal { get; private set; }
         public string SelectedDimensionText { get; private set; }
         public decimal SelectedTotalLength { get; private set; }
 
@@ -46,10 +54,23 @@ namespace OVIA.Desktop
         }
 
         public FrmShapePicker(RebarShapeRepository repository, string currentValue, string currentDimensionText)
+            : this(repository, currentValue, currentDimensionText, "")
+        {
+        }
+
+        public FrmShapePicker(RebarShapeRepository repository, string currentValue, string currentDimensionText, string cadShapeJsonPath)
         {
             this.repository = repository == null ? RebarShapeRepository.CreateDefault() : repository;
             this.allShapes = this.repository.GetUserSelectableShapes();
+            this.cadShapeJsonPath = cadShapeJsonPath == null ? "" : cadShapeJsonPath.Trim();
+            this.hasCadShapeOption = this.cadShapeJsonPath != "" && File.Exists(this.cadShapeJsonPath);
             renderer = new RebarShapeRenderer();
+            cadRenderer = new CadShapeRenderer();
+
+            if (this.hasCadShapeOption)
+            {
+                this.allShapes.Insert(0, CreateCadImportedShape(this.cadShapeJsonPath));
+            }
 
             dimensionBoxes = new Dictionary<string, TextBox>(StringComparer.OrdinalIgnoreCase);
             dimensionLabels = new Dictionary<string, Label>(StringComparer.OrdinalIgnoreCase);
@@ -58,19 +79,249 @@ namespace OVIA.Desktop
             currentEditingShape = null;
             lastSelectedIndex = -1;
             isApplyingShapeFields = false;
+            initialSelectedRawValue = currentValue == null ? "" : currentValue.Trim();
+            initialSelectionApplied = false;
 
             SelectedShape = null;
+            SelectedCadShapeOriginal = false;
             SelectedDimensionText = "";
             SelectedTotalLength = 0M;
 
             string safeCurrentValue = currentValue == null ? "" : currentValue.Trim();
-            PreloadDimensionValues(safeCurrentValue, currentDimensionText);
+
+            if (this.hasCadShapeOption)
+            {
+                // CAD 원본 형상이 있는 행을 다시 수정할 때도 CAD 원본 항목과 이미지 없음 항목은 항상 보여야 합니다.
+                // 현재 행이 OVIA 형상코드로 교체된 상태라면 currentDimensionText는 OVIA 형상 입력값입니다.
+                // 이 값을 CAD 원본 형상 입력란에 재사용하면 CAD 원본값이 오염되므로,
+                // OVIA 형상 선택 상태에서는 CAD JSON 안의 원본 치수값을 우선 사용합니다.
+                bool currentIsManualOviaShape = safeCurrentValue != "";
+                PreloadCadDimensionValues(currentDimensionText, currentIsManualOviaShape);
+
+                if (safeCurrentValue != "")
+                {
+                    PreloadDimensionValues(safeCurrentValue, currentDimensionText);
+                }
+
+                safeCurrentValue = "";
+            }
+            else
+            {
+                PreloadDimensionValues(safeCurrentValue, currentDimensionText);
+            }
 
             BuildUI();
             txtSearch.Text = safeCurrentValue;
             lblShapeCodeValue.Text = "";
             ApplyFilter();
         }
+
+
+        private RebarShapeInfo CreateCadImportedShape(string jsonPath)
+        {
+            RebarShapeInfo shape = new RebarShapeInfo();
+            shape.ShapeNo = -1000;
+            shape.ShapeCode = "CAD";
+            shape.ShapeName = "CAD에서 불러온 형상";
+            shape.Category = "CAD";
+            shape.SourceImagePath = jsonPath;
+            shape.VectorStatus = "CAD_IMPORTED";
+            shape.ApproveStatus = "CAD_CAPTURED";
+            shape.FieldsText = BuildCadFieldText(jsonPath);
+            shape.OptionText = "CAD";
+            shape.IsUserSelectable = true;
+            return shape;
+        }
+
+        private bool IsCadImportedShape(RebarShapeInfo shape)
+        {
+            return shape != null
+                && shape.VectorStatus != null
+                && shape.VectorStatus.Equals("CAD_IMPORTED", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string BuildCadFieldText(string jsonPath)
+        {
+            int count = CountCadTextElements(jsonPath);
+            string[] keys = new string[] { "A", "B", "C", "D", "E", "F", "G", "H", "R1", "R2", "R3", "R4" };
+
+            if (count <= 0)
+            {
+                count = 1;
+            }
+
+            if (count > keys.Length)
+            {
+                count = keys.Length;
+            }
+
+            StringBuilder sb = new StringBuilder();
+            int i;
+
+            for (i = 0; i < count; i++)
+            {
+                if (sb.Length > 0)
+                {
+                    sb.Append("|");
+                }
+
+                sb.Append(keys[i]);
+            }
+
+            return sb.ToString();
+        }
+
+        private int CountCadTextElements(string jsonPath)
+        {
+            if (jsonPath == null || jsonPath.Trim() == "" || !File.Exists(jsonPath))
+            {
+                return 0;
+            }
+
+            try
+            {
+                string json = File.ReadAllText(jsonPath);
+                MatchCollection matches = Regex.Matches(json, "\\{[^\\{\\}]*\\\"type\\\"[^\\{\\}]*\\}", RegexOptions.Singleline);
+                int count = 0;
+                int i;
+
+                for (i = 0; i < matches.Count; i++)
+                {
+                    string item = matches[i].Value;
+                    string type = GetJsonString(item, "type").ToUpperInvariant();
+                    string text = GetJsonString(item, "text").Trim();
+
+                    if (type == "TEXT" && text != "")
+                    {
+                        count++;
+                    }
+                }
+
+                return count;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private void PreloadCadDimensionValues(string currentDimensionText, bool forceCadJsonValues)
+        {
+            RebarShapeInfo shape = null;
+
+            if (allShapes != null && allShapes.Count > 0 && IsCadImportedShape(allShapes[0]))
+            {
+                shape = allShapes[0];
+            }
+
+            if (shape == null)
+            {
+                return;
+            }
+
+            Dictionary<string, string> values;
+
+            if (forceCadJsonValues)
+            {
+                values = BuildDimensionValuesFromCadJson(shape.SourceImagePath, shape.FieldsText);
+            }
+            else
+            {
+                values = ParseDimensionText(currentDimensionText);
+
+                if (values.Count == 0)
+                {
+                    values = BuildDimensionValuesFromCadJson(shape.SourceImagePath, shape.FieldsText);
+                }
+            }
+
+            if (values.Count > 0)
+            {
+                dimensionValueCache[shape.ShapeNo] = values;
+            }
+        }
+
+        private Dictionary<string, string> BuildDimensionValuesFromCadJson(string jsonPath, string fieldsText)
+        {
+            Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            List<string> keys = SplitFieldKeys(fieldsText);
+
+            if (jsonPath == null || jsonPath.Trim() == "" || !File.Exists(jsonPath) || keys.Count == 0)
+            {
+                return values;
+            }
+
+            try
+            {
+                string json = File.ReadAllText(jsonPath);
+                MatchCollection matches = Regex.Matches(json, "\\{[^\\{\\}]*\\\"type\\\"[^\\{\\}]*\\}", RegexOptions.Singleline);
+                int textIndex = 0;
+                int i;
+
+                for (i = 0; i < matches.Count; i++)
+                {
+                    string item = matches[i].Value;
+                    string type = GetJsonString(item, "type").ToUpperInvariant();
+                    string text = GetJsonString(item, "text").Trim();
+
+                    if (type != "TEXT" || text == "")
+                    {
+                        continue;
+                    }
+
+                    if (textIndex >= keys.Count)
+                    {
+                        break;
+                    }
+
+                    values[keys[textIndex]] = text;
+                    textIndex++;
+                }
+            }
+            catch
+            {
+            }
+
+            return values;
+        }
+
+        private List<string> SplitFieldKeys(string fieldsText)
+        {
+            List<string> list = new List<string>();
+
+            if (fieldsText == null || fieldsText.Trim() == "")
+            {
+                return list;
+            }
+
+            string[] parts = fieldsText.Replace(",", "|").Replace("/", "|").Split('|');
+            int i;
+
+            for (i = 0; i < parts.Length; i++)
+            {
+                string key = RebarShapeInfo.NormalizeFieldKey(parts[i]);
+
+                if (key != "" && !ContainsField(list, key))
+                {
+                    list.Add(key);
+                }
+            }
+
+            return list;
+        }
+
+        private string GetJsonString(string json, string key)
+        {
+            Match match = Regex.Match(json, "\\\"" + Regex.Escape(key) + "\\\"\\s*:\\s*\\\"((?:\\\\.|[^\\\\\"])*)\\\"", RegexOptions.Singleline);
+
+            if (!match.Success)
+            {
+                return "";
+            }
+
+            return match.Groups[1].Value.Replace("\\\"", "\"").Replace("\\\\", "\\");
+        }
+
 
         private void PreloadDimensionValues(string currentValue, string currentDimensionText)
         {
@@ -396,7 +647,7 @@ namespace OVIA.Desktop
             currentEditingShape = shape;
             lastSelectedIndex = shapeGrid.SelectedIndex;
             preview.Shape = shape;
-            preview.RawText = txtSearch.Text;
+            preview.RawText = IsCadImportedShape(shape) ? "" : txtSearch.Text;
 
             lblShapeCodeValue.Text = shape.ShapeNo <= 0 ? "" : shape.DisplayCode;
             ApplyShapeFields(shape);
@@ -409,6 +660,11 @@ namespace OVIA.Desktop
             if (shape == null)
             {
                 return "";
+            }
+
+            if (IsCadImportedShape(shape))
+            {
+                return "CAD에서 불러온 형상";
             }
 
             if (shape.ShapeNo <= 0)
@@ -456,32 +712,34 @@ namespace OVIA.Desktop
                     continue;
                 }
 
-                if (!MatchesKeyword(shape, normalized))
+                bool alwaysVisibleTopItem = IsCadImportedShape(shape) || shape.ShapeNo <= 0;
+
+                if (!alwaysVisibleTopItem && !MatchesKeyword(shape, normalized))
                 {
                     continue;
                 }
 
-                if (partCount > 0 && shape.GetLengthFieldCount() != partCount)
+                if (!alwaysVisibleTopItem && partCount > 0 && shape.GetLengthFieldCount() != partCount)
                 {
                     continue;
                 }
 
-                if (chkCoupler.Checked && !shape.HasOption("COUPLER"))
+                if (!alwaysVisibleTopItem && chkCoupler.Checked && !shape.HasOption("COUPLER"))
                 {
                     continue;
                 }
 
-                if (chkRound.Checked && !shape.HasOption("ROUND"))
+                if (!alwaysVisibleTopItem && chkRound.Checked && !shape.HasOption("ROUND"))
                 {
                     continue;
                 }
 
-                if (chkUpDown.Checked && !shape.HasOption("UPDOWN"))
+                if (!alwaysVisibleTopItem && chkUpDown.Checked && !shape.HasOption("UPDOWN"))
                 {
                     continue;
                 }
 
-                if (chkSleeve.Checked && !shape.HasOption("SLEEVE"))
+                if (!alwaysVisibleTopItem && chkSleeve.Checked && !shape.HasOption("SLEEVE"))
                 {
                     continue;
                 }
@@ -496,7 +754,17 @@ namespace OVIA.Desktop
 
             if (filteredShapes.Count > 0)
             {
-                int selectIndex = FindBestSelectIndex(filteredShapes, normalized);
+                int selectIndex;
+
+                if (!initialSelectionApplied && initialSelectedRawValue != null && initialSelectedRawValue.Trim() != "")
+                {
+                    selectIndex = FindBestSelectIndexByRawValue(filteredShapes, initialSelectedRawValue);
+                    initialSelectionApplied = true;
+                }
+                else
+                {
+                    selectIndex = FindBestSelectIndex(filteredShapes, normalized);
+                }
 
                 if (shapeGrid != null)
                 {
@@ -517,6 +785,41 @@ namespace OVIA.Desktop
 
                 ApplyShapeFields(null);
             }
+        }
+
+        private int FindBestSelectIndexByRawValue(List<RebarShapeInfo> shapes, string rawValue)
+        {
+            if (shapes == null || shapes.Count == 0)
+            {
+                return -1;
+            }
+
+            string normalized = Normalize(rawValue);
+
+            if (normalized == "")
+            {
+                return 0;
+            }
+
+            int i;
+
+            for (i = 0; i < shapes.Count; i++)
+            {
+                RebarShapeInfo shape = shapes[i];
+
+                if (shape == null || IsCadImportedShape(shape))
+                {
+                    continue;
+                }
+
+                if (Normalize(shape.DisplayCode).Equals(normalized, StringComparison.OrdinalIgnoreCase)
+                    || Normalize(shape.ShapeCode).Equals(normalized, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i;
+                }
+            }
+
+            return 0;
         }
 
         private int FindBestSelectIndex(List<RebarShapeInfo> shapes, string normalized)
@@ -761,6 +1064,7 @@ namespace OVIA.Desktop
             }
 
             SelectedShape = shape;
+            SelectedCadShapeOriginal = IsCadImportedShape(shape);
             SelectedDimensionText = BuildSelectedDimensionText();
             RecalculateTotalLength();
             DialogResult = DialogResult.OK;
@@ -771,7 +1075,12 @@ namespace OVIA.Desktop
         {
             List<string> list = new List<string>();
 
-            if (shape == null || shape.ShapeNo <= 0)
+            if (shape == null)
+            {
+                return list;
+            }
+
+            if (shape.ShapeNo <= 0 && !IsCadImportedShape(shape))
             {
                 return list;
             }
@@ -810,6 +1119,15 @@ namespace OVIA.Desktop
             if (shape == null)
             {
                 lblInfo.Text = "";
+                return;
+            }
+
+            if (IsCadImportedShape(shape))
+            {
+                lblInfo.Text = "형상구분: CAD에서 불러온 형상\r\n"
+                    + "표시명: CAD 원본 형상 수정\r\n"
+                    + "입력필드: " + (shape.FieldsText == null || shape.FieldsText.Trim() == "" ? "미정의" : shape.FieldsText.Replace("|", ", ")) + "\r\n"
+                    + "사용기준: 기존 CAD 형상은 유지하고 치수값만 수정합니다.";
                 return;
             }
 
@@ -878,6 +1196,7 @@ namespace OVIA.Desktop
     {
         private readonly List<RebarShapeInfo> shapes;
         private readonly RebarShapeRenderer renderer;
+        private readonly CadShapeRenderer cadRenderer;
         private int selectedIndex;
         private int hoveredIndex;
 
@@ -887,6 +1206,7 @@ namespace OVIA.Desktop
         public ShapeGridControl(RebarShapeRenderer renderer)
         {
             this.renderer = renderer == null ? new RebarShapeRenderer() : renderer;
+            cadRenderer = new CadShapeRenderer();
             shapes = new List<RebarShapeInfo>();
             selectedIndex = -1;
             hoveredIndex = -1;
@@ -1046,7 +1366,15 @@ namespace OVIA.Desktop
                     e.Graphics.DrawRectangle(selected ? selectedPen : borderPen, rect);
 
                     Rectangle previewRect = new Rectangle(rect.Left + 12, rect.Top + 8, rect.Width - 24, 68);
-                    renderer.DrawShape(e.Graphics, previewRect, shape, "", selected);
+
+                    if (IsCadImportedShape(shape))
+                    {
+                        cadRenderer.DrawCadShape(e.Graphics, previewRect, shape.SourceImagePath, selected);
+                    }
+                    else
+                    {
+                        renderer.DrawShape(e.Graphics, previewRect, shape, "", selected);
+                    }
 
                     string label = GetShapeLabel(shape);
                     SizeF size = e.Graphics.MeasureString(label, Font);
@@ -1097,12 +1425,27 @@ namespace OVIA.Desktop
 
         private string GetShapeLabel(RebarShapeInfo shape)
         {
+            if (IsCadImportedShape(shape))
+            {
+                return "CAD에서 불러온 형상";
+            }
+
             if (shape == null || shape.ShapeNo <= 0)
             {
                 return "이미지 없음";
             }
 
             return "형상 " + shape.DisplayCode;
+        }
+
+
+        private bool IsCadImportedShape(RebarShapeInfo shape)
+        {
+            return shape != null
+                && shape.VectorStatus != null
+                && shape.VectorStatus.Equals("CAD_IMPORTED", StringComparison.OrdinalIgnoreCase)
+                && shape.SourceImagePath != null
+                && shape.SourceImagePath.Trim() != "";
         }
 
         private int GetCellWidth()

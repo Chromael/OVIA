@@ -29,6 +29,8 @@ namespace OVIA.Desktop
 
         private const int BaseClientWidth = 1180;
         private const int BaseClientHeight = 720;
+        private const int MinFormWidth = 1100;
+        private const int MinFormHeight = 750;
         private Panel scrollPanel;
         private Panel contentPanel;
         private bool isScrollResetQueued = false;
@@ -54,7 +56,7 @@ namespace OVIA.Desktop
             this.MaximizeBox = true;
             this.MinimizeBox = true;
             this.ClientSize = new Size(BaseClientWidth, BaseClientHeight);
-            this.MinimumSize = new Size(760, 520);
+            this.MinimumSize = new Size(MinFormWidth, MinFormHeight);
             this.BackColor = SurfaceColor;
 
             windowToolTip = new ToolTip();
@@ -367,19 +369,9 @@ namespace OVIA.Desktop
             chkIncludeDone.CheckedChanged += Filter_Changed;
             card.Controls.Add(chkIncludeDone);
 
-            OviaProjectButton openButton = new OviaProjectButton();
-            openButton.Text = "선택한 공사 열기";
-            openButton.Location = new Point(800, 38);
-            openButton.Size = new Size(145, 36);
-            openButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            openButton.StartColor = BrandCyan;
-            openButton.EndColor = BrandViolet;
-            openButton.Click += OpenSelectedProject_Click;
-            card.Controls.Add(openButton);
-
             OviaProjectButton newButton = new OviaProjectButton();
             newButton.Text = "새 공사";
-            newButton.Location = new Point(965, 38);
+            newButton.Location = new Point(981, 38);
             newButton.Size = new Size(105, 36);
             newButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             newButton.StartColor = BrandViolet;
@@ -406,12 +398,14 @@ namespace OVIA.Desktop
             grid.MultiSelect = false;
             grid.RowHeadersVisible = false;
             grid.ReadOnly = true;
+            grid.CellClick += Grid_CellClick;
             grid.CellDoubleClick += Grid_CellDoubleClick;
 
             grid.EnableHeadersVisualStyles = false;
             grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(242, 245, 252);
             grid.ColumnHeadersDefaultCellStyle.ForeColor = TextDark;
             grid.ColumnHeadersDefaultCellStyle.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
+            grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             grid.ColumnHeadersHeight = 34;
 
             grid.DefaultCellStyle.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
@@ -429,6 +423,8 @@ namespace OVIA.Desktop
             AddColumn("담당자", 90);
             AddColumn("비고", 190);
 
+            ApplyProjectGridAlignments();
+
             parent.Controls.Add(grid);
         }
 
@@ -443,7 +439,38 @@ namespace OVIA.Desktop
             column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
             column.SortMode = DataGridViewColumnSortMode.NotSortable;
             column.Resizable = DataGridViewTriState.True;
+            column.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
             grid.Columns.Add(column);
+        }
+
+        private void ApplyProjectGridAlignments()
+        {
+            if (grid == null)
+            {
+                return;
+            }
+
+            int i;
+
+            for (i = 0; i < grid.Columns.Count; i++)
+            {
+                grid.Columns[i].HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                grid.Columns[i].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            }
+
+            SetColumnAlignment("공사명", DataGridViewContentAlignment.MiddleLeft);
+            SetColumnAlignment("거래처", DataGridViewContentAlignment.MiddleLeft);
+            SetColumnAlignment("비고", DataGridViewContentAlignment.MiddleLeft);
+        }
+
+        private void SetColumnAlignment(string columnName, DataGridViewContentAlignment alignment)
+        {
+            if (grid == null || !grid.Columns.Contains(columnName))
+            {
+                return;
+            }
+
+            grid.Columns[columnName].DefaultCellStyle.Alignment = alignment;
         }
 
         private void BuildFooter(Control parent)
@@ -559,6 +586,19 @@ namespace OVIA.Desktop
             BindProjects();
         }
 
+        private void Grid_CellClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            if (grid.Columns[e.ColumnIndex].HeaderText == "공사명")
+            {
+                OpenSelectedProject();
+            }
+        }
+
         private void Grid_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
         {
             if (e.RowIndex < 0)
@@ -566,11 +606,6 @@ namespace OVIA.Desktop
                 return;
             }
 
-            OpenSelectedProject();
-        }
-
-        private void OpenSelectedProject_Click(object sender, EventArgs e)
-        {
             OpenSelectedProject();
         }
 

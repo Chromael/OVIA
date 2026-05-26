@@ -68,6 +68,14 @@ namespace OVIA.Desktop
         private int lastMappingTotalHeaderCount = 0;
         private string lastMappingVersion = "";
 
+        private const int GridZoomMinPercent = 100;
+        private const int GridZoomMaxPercent = 220;
+        private const int GridZoomStepPercent = 10;
+        private const int GridBaseHeaderHeight = 34;
+        private const int GridBaseRowHeight = 62;
+        private const int GridBaseRowHeaderWidth = 48;
+        private int gridZoomPercent = GridZoomMinPercent;
+
         private FileSystemWatcher autoCadWatcher;
         private DateTime autoImportStartTime;
         private string lastLoadedFilePath = "";
@@ -678,11 +686,11 @@ namespace OVIA.Desktop
             grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
             grid.MultiSelect = true;
             grid.RowHeadersVisible = true;
-            grid.RowHeadersWidth = 48;
+            grid.RowHeadersWidth = ScaleGridSize(GridBaseRowHeaderWidth);
             grid.RowHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             grid.RowHeadersDefaultCellStyle.BackColor = Color.FromArgb(242, 245, 252);
             grid.RowHeadersDefaultCellStyle.ForeColor = TextSub;
-            grid.RowHeadersDefaultCellStyle.Font = new Font("맑은 고딕", 8.5F, FontStyle.Regular);
+            grid.RowHeadersDefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(8.5F), FontStyle.Regular);
             grid.EditMode = DataGridViewEditMode.EditProgrammatically;
             grid.CellBeginEdit += Grid_CellBeginEdit;
             grid.CellEndEdit += Grid_CellEndEdit;
@@ -698,19 +706,20 @@ namespace OVIA.Desktop
             grid.ColumnHeaderMouseClick += Grid_ColumnHeaderMouseClick;
             grid.SelectionChanged += Grid_SelectionChanged;
             grid.KeyDown += Grid_KeyDown;
+            grid.MouseWheel += Grid_MouseWheel;
 
             grid.EnableHeadersVisualStyles = false;
             grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(242, 245, 252);
             grid.ColumnHeadersDefaultCellStyle.ForeColor = TextDark;
-            grid.ColumnHeadersDefaultCellStyle.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
+            grid.ColumnHeadersDefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(9F), FontStyle.Bold);
             grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
-            grid.ColumnHeadersHeight = 34;
+            grid.ColumnHeadersHeight = ScaleGridSize(GridBaseHeaderHeight);
 
-            grid.DefaultCellStyle.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+            grid.DefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(9F), FontStyle.Regular);
             grid.DefaultCellStyle.ForeColor = TextDark;
             grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(255, 248, 205);
             grid.DefaultCellStyle.SelectionForeColor = TextDark;
-            grid.RowTemplate.Height = 62;
+            grid.RowTemplate.Height = ScaleGridSize(GridBaseRowHeight);
 
             BuildGridContextMenu();
 
@@ -1096,6 +1105,7 @@ namespace OVIA.Desktop
                     filePath = Path.Combine(dir, fileName);
                 }
 
+                NormalizeCadShapeJsonFilesForSave(filePath);
                 SaveGridToCsv(filePath);
                 ResetAllRowOriginalValuesToCurrent();
 
@@ -1186,6 +1196,7 @@ namespace OVIA.Desktop
 
             try
             {
+                NormalizeCadShapeJsonFilesForSave(dialog.FileName);
                 SaveGridToCsv(dialog.FileName);
 
                 MessageBox.Show(
@@ -1566,6 +1577,138 @@ namespace OVIA.Desktop
                 e.SuppressKeyPress = true;
                 return;
             }
+
+            if (e.Control && !e.Shift && e.KeyCode == Keys.D0)
+            {
+                ResetGridZoom();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
+        }
+
+        private void Grid_MouseWheel(object sender, MouseEventArgs e)
+        {
+            if ((Control.ModifierKeys & Keys.Control) != Keys.Control)
+            {
+                return;
+            }
+
+            HandledMouseEventArgs handled = e as HandledMouseEventArgs;
+
+            if (handled != null)
+            {
+                handled.Handled = true;
+            }
+
+            if (e.Delta > 0)
+            {
+                ChangeGridZoom(GridZoomStepPercent);
+            }
+            else if (e.Delta < 0)
+            {
+                ChangeGridZoom(-GridZoomStepPercent);
+            }
+        }
+
+        private void ChangeGridZoom(int deltaPercent)
+        {
+            int nextPercent = gridZoomPercent + deltaPercent;
+
+            if (nextPercent < GridZoomMinPercent)
+            {
+                nextPercent = GridZoomMinPercent;
+            }
+
+            if (nextPercent > GridZoomMaxPercent)
+            {
+                nextPercent = GridZoomMaxPercent;
+            }
+
+            if (nextPercent == gridZoomPercent)
+            {
+                return;
+            }
+
+            gridZoomPercent = nextPercent;
+            ApplyGridZoomLayout();
+
+            if (lblStatus != null)
+            {
+                lblStatus.Text = "BarList 보기 배율 " + gridZoomPercent.ToString() + "%";
+                lblStatus.ForeColor = TextSub;
+            }
+        }
+
+        private void ResetGridZoom()
+        {
+            if (gridZoomPercent == GridZoomMinPercent)
+            {
+                return;
+            }
+
+            gridZoomPercent = GridZoomMinPercent;
+            ApplyGridZoomLayout();
+
+            if (lblStatus != null)
+            {
+                lblStatus.Text = "BarList 보기 배율 100%로 복귀했습니다.";
+                lblStatus.ForeColor = TextSub;
+            }
+        }
+
+        private void ApplyGridZoomLayout()
+        {
+            if (grid == null || grid.IsDisposed)
+            {
+                return;
+            }
+
+            grid.SuspendLayout();
+
+            try
+            {
+                grid.RowHeadersWidth = ScaleGridSize(GridBaseRowHeaderWidth);
+                grid.ColumnHeadersHeight = ScaleGridSize(GridBaseHeaderHeight);
+                grid.ColumnHeadersDefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(9F), FontStyle.Bold);
+                grid.DefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(9F), FontStyle.Regular);
+                grid.RowHeadersDefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(8.5F), FontStyle.Regular);
+                ApplyGridColumnStyle();
+            }
+            finally
+            {
+                grid.ResumeLayout();
+                grid.Invalidate();
+            }
+        }
+
+        private int ScaleGridSize(int baseValue)
+        {
+            int scaled = (int)Math.Round(baseValue * (gridZoomPercent / 100.0));
+
+            if (scaled < 1)
+            {
+                scaled = 1;
+            }
+
+            return scaled;
+        }
+
+        private float ScaleGridFont(float baseSize)
+        {
+            float scaled = baseSize * gridZoomPercent / 100F;
+
+            if (scaled < baseSize)
+            {
+                scaled = baseSize;
+            }
+
+            if (scaled > 22F)
+            {
+                scaled = 22F;
+            }
+
+            return scaled;
         }
 
         private void Grid_SelectionChanged(object sender, EventArgs e)
@@ -1621,7 +1764,7 @@ namespace OVIA.Desktop
                 e.Graphics.FillRectangle(brush, headerBounds);
             }
 
-            using (Pen pen = new Pen(rowSelected ? Color.FromArgb(188, 136, 0) : Color.FromArgb(220, 225, 235), rowSelected ? 2F : 1F))
+            using (Pen pen = new Pen(rowSelected ? Color.FromArgb(188, 136, 0) : Color.FromArgb(220, 225, 235), 1F))
             {
                 e.Graphics.DrawRectangle(pen, headerBounds.Left, headerBounds.Top, headerBounds.Width - 1, headerBounds.Height - 1);
             }
@@ -1672,10 +1815,6 @@ namespace OVIA.Desktop
                 return;
             }
 
-            bool singleCellSelected = selectedCellCountCache <= 1;
-            Color backColor = singleCellSelected ? Color.FromArgb(255, 219, 58) : Color.FromArgb(255, 248, 205);
-            Color borderColor = singleCellSelected ? Color.FromArgb(170, 122, 0) : Color.FromArgb(226, 189, 67);
-
             if (IsCellModified(e.RowIndex, e.ColumnIndex))
             {
                 e.CellStyle.ForeColor = ModifiedCellTextColor;
@@ -1688,52 +1827,29 @@ namespace OVIA.Desktop
             }
 
             e.Handled = true;
+            PaintGridCellBase(e, true);
+            e.PaintContent(e.CellBounds);
+            PaintGridCellBorder(e.Graphics, e.CellBounds, true);
+        }
+
+        private void PaintGridCellBase(DataGridViewCellPaintingEventArgs e, bool selected)
+        {
+            Color backColor = selected ? Color.FromArgb(255, 248, 205) : Color.White;
 
             using (SolidBrush brush = new SolidBrush(backColor))
             {
                 e.Graphics.FillRectangle(brush, e.CellBounds);
             }
+        }
 
-            e.PaintContent(e.CellBounds);
+        private void PaintGridCellBorder(Graphics graphics, Rectangle bounds, bool selected)
+        {
+            Color borderColor = selected ? Color.FromArgb(226, 189, 67) : Color.FromArgb(185, 190, 200);
+            Rectangle rect = new Rectangle(bounds.Left, bounds.Top, bounds.Width - 1, bounds.Height - 1);
 
-            Rectangle rect = new Rectangle(e.CellBounds.Left, e.CellBounds.Top, e.CellBounds.Width - 1, e.CellBounds.Height - 1);
-
-            if (singleCellSelected)
+            using (Pen pen = new Pen(borderColor, 1F))
             {
-                using (Pen pen = new Pen(borderColor, 3F))
-                {
-                    e.Graphics.DrawRectangle(pen, rect);
-                }
-            }
-            else
-            {
-                using (Pen innerPen = new Pen(Color.FromArgb(242, 214, 126), 1F))
-                {
-                    e.Graphics.DrawRectangle(innerPen, rect);
-                }
-
-                using (Pen outerPen = new Pen(borderColor, 2F))
-                {
-                    if (!IsGridCellSelected(e.RowIndex - 1, e.ColumnIndex))
-                    {
-                        e.Graphics.DrawLine(outerPen, rect.Left, rect.Top, rect.Right, rect.Top);
-                    }
-
-                    if (!IsGridCellSelected(e.RowIndex + 1, e.ColumnIndex))
-                    {
-                        e.Graphics.DrawLine(outerPen, rect.Left, rect.Bottom, rect.Right, rect.Bottom);
-                    }
-
-                    if (!IsGridCellSelected(e.RowIndex, e.ColumnIndex - 1))
-                    {
-                        e.Graphics.DrawLine(outerPen, rect.Left, rect.Top, rect.Left, rect.Bottom);
-                    }
-
-                    if (!IsGridCellSelected(e.RowIndex, e.ColumnIndex + 1))
-                    {
-                        e.Graphics.DrawLine(outerPen, rect.Right, rect.Top, rect.Right, rect.Bottom);
-                    }
-                }
+                graphics.DrawRectangle(pen, rect);
             }
         }
 
@@ -3112,6 +3228,34 @@ namespace OVIA.Desktop
             return candidates[0];
         }
 
+
+        private string NormalizeBarListDisplayHeader(string header)
+        {
+            if (header == null)
+            {
+                return "";
+            }
+
+            string value = header.Trim();
+
+            if (value == "")
+            {
+                return value;
+            }
+
+            if (value.IndexOf("총중량", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "중량(TON)";
+            }
+
+            if (value.Equals("부호/명칭", StringComparison.OrdinalIgnoreCase) || value.Equals("부호 및 명칭", StringComparison.OrdinalIgnoreCase))
+            {
+                return "부호";
+            }
+
+            return value;
+        }
+
         private bool IsOviaAutoCadTableCsvFile(string fileName)
         {
             if (fileName == null)
@@ -3169,6 +3313,8 @@ namespace OVIA.Desktop
 
         private void BindCsvRows(List<List<string>> rows)
         {
+            rows = RemoveRuntimeCsvColumnsForDisplay(rows);
+
             BeginGridSelectionUpdate();
             grid.SuspendLayout();
 
@@ -3189,7 +3335,7 @@ namespace OVIA.Desktop
 
                 for (i = 0; i < mappedTable.Columns.Count; i++)
                 {
-                    string header = mappedTable.Columns[i].DisplayName;
+                    string header = NormalizeBarListDisplayHeader(mappedTable.Columns[i].DisplayName);
 
                     if (header == null || header.Trim() == "")
                     {
@@ -3244,6 +3390,94 @@ namespace OVIA.Desktop
                 grid.ResumeLayout();
                 EndGridSelectionUpdate();
             }
+        }
+
+
+        private List<List<string>> RemoveRuntimeCsvColumnsForDisplay(List<List<string>> rows)
+        {
+            if (rows == null || rows.Count == 0 || rows[0] == null)
+            {
+                return rows;
+            }
+
+            List<int> keepIndexes = new List<int>();
+            int i;
+
+            for (i = 0; i < rows[0].Count; i++)
+            {
+                string header = rows[0][i] == null ? "" : rows[0][i].Trim();
+
+                // AutoCAD 추출 CSV의 No/RowType/SourceRowNo는 OVIA 내부 관리용입니다.
+                // 이 값이 매핑 테이블에서 사용자용 "번호"로 먼저 잡히면
+                // CAD 원본 번호 7, 8, 9 대신 화면에 1, 2, 3처럼 내부 순번이 표시됩니다.
+                // 따라서 화면 매핑 전 단계에서 이 3개 내부 컬럼만 제거하고,
+                // OVIA_CAD_SHAPE_JSON 등 렌더링에 필요한 숨김 컬럼은 그대로 유지합니다.
+                if (IsRuntimeCsvColumn(header))
+                {
+                    continue;
+                }
+
+                keepIndexes.Add(i);
+            }
+
+            if (keepIndexes.Count == rows[0].Count)
+            {
+                return rows;
+            }
+
+            List<List<string>> filtered = new List<List<string>>();
+            int r;
+
+            for (r = 0; r < rows.Count; r++)
+            {
+                List<string> sourceRow = rows[r];
+                List<string> newRow = new List<string>();
+
+                for (i = 0; i < keepIndexes.Count; i++)
+                {
+                    int sourceIndex = keepIndexes[i];
+
+                    if (sourceRow != null && sourceIndex >= 0 && sourceIndex < sourceRow.Count)
+                    {
+                        newRow.Add(sourceRow[sourceIndex]);
+                    }
+                    else
+                    {
+                        newRow.Add("");
+                    }
+                }
+
+                filtered.Add(newRow);
+            }
+
+            return filtered;
+        }
+
+        private bool IsRuntimeCsvColumn(string header)
+        {
+            if (header == null)
+            {
+                return false;
+            }
+
+            string value = header.Trim();
+
+            if (value.Equals("No", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (value.Equals("RowType", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (value.Equals("SourceRowNo", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
         }
 
         private bool IsRebarShapeColumn(int columnIndex)
@@ -3315,23 +3549,36 @@ namespace OVIA.Desktop
             bool selected = grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Selected;
             string cadShapePath = ResolveCadShapeJsonPath(GetCadShapeJsonText(e.RowIndex));
 
-            if (cadShapePath != "" && File.Exists(cadShapePath))
+            e.Handled = true;
+            PaintGridCellBase(e, selected);
+
+            if (!IsManualShapeOverrideRow(e.RowIndex) && cadShapePath != "" && File.Exists(cadShapePath))
             {
-                e.Paint(e.ClipBounds, DataGridViewPaintParts.Background);
-                cadShapeRenderer.DrawCadShape(e.Graphics, e.CellBounds, cadShapePath, selected);
-                e.Handled = true;
+                cadShapeRenderer.DrawCadShape(e.Graphics, e.CellBounds, cadShapePath, selected, GetShapeDimensionText(e.RowIndex));
+                PaintGridCellBorder(e.Graphics, e.CellBounds, selected);
                 return;
             }
 
-            e.Paint(e.ClipBounds, DataGridViewPaintParts.Background);
             string dimensionText = GetShapeDimensionText(e.RowIndex);
             shapeRenderer.DrawShape(e.Graphics, e.CellBounds, shape, rawText, selected, dimensionText);
-            e.Handled = true;
+            PaintGridCellBorder(e.Graphics, e.CellBounds, selected);
         }
 
         private string GetCadShapeJsonText(int rowIndex)
         {
             return GetFirstExistingCellText(rowIndex, new string[] { "OVIA_CAD_SHAPE_JSON", "CAD_SHAPE_JSON", "OVIA CAD SHAPE JSON" });
+        }
+
+        private string GetShapeSourceText(int rowIndex)
+        {
+            return GetFirstExistingCellText(rowIndex, new string[] { "OVIA_SHAPE_SOURCE", "SHAPE_SOURCE", "OVIA SHAPE SOURCE" });
+        }
+
+        private bool IsManualShapeOverrideRow(int rowIndex)
+        {
+            string source = GetShapeSourceText(rowIndex);
+
+            return source != null && source.Trim().Equals("MANUAL", StringComparison.OrdinalIgnoreCase);
         }
 
         private string ResolveCadShapeJsonPath(string value)
@@ -3370,6 +3617,132 @@ namespace OVIA.Desktop
             return Path.Combine(dir, path.Replace('/', Path.DirectorySeparatorChar));
         }
 
+
+        private void NormalizeCadShapeJsonFilesForSave(string targetCsvPath)
+        {
+            if (grid == null || grid.Rows.Count == 0 || targetCsvPath == null || targetCsvPath.Trim() == "")
+            {
+                return;
+            }
+
+            int cadShapeColumnIndex = FindExactColumnIndexByHeaders(new string[] { "OVIA_CAD_SHAPE_JSON", "CAD_SHAPE_JSON", "OVIA CAD SHAPE JSON" });
+
+            if (cadShapeColumnIndex < 0)
+            {
+                return;
+            }
+
+            string targetDir = Path.GetDirectoryName(targetCsvPath);
+
+            if (targetDir == null || targetDir.Trim() == "")
+            {
+                return;
+            }
+
+            string shapeDir = Path.Combine(targetDir, "Shapes");
+            bool shapeDirCreated = false;
+            int r;
+
+            for (r = 0; r < grid.Rows.Count; r++)
+            {
+                if (grid.Rows[r].IsNewRow)
+                {
+                    continue;
+                }
+
+                object rawValue = grid.Rows[r].Cells[cadShapeColumnIndex].Value;
+                string savedValue = rawValue == null ? "" : rawValue.ToString().Trim();
+
+                if (savedValue == "")
+                {
+                    continue;
+                }
+
+                string sourcePath = ResolveCadShapeJsonPath(savedValue);
+
+                if (sourcePath == "" || !File.Exists(sourcePath))
+                {
+                    continue;
+                }
+
+                if (!shapeDirCreated)
+                {
+                    Directory.CreateDirectory(shapeDir);
+                    shapeDirCreated = true;
+                }
+
+                string fileName = Path.GetFileName(sourcePath);
+
+                if (fileName == null || fileName.Trim() == "")
+                {
+                    fileName = "row_" + (r + 1).ToString("000") + "_shape.json";
+                }
+
+                string targetPath = Path.Combine(shapeDir, fileName);
+
+                if (!IsSameFullPath(sourcePath, targetPath))
+                {
+                    File.Copy(sourcePath, targetPath, true);
+                }
+
+                grid.Rows[r].Cells[cadShapeColumnIndex].Value = "Shapes/" + fileName;
+            }
+        }
+
+        private int FindExactColumnIndexByHeaders(string[] headers)
+        {
+            if (grid == null || headers == null)
+            {
+                return -1;
+            }
+
+            int i;
+            int j;
+
+            for (i = 0; i < grid.Columns.Count; i++)
+            {
+                string header = grid.Columns[i].HeaderText == null ? "" : grid.Columns[i].HeaderText.Trim();
+                string name = grid.Columns[i].Name == null ? "" : grid.Columns[i].Name.Trim();
+
+                for (j = 0; j < headers.Length; j++)
+                {
+                    string target = headers[j] == null ? "" : headers[j].Trim();
+
+                    if (target == "")
+                    {
+                        continue;
+                    }
+
+                    if (header.Equals(target, StringComparison.OrdinalIgnoreCase) || name.Equals(target, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return i;
+                    }
+                }
+            }
+
+            return -1;
+        }
+
+        private bool IsSameFullPath(string pathA, string pathB)
+        {
+            if (pathA == null || pathB == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                string a = Path.GetFullPath(pathA).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string b = Path.GetFullPath(pathB).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                return a.Equals(b, StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private void OpenShapePickerForCell(int rowIndex, int columnIndex)
         {
             if (grid == null || rowIndex < 0 || columnIndex < 0 || rowIndex >= grid.Rows.Count || columnIndex >= grid.Columns.Count)
@@ -3386,7 +3759,8 @@ namespace OVIA.Desktop
             string currentShapeNo = GetShapeNumberText(rowIndex);
             string currentDimensionText = GetShapeDimensionText(rowIndex);
             string pickerSearchValue = currentShapeNo != "" ? currentShapeNo : currentValue;
-            FrmShapePicker picker = new FrmShapePicker(GetShapeRepository(), pickerSearchValue, currentDimensionText);
+            string currentCadShapePath = ResolveCadShapeJsonPath(GetCadShapeJsonText(rowIndex));
+            FrmShapePicker picker = new FrmShapePicker(GetShapeRepository(), pickerSearchValue, currentDimensionText, currentCadShapePath);
 
             if (picker.ShowDialog(this) != DialogResult.OK || picker.SelectedShape == null)
             {
@@ -3395,19 +3769,47 @@ namespace OVIA.Desktop
 
             PushUndoState(CaptureGridState());
 
-            // CAD에서 추출된 원본 형상이 남아 있으면 PaintRebarShapeGridCell이 CAD JSON을 우선 렌더링합니다.
-            // 사용자가 형상코드 선택창에서 수동 형상을 선택한 경우에는 CAD 원본 형상 메타를 지워야
-            // 선택한 OVIA 형상코드와 입력 치수값이 철근형상 셀에 바로 표시됩니다.
-            ClearCadShapeMetaCells(rowIndex);
+            if (picker.SelectedCadShapeOriginal)
+            {
+                // CAD에서 가져온 형상은 그대로 유지하고, 형상 안의 치수값만 수정합니다.
+                // 형상번호는 OVIA 마스터 형상코드가 아니므로 비워둡니다.
+                grid.Rows[rowIndex].Cells[columnIndex].Value = "";
+                SetShapeMetaCellIfExists(rowIndex, new string[] { "형상번호", "OVIA_형상번호", "OVIA 형상번호", "OVIA형상번호" }, "");
+                SetShapeMetaCellIfExists(rowIndex, new string[] { "OVIA_형상치수", "OVIA 형상치수", "OVIA형상치수" }, picker.SelectedDimensionText);
+                SetShapeMetaCellIfExists(rowIndex, new string[] { "OVIA_SHAPE_SOURCE", "SHAPE_SOURCE", "OVIA SHAPE SOURCE" }, "CAD");
+                SetShapeMetaCellIfExists(rowIndex, new string[] { "OVIA_SHAPE_STATUS", "SHAPE_STATUS", "OVIA SHAPE STATUS" }, "CAD_EDITED");
+                SetShapeDimensionColumnsIfExists(rowIndex, picker.SelectedDimensionText);
+                lblStatus.Text = "CAD에서 불러온 철근형상의 치수값을 수정했습니다.";
+            }
+            else
+            {
+                // 사용자가 OVIA 형상코드 또는 이미지 없음을 선택해도 기존 CAD 원본 형상 경로는 보존합니다.
+                // 그래야 다시 수정할 때 목록 맨 위에서 CAD 원본 형상으로 되돌릴 수 있습니다.
+                // 화면 렌더링은 OVIA_SHAPE_SOURCE=MANUAL 기준으로 수동 형상을 우선 표시합니다.
+                if (picker.SelectedShape.ShapeNo <= 0)
+                {
+                    grid.Rows[rowIndex].Cells[columnIndex].Value = "";
+                    SetShapeMetaCellIfExists(rowIndex, new string[] { "형상번호", "OVIA_형상번호", "OVIA 형상번호", "OVIA형상번호" }, "");
+                    SetShapeMetaCellIfExists(rowIndex, new string[] { "OVIA_형상치수", "OVIA 형상치수", "OVIA형상치수" }, "");
+                    SetShapeMetaCellIfExists(rowIndex, new string[] { "OVIA_SHAPE_SOURCE", "SHAPE_SOURCE", "OVIA SHAPE SOURCE" }, "MANUAL");
+                    SetShapeMetaCellIfExists(rowIndex, new string[] { "OVIA_SHAPE_STATUS", "SHAPE_STATUS", "OVIA SHAPE STATUS" }, "MANUAL_NO_IMAGE");
+                    lblStatus.Text = "철근 형상을 이미지 없음으로 변경했습니다.";
+                }
+                else
+                {
+                    grid.Rows[rowIndex].Cells[columnIndex].Value = picker.SelectedShape.DisplayCode;
+                    SetShapeMetaCellIfExists(rowIndex, new string[] { "형상번호", "OVIA_형상번호", "OVIA 형상번호", "OVIA형상번호" }, picker.SelectedShape.DisplayCode);
+                    SetShapeMetaCellIfExists(rowIndex, new string[] { "OVIA_형상치수", "OVIA 형상치수", "OVIA형상치수" }, picker.SelectedDimensionText);
+                    SetShapeDimensionColumnsIfExists(rowIndex, picker.SelectedDimensionText);
+                    SetShapeMetaCellIfExists(rowIndex, new string[] { "OVIA_SHAPE_SOURCE", "SHAPE_SOURCE", "OVIA SHAPE SOURCE" }, "MANUAL");
+                    SetShapeMetaCellIfExists(rowIndex, new string[] { "OVIA_SHAPE_STATUS", "SHAPE_STATUS", "OVIA SHAPE STATUS" }, "MANUAL_SELECTED");
+                    lblStatus.Text = "철근 형상 " + picker.SelectedShape.DisplayName + "을(를) 선택했습니다.";
+                }
+            }
 
-            grid.Rows[rowIndex].Cells[columnIndex].Value = picker.SelectedShape.DisplayCode;
-            SetShapeMetaCellIfExists(rowIndex, new string[] { "형상번호", "OVIA_형상번호", "OVIA 형상번호", "OVIA형상번호" }, picker.SelectedShape.DisplayCode);
-            SetShapeMetaCellIfExists(rowIndex, new string[] { "OVIA_형상치수", "OVIA 형상치수", "OVIA형상치수" }, picker.SelectedDimensionText);
-            SetShapeDimensionColumnsIfExists(rowIndex, picker.SelectedDimensionText);
             RefreshModifiedCellVisual(rowIndex, columnIndex);
             MarkUnsaved();
             RecalculateSummary();
-            lblStatus.Text = "철근 형상 " + picker.SelectedShape.DisplayName + "을(를) 선택했습니다.";
             lblStatus.ForeColor = TextSub;
             grid.InvalidateRow(rowIndex);
         }
@@ -3734,8 +4136,8 @@ namespace OVIA.Desktop
             column.SortMode = DataGridViewColumnSortMode.NotSortable;
             column.ReadOnly = false;
             column.MinimumWidth = 55;
-            column.Width = 80;
-            column.FillWeight = 80;
+            column.Width = 68;
+            column.FillWeight = 68;
             grid.Columns.Insert(insertIndex, column);
         }
 
@@ -3813,8 +4215,8 @@ namespace OVIA.Desktop
                 column.SortMode = DataGridViewColumnSortMode.NotSortable;
                 column.ReadOnly = false;
                 column.MinimumWidth = 55;
-                column.Width = 70;
-                column.FillWeight = 70;
+                column.Width = 62;
+                column.FillWeight = 62;
                 grid.Columns.Insert(shapeColumnIndex, column);
                 existingIndex = column.Index;
 
@@ -3989,21 +4391,22 @@ namespace OVIA.Desktop
             EnsurePartColumnExists();
             EnsureShapeNumberColumnExists();
 
-            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            grid.ScrollBars = ScrollBars.Vertical;
+            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+            grid.ScrollBars = ScrollBars.Both;
 
             for (i = 0; i < grid.Columns.Count; i++)
             {
                 string name = grid.Columns[i].HeaderText;
                 int baseWidth = 95;
+                bool fillColumn = false;
 
                 if (grid.Columns[i].Name != null && grid.Columns[i].Name.Equals("OVIA_PartVisible", StringComparison.OrdinalIgnoreCase))
                 {
-                    baseWidth = 80;
+                    baseWidth = 68;
                 }
                 else if (grid.Columns[i].Name != null && grid.Columns[i].Name.Equals("OVIA_ShapeNoVisible", StringComparison.OrdinalIgnoreCase))
                 {
-                    baseWidth = 75;
+                    baseWidth = 62;
                 }
                 else if (IsInternalOviaColumn(name))
                 {
@@ -4012,19 +4415,19 @@ namespace OVIA.Desktop
                 }
                 else if (IsRebarShapeHeader(name))
                 {
-                    baseWidth = 150;
+                    baseWidth = 145;
                 }
                 else if (name != null && name.Trim().Equals("형상번호", StringComparison.OrdinalIgnoreCase))
                 {
-                    baseWidth = 75;
+                    baseWidth = 62;
                 }
                 else if (ContainsAny(name, "부위", "위치", "구간"))
                 {
-                    baseWidth = 80;
+                    baseWidth = 68;
                 }
-                else if (ContainsAny(name, "번호"))
+                else if (name != null && name.Trim().Equals("번호", StringComparison.OrdinalIgnoreCase))
                 {
-                    baseWidth = 60;
+                    baseWidth = 48;
                 }
                 else if (ContainsAny(name, "규격"))
                 {
@@ -4032,30 +4435,37 @@ namespace OVIA.Desktop
                 }
                 else if (ContainsAny(name, "형상"))
                 {
-                    baseWidth = 130;
+                    baseWidth = 145;
                 }
                 else if (ContainsAny(name, "길이"))
                 {
-                    baseWidth = 90;
+                    baseWidth = 105;
                 }
                 else if (ContainsAny(name, "수량"))
                 {
-                    baseWidth = 75;
+                    baseWidth = 88;
+                }
+                else if (ContainsAny(name, "총길이"))
+                {
+                    baseWidth = 110;
                 }
                 else if (ContainsAny(name, "중량"))
                 {
-                    baseWidth = 95;
+                    baseWidth = 112;
                 }
                 else if (ContainsAny(name, "비고"))
                 {
-                    baseWidth = 130;
+                    baseWidth = 150;
+                    fillColumn = true;
                 }
 
+                int scaledWidth = ScaleGridSize(baseWidth);
+
                 grid.Columns[i].Visible = true;
-                grid.Columns[i].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-                grid.Columns[i].FillWeight = baseWidth;
-                grid.Columns[i].MinimumWidth = 45;
-                grid.Columns[i].Width = baseWidth;
+                grid.Columns[i].AutoSizeMode = fillColumn ? DataGridViewAutoSizeColumnMode.Fill : DataGridViewAutoSizeColumnMode.None;
+                grid.Columns[i].FillWeight = scaledWidth;
+                grid.Columns[i].MinimumWidth = Math.Min(scaledWidth, ScaleGridSize(45));
+                grid.Columns[i].Width = scaledWidth;
                 grid.Columns[i].HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
                 grid.Columns[i].DefaultCellStyle.Alignment = GetBarListCellAlignment(name);
             }
@@ -4066,7 +4476,7 @@ namespace OVIA.Desktop
             {
                 if (!grid.Rows[r].IsNewRow)
                 {
-                    grid.Rows[r].Height = 62;
+                    grid.Rows[r].Height = ScaleGridSize(GridBaseRowHeight);
                 }
             }
         }
@@ -4959,13 +5369,14 @@ namespace OVIA.Desktop
 
             store.AddColumn("no", "번호", "number_or_text", 100, "NO", "NO.", "No", "No.", "순번", "번호", "번", "숫자");
             store.AddColumn("part", "부위", "text", 100, "부위", "위치", "층", "구간", "시공부위", "ZONE", "AREA", "LOCATION");
-            store.AddColumn("mark", "부호/명칭", "text", 100, "부호", "명칭", "부호명", "부호 및 명칭", "형번", "형상번호", "형상코드", "BAR MARK", "MARK", "SHAPE NO", "SHAPE CODE", "기호", "철근명", "ITEM");
-            store.AddColumn("shape", "철근형상", "text_or_image", 100, "형상", "철근형상", "SHAPE", "BENT", "BAR SHAPE", "절곡형상");
+            store.AddColumn("mark", "부호", "text", 100, "부호", "명칭", "부호명", "부호 및 명칭", "BAR MARK", "MARK", "기호", "철근명", "ITEM", "SYMBOL", "CODE");
             store.AddColumn("dia", "규격", "rebar_diameter", 100, "규격", "DIA", "D", "직경", "철근규격", "BAR DIA", "SIZE", "강종");
+            store.AddColumn("shape_no", "형상번호", "number_or_text", 100, "형번", "형상번호", "형상코드", "SHAPE NO", "SHAPE CODE", "SHAPENO", "SHAPECODE");
+            store.AddColumn("shape", "철근형상", "text_or_image", 100, "형상", "철근형상", "SHAPE", "BENT", "BAR SHAPE", "절곡형상");
             store.AddColumn("length_mm", "길이(mm)", "number", 100, "길이", "L", "LENGTH", "절단길이", "산출길이", "MM", "길이MM", "길이(MM)");
-            store.AddColumn("qty_ea", "수량(EA)", "number", 100, "수량", "EA", "QTY", "QUANTITY", "개수", "갯수", "본수", "수량EA", "수량(EA)");
             store.AddColumn("total_length_m", "총길이(M)", "number", 90, "총길이", "총연장", "연장", "TOTAL LENGTH", "T.L", "M", "총길이M", "총길이(M)");
-            store.AddColumn("total_weight_ton", "총중량(TON)", "number", 90, "총중량", "중량", "WEIGHT", "WT", "TON", "톤", "KG", "TOTAL WEIGHT", "총중량TON", "총중량(TON)");
+            store.AddColumn("qty_ea", "수량(EA)", "number", 100, "수량", "EA", "QTY", "QUANTITY", "개수", "갯수", "본수", "수량EA", "수량(EA)");
+            store.AddColumn("total_weight_ton", "중량(TON)", "number", 90, "중량", "총중량", "WEIGHT", "WT", "TON", "톤", "KG", "TOTAL WEIGHT", "총중량TON", "중량(TON)", "총중량(TON)");
             store.AddColumn("remark", "비고", "text", 80, "비고", "REMARK", "NOTE", "메모", "특기사항", "비고사항");
 
             return store;

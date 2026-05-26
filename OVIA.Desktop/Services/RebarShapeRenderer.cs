@@ -29,20 +29,8 @@ namespace OVIA.Desktop
 
             Dictionary<string, string> dimensionValues = ParseDimensionText(dimensionText);
 
-            Color backColor = selected ? Color.FromArgb(255, 248, 205) : Color.White;
-            Color borderColor = selected ? Color.FromArgb(226, 189, 67) : Color.FromArgb(225, 230, 240);
-
-            using (SolidBrush backBrush = new SolidBrush(backColor))
-            {
-                g.FillRectangle(backBrush, bounds);
-            }
-
-            using (Pen borderPen = new Pen(borderColor, selected ? 2F : 1F))
-            {
-                Rectangle border = new Rectangle(bounds.Left, bounds.Top, bounds.Width - 1, bounds.Height - 1);
-                g.DrawRectangle(borderPen, border);
-            }
-
+            // 셀 배경/테두리는 FrmBarList의 공통 그리드 페인터에서만 처리합니다.
+            // 여기서 별도 배경이나 테두리를 다시 그리면 CAD 원본 형상 셀과 수동 선택 형상 셀의 라인이 다르게 보입니다.
             Rectangle inner = Rectangle.Inflate(bounds, -5, -4);
 
             if (inner.Width <= 4 || inner.Height <= 4)
