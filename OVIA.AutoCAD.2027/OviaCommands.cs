@@ -2878,7 +2878,13 @@ namespace OVIA.AutoCAD_2027
                 return "";
             }
 
-            Match match = Regex.Match(text, @"[A-Z]{1,5}D?\d{1,3}", RegexOptions.IgnoreCase);
+            /*
+             * OVIA 2026-05-27-11 보정:
+             * CAD 원문 규격은 임의로 자르면 안 됩니다.
+             * UHD25S, UHD22S처럼 숫자 뒤의 접미 문자까지 독립된 규격 의미를 가질 수 있으므로
+             * 기존 [A-Z]{1,5}D?\d{1,3} 패턴처럼 UHD25까지만 잘라 반환하지 않습니다.
+             */
+            Match match = Regex.Match(text, @"(?<![A-Z0-9])[A-Z]{1,6}D?\d{1,3}[A-Z]{0,4}(?![A-Z0-9])", RegexOptions.IgnoreCase);
 
             if (match.Success)
             {
@@ -3180,72 +3186,36 @@ namespace OVIA.AutoCAD_2027
             }
 
             /*
-             * OVIA 2026-05-27 보정:
+             * OVIA 2026-05-27 보정 유지 + 2026-05-27-11 보강:
              * 데이터 값은 헤더 기준으로 정상 추출되고 있으므로 여기서는 철근형상 렌더링만 보정합니다.
-             * 일부 CAD는 철근형상 컬럼의 좌/우 테이블 세로선이 BlockReference 또는 긴 LINE으로
-             * 같이 선택되어 OVIA 화면에 세로선 2개가 형상처럼 표시되었습니다.
+             * good_01~03에서 성공한 길이/수량/총길이/중량 추출 구조는 절대 건드리지 않습니다.
              *
-             * 따라서 형상 캡처 범위는 셀 전체가 아니라 안쪽 안전 영역을 우선 사용합니다.
-             * 형상 내부 치수와 실제 형상선은 보존하고, 테이블 경계선/행 경계선은 제외합니다.
+             * 10번 패치에서는 테이블 세로선을 제거하기 위해 형상 셀을 안쪽으로 줄여 캡처했습니다.
+             * 하지만 일부 도면은 형상 치수 문자(10000, 360 등)가 셀 경계 또는 형상선 가까이에 붙어 있어
+             * 안쪽 캡처 범위에서 제외되고, 화면에는 0처럼 보이는 잘못된 대체 표시가 나타났습니다.
+             *
+             * 따라서 이번 버전부터 형상 셀 전체를 기준으로 객체를 수집하고,
+             * 테이블 선은 선 객체 필터에서만 제거합니다. 문자/치수/블록 내부 문자는 최대한 보존합니다.
              */
-            double primaryInsetX = Math.Max(width * 0.065, 0.08);
-            double primaryInsetY = Math.Max(height * 0.045, 0.06);
-
-            if (primaryInsetX > width * 0.20)
-            {
-                primaryInsetX = width * 0.20;
-            }
-
-            if (primaryInsetY > height * 0.18)
-            {
-                primaryInsetY = height * 0.18;
-            }
-
             double captureWidth;
             double captureHeight;
 
             elements = ExtractCadShapeElementsByBounds(
                 ed,
                 db,
-                minX + primaryInsetX,
-                maxX - primaryInsetX,
-                minY + primaryInsetY,
-                maxY - primaryInsetY,
+                minX,
+                maxX,
+                minY,
+                maxY,
                 out captureWidth,
                 out captureHeight
             );
-
-            if (elements.Count == 0)
-            {
-                double fallbackInsetX = Math.Max(width * 0.025, 0.03);
-                double fallbackInsetY = Math.Max(height * 0.020, 0.03);
-
-                if (fallbackInsetX > width * 0.12)
-                {
-                    fallbackInsetX = width * 0.12;
-                }
-
-                if (fallbackInsetY > height * 0.10)
-                {
-                    fallbackInsetY = height * 0.10;
-                }
-
-                elements = ExtractCadShapeElementsByBounds(
-                    ed,
-                    db,
-                    minX + fallbackInsetX,
-                    maxX - fallbackInsetX,
-                    minY + fallbackInsetY,
-                    maxY - fallbackInsetY,
-                    out captureWidth,
-                    out captureHeight
-                );
-            }
 
             RemoveCadShapeNoise(elements, captureWidth, captureHeight);
             RemoveCadShapeTableBorderLines(elements, captureWidth, captureHeight);
             KeepOnlyActualCadShapeElements(row, elements, captureWidth, captureHeight);
             PreferDominantWhiteCadShapeElements(elements);
+            RemoveDuplicateCadShapeElements(elements);
             return elements;
         }
 
@@ -3433,26 +3403,53 @@ namespace OVIA.AutoCAD_2027
                 return;
             }
 
+            AttributeReference attributeReference = entity as AttributeReference;
+
+            if (attributeReference != null)
+            {
+                Point3d p = GetTextReferencePoint(attributeReference, attributeReference.Position, transform);
+
+                AddCadShapeTextElement(
+                    elements,
+                    entity,
+                    CleanText(attributeReference.TextString),
+                    p,
+                    attributeReference.Height,
+                    attributeReference.Rotation,
+                    minX,
+                    maxX,
+                    minY,
+                    maxY,
+                    width,
+                    height,
+                    originX,
+                    topY
+                );
+                return;
+            }
+
             DBText dbText = entity as DBText;
 
             if (dbText != null)
             {
                 Point3d p = GetTextReferencePoint(dbText, dbText.Position, transform);
 
-                if (!IsPointInCadShapeCell(p, minX, maxX, minY, maxY, width, height))
-                {
-                    return;
-                }
-
-                OviaCadShapeElement item = new OviaCadShapeElement();
-                item.Type = "TEXT";
-                item.Text = CleanText(dbText.TextString);
-                item.X1 = NormalizeCadShapeX(p.X, originX);
-                item.Y1 = NormalizeCadShapeY(p.Y, topY);
-                item.Height = dbText.Height;
-                item.Rotation = dbText.Rotation * 180.0 / Math.PI;
-                item.ColorIndex = GetEntityColorIndex(entity);
-                elements.Add(item);
+                AddCadShapeTextElement(
+                    elements,
+                    entity,
+                    CleanText(dbText.TextString),
+                    p,
+                    dbText.Height,
+                    dbText.Rotation,
+                    minX,
+                    maxX,
+                    minY,
+                    maxY,
+                    width,
+                    height,
+                    originX,
+                    topY
+                );
                 return;
             }
 
@@ -3462,20 +3459,50 @@ namespace OVIA.AutoCAD_2027
             {
                 Point3d p = GetTextReferencePoint(mText, mText.Location, transform);
 
-                if (!IsPointInCadShapeCell(p, minX, maxX, minY, maxY, width, height))
-                {
-                    return;
-                }
+                AddCadShapeTextElement(
+                    elements,
+                    entity,
+                    CleanText(mText.Text),
+                    p,
+                    mText.TextHeight,
+                    mText.Rotation,
+                    minX,
+                    maxX,
+                    minY,
+                    maxY,
+                    width,
+                    height,
+                    originX,
+                    topY
+                );
+                return;
+            }
 
-                OviaCadShapeElement item = new OviaCadShapeElement();
-                item.Type = "TEXT";
-                item.Text = CleanText(mText.Text);
-                item.X1 = NormalizeCadShapeX(p.X, originX);
-                item.Y1 = NormalizeCadShapeY(p.Y, topY);
-                item.Height = mText.TextHeight;
-                item.Rotation = mText.Rotation * 180.0 / Math.PI;
-                item.ColorIndex = GetEntityColorIndex(entity);
-                elements.Add(item);
+            Dimension dimension = entity as Dimension;
+
+            if (dimension != null)
+            {
+                string dimensionText = GetCadDimensionDisplayText(dimension);
+                Point3d p = GetDimensionReferencePoint(dimension, transform);
+                double textHeight = GetCadDimensionTextHeight(dimension);
+                double rotation = GetCadDimensionTextRotation(dimension);
+
+                AddCadShapeTextElement(
+                    elements,
+                    entity,
+                    dimensionText,
+                    p,
+                    textHeight,
+                    rotation,
+                    minX,
+                    maxX,
+                    minY,
+                    maxY,
+                    width,
+                    height,
+                    originX,
+                    topY
+                );
                 return;
             }
 
@@ -3483,6 +3510,35 @@ namespace OVIA.AutoCAD_2027
 
             if (blockReference != null)
             {
+                foreach (ObjectId attributeId in blockReference.AttributeCollection)
+                {
+                    AttributeReference attribute = tr.GetObject(attributeId, OpenMode.ForRead, false) as AttributeReference;
+
+                    if (attribute == null)
+                    {
+                        continue;
+                    }
+
+                    Point3d attrPoint = GetTextReferencePoint(attribute, attribute.Position, Matrix3d.Identity);
+
+                    AddCadShapeTextElement(
+                        elements,
+                        attribute,
+                        CleanText(attribute.TextString),
+                        attrPoint,
+                        attribute.Height,
+                        attribute.Rotation,
+                        minX,
+                        maxX,
+                        minY,
+                        maxY,
+                        width,
+                        height,
+                        originX,
+                        topY
+                    );
+                }
+
                 BlockTableRecord blockRecord = tr.GetObject(blockReference.BlockTableRecord, OpenMode.ForRead, false) as BlockTableRecord;
 
                 if (blockRecord != null)
@@ -3504,6 +3560,259 @@ namespace OVIA.AutoCAD_2027
 
                 return;
             }
+        }
+
+        private void AddCadShapeTextElement(
+            List<OviaCadShapeElement> elements,
+            Entity entity,
+            string text,
+            Point3d point,
+            double height,
+            double rotation,
+            double minX,
+            double maxX,
+            double minY,
+            double maxY,
+            double width,
+            double heightCell,
+            double originX,
+            double topY
+        )
+        {
+            if (elements == null)
+            {
+                return;
+            }
+
+            text = CleanText(text);
+
+            if (text == "")
+            {
+                return;
+            }
+
+            if (!IsPointInCadShapeTextArea(point, minX, maxX, minY, maxY, width, heightCell))
+            {
+                return;
+            }
+
+            OviaCadShapeElement item = new OviaCadShapeElement();
+            item.Type = "TEXT";
+            item.Text = text;
+            item.X1 = NormalizeCadShapeX(point.X, originX);
+            item.Y1 = NormalizeCadShapeY(point.Y, topY);
+            item.Height = height;
+            item.Rotation = rotation * 180.0 / Math.PI;
+            item.ColorIndex = GetEntityColorIndex(entity);
+            elements.Add(item);
+        }
+
+        private bool IsPointInCadShapeTextArea(Point3d point, double minX, double maxX, double minY, double maxY, double width, double height)
+        {
+            /*
+             * 형상 치수 문자는 실무 CAD에서 테이블 라인에 살짝 걸치거나 셀 경계에 붙는 경우가 있습니다.
+             * 선 객체는 테이블 경계선 제거 필터를 강하게 적용하지만, 문자 객체는 조금 더 넓게 허용합니다.
+             * 단, 인접 데이터 컬럼의 길이/수량/중량 문자가 섞이지 않도록 셀 폭 대비 과도한 확장은 금지합니다.
+             */
+            double marginX = Math.Max(width * 0.035, 0.03);
+            double marginY = Math.Max(height * 0.12, 0.04);
+
+            if (marginX > width * 0.10)
+            {
+                marginX = width * 0.10;
+            }
+
+            if (marginY > height * 0.28)
+            {
+                marginY = height * 0.28;
+            }
+
+            return point.X >= minX - marginX
+                && point.X <= maxX + marginX
+                && point.Y >= minY - marginY
+                && point.Y <= maxY + marginY;
+        }
+
+        private string GetCadDimensionDisplayText(Dimension dimension)
+        {
+            if (dimension == null)
+            {
+                return "";
+            }
+
+            string text = "";
+
+            try
+            {
+                text = CleanText(dimension.DimensionText);
+            }
+            catch
+            {
+                text = "";
+            }
+
+            if (text == "<>" || text == "[]")
+            {
+                text = "";
+            }
+
+            if (text != "")
+            {
+                text = text.Replace("<>", "").Trim();
+
+                if (text != "")
+                {
+                    return text;
+                }
+            }
+
+            try
+            {
+                double measurement = dimension.Measurement;
+
+                if (Double.IsNaN(measurement) || Double.IsInfinity(measurement) || Math.Abs(measurement) < 0.0001)
+                {
+                    return "";
+                }
+
+                return FormatCadShapeDimensionNumber(measurement);
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+        private string FormatCadShapeDimensionNumber(double value)
+        {
+            double rounded = Math.Round(value, 0);
+
+            if (Math.Abs(value - rounded) < 0.01)
+            {
+                return rounded.ToString("0", CultureInfo.InvariantCulture);
+            }
+
+            return value.ToString("0.###", CultureInfo.InvariantCulture);
+        }
+
+        private Point3d GetDimensionReferencePoint(Dimension dimension, Matrix3d transform)
+        {
+            Point3d point = Point3d.Origin;
+
+            try
+            {
+                point = dimension.TextPosition;
+            }
+            catch
+            {
+                try
+                {
+                    Extents3d extents = dimension.GeometricExtents;
+                    point = new Point3d((extents.MinPoint.X + extents.MaxPoint.X) / 2.0, (extents.MinPoint.Y + extents.MaxPoint.Y) / 2.0, (extents.MinPoint.Z + extents.MaxPoint.Z) / 2.0);
+                }
+                catch
+                {
+                    point = Point3d.Origin;
+                }
+            }
+
+            try
+            {
+                point = point.TransformBy(transform);
+            }
+            catch
+            {
+            }
+
+            return point;
+        }
+
+        private double GetCadDimensionTextHeight(Dimension dimension)
+        {
+            if (dimension == null)
+            {
+                return 1.0;
+            }
+
+            try
+            {
+                Extents3d extents = dimension.GeometricExtents;
+                double h = Math.Abs(extents.MaxPoint.Y - extents.MinPoint.Y);
+
+                if (h > 0.0001)
+                {
+                    return Math.Max(1.0, h * 0.25);
+                }
+            }
+            catch
+            {
+            }
+
+            return 1.0;
+        }
+
+        private double GetCadDimensionTextRotation(Dimension dimension)
+        {
+            // 치수 객체마다 회전 속성이 다를 수 있으므로 기본 0도로 안전 처리합니다.
+            // 실제 DBText/MText 회전값은 별도 경로에서 그대로 보존됩니다.
+            return 0.0;
+        }
+
+        private void RemoveDuplicateCadShapeElements(List<OviaCadShapeElement> elements)
+        {
+            if (elements == null || elements.Count == 0)
+            {
+                return;
+            }
+
+            HashSet<string> keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int i;
+
+            for (i = elements.Count - 1; i >= 0; i--)
+            {
+                OviaCadShapeElement item = elements[i];
+
+                if (item == null)
+                {
+                    elements.RemoveAt(i);
+                    continue;
+                }
+
+                string key = BuildCadShapeElementCompareKey(item);
+
+                if (key == "")
+                {
+                    continue;
+                }
+
+                if (keys.Contains(key))
+                {
+                    elements.RemoveAt(i);
+                    continue;
+                }
+
+                keys.Add(key);
+            }
+        }
+
+        private string BuildCadShapeElementCompareKey(OviaCadShapeElement item)
+        {
+            if (item == null || item.Type == null)
+            {
+                return "";
+            }
+
+            if (item.Type == "TEXT")
+            {
+                return "TEXT|" + NormalizeCadShapeCompareText(item.Text) + "|" + Math.Round(item.X1, 2).ToString(CultureInfo.InvariantCulture) + "|" + Math.Round(item.Y1, 2).ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (item.Type == "LINE")
+            {
+                return "LINE|" + Math.Round(item.X1, 2).ToString(CultureInfo.InvariantCulture) + "|" + Math.Round(item.Y1, 2).ToString(CultureInfo.InvariantCulture) + "|" + Math.Round(item.X2, 2).ToString(CultureInfo.InvariantCulture) + "|" + Math.Round(item.Y2, 2).ToString(CultureInfo.InvariantCulture);
+            }
+
+            return item.Type + "|" + Math.Round(item.CX, 2).ToString(CultureInfo.InvariantCulture) + "|" + Math.Round(item.CY, 2).ToString(CultureInfo.InvariantCulture) + "|" + Math.Round(item.Radius, 2).ToString(CultureInfo.InvariantCulture);
         }
 
         private int GetEntityColorIndex(Entity entity)
@@ -8711,6 +9020,7 @@ namespace OVIA.AutoCAD_2027
             value = value.Replace("\n", " ");
             value = value.Replace("\t", " ");
             value = value.Replace("\\P", " ");
+            value = StripMTextControlCodes(value);
             value = value.Replace("{", "");
             value = value.Replace("}", "");
             value = value.Trim();
@@ -8724,6 +9034,21 @@ namespace OVIA.AutoCAD_2027
             {
                 value = value.Substring(0, 500) + "...";
             }
+
+            return value;
+        }
+
+        private string StripMTextControlCodes(string value)
+        {
+            if (value == null || value == "")
+            {
+                return "";
+            }
+
+            // AutoCAD MText 제어코드 예: \A1;, \H0.7x;, \W0.8;, \C7;, \Ffont|...
+            value = Regex.Replace(value, @"\\[A-Za-z][^;]*;", "");
+            value = value.Replace("\\~", " ");
+            value = value.Replace("\\", "");
 
             return value;
         }
