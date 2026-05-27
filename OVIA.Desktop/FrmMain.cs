@@ -32,6 +32,7 @@ namespace OVIA.Desktop
         private Timer autoCadStatusTimer;
         private FrmProjectManager projectManagerForm;
         private FrmBarList barListForm;
+        private FrmBarListMappingManager barListMappingForm;
 
         private readonly Color BrandIndigo = Color.FromArgb(37, 30, 130);
         private readonly Color BrandViolet = Color.FromArgb(91, 49, 225);
@@ -118,6 +119,9 @@ namespace OVIA.Desktop
             barListMenu.Click += OpenBarList_Click;
 
             AddMenu(side, "환경 설정", 425, false);
+
+            OviaMenuButton barListMappingMenu = AddMenu(side, "└ BarList 항목 매핑", 470, false);
+            barListMappingMenu.Click += OpenBarListMapping_Click;
 
             Label account = new Label();
             account.Text = "회사 ID : " + companyId + "\r\n사용자 ID : " + userId;
@@ -518,6 +522,58 @@ namespace OVIA.Desktop
             barListForm.Activate();
         }
 
+        private void OpenBarListMapping_Click(object sender, EventArgs e)
+        {
+            if (!IsSystemAdminUser())
+            {
+                MessageBox.Show(
+                    "BarList 항목 매핑은 시스템관리자만 접근할 수 있습니다.\r\n\r\n현재 사용자 ID: " + userId,
+                    "OVIA 권한 확인",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+
+                return;
+            }
+
+            if (barListMappingForm != null && !barListMappingForm.IsDisposed)
+            {
+                RestoreAndActivate(barListMappingForm);
+                return;
+            }
+
+            barListMappingForm = new FrmBarListMappingManager(companyId, userId);
+            barListMappingForm.StartPosition = FormStartPosition.Manual;
+            barListMappingForm.Location = GetChildWindowLocation(barListMappingForm.Size);
+            barListMappingForm.FormClosed += delegate
+            {
+                barListMappingForm = null;
+            };
+            barListMappingForm.Show();
+            barListMappingForm.Activate();
+        }
+
+        private bool IsSystemAdminUser()
+        {
+            string value = userId == null ? "" : userId.Trim().ToLowerInvariant();
+
+            if (value == "")
+            {
+                return false;
+            }
+
+            return value == "admin"
+                || value == "administrator"
+                || value == "systemadmin"
+                || value == "sysadmin"
+                || value == "root"
+                || value == "celmon"
+                || value == "oviaadmin"
+                || value == "system"
+                || value == "관리자"
+                || value == "시스템관리자";
+        }
+
         private void ExtractReady_Click(object sender, EventArgs e)
         {
             UpdateAutoCadRunStatus();
@@ -609,6 +665,12 @@ namespace OVIA.Desktop
             {
                 barListForm.Close();
                 barListForm = null;
+            }
+
+            if (barListMappingForm != null && !barListMappingForm.IsDisposed)
+            {
+                barListMappingForm.Close();
+                barListMappingForm = null;
             }
 
             if (autoCadStatusTimer != null)

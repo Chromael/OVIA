@@ -232,9 +232,16 @@ namespace OVIA.AutoCAD_2027
                     return;
                 }
 
+                /*
+                 * OVIA 2026-05-27 보정:
+                 * 대표님이 클릭한 X/Y 위치와 노란 선택박스가 달라지면 안 됩니다.
+                 * 이전 자동 라인 스냅/좌측 확장 로직은 번호 컬럼 보정에는 도움이 되었지만,
+                 * 사용자가 정확히 선택한 범위보다 왼쪽 다른 라인까지 박스가 늘어나는 문제가 있었습니다.
+                 * AutoCAD 객체스냅으로 반환된 클릭 좌표 자체를 신뢰하고, OVIA가 추가로 선택박스를 확장하지 않습니다.
+                 */
                 Point3d boxPoint1 = firstPointResult.Value;
                 Point3d boxPoint2 = secondPointResult.Value;
-                bool isSnapped = TrySnapOviaBoxToTableLines(ed, db, firstPointResult.Value, secondPointResult.Value, out boxPoint1, out boxPoint2);
+                bool isSnapped = false;
 
                 using (Transaction tr = db.TransactionManager.StartTransaction())
                 {
@@ -254,9 +261,9 @@ namespace OVIA.AutoCAD_2027
                 ed.WriteMessage("------------------------------------\n");
                 ed.WriteMessage("표시 형태 : 밝은 노란색 / 매우 두꺼운 실선\n");
                 ed.WriteMessage("박스 개수 : 기존 박스 삭제 후 1개만 유지\n");
-                ed.WriteMessage("정확 선택 : AutoCAD 객체스냅은 끝점/교차점만 임시 적용하여 내부선으로 붙는 문제를 줄임\n");
-                ed.WriteMessage("라인 스냅 : " + (isSnapped ? "표 전체를 이루는 실제 테이블 라인에 자동 보정됨" : "스냅 가능한 테이블 라인 없음, 클릭 좌표 사용") + "\n");
-                ed.WriteMessage("번호 보정 : 왼쪽 경계가 번호 컬럼 안쪽 선으로 붙으면 클릭 지점/직전 세로선까지 강제 확장\n");
+                ed.WriteMessage("정확 선택 : AutoCAD 끝점/교차점 객체스냅을 임시 적용하여 테이블 교차점에서 시작/종료 가능\n");
+                ed.WriteMessage("선택 좌표 : AutoCAD가 끝점/교차점으로 스냅한 좌표를 기준으로 노란 선택박스를 생성함\n");
+                ed.WriteMessage("자동 확장 : OVIA가 사용자가 선택한 범위를 임의로 좌/우/상/하 확장하지 않음\n");
                 ed.WriteMessage("주의      : 철근형상 내부의 작은 치수선이 아니라 표 외곽/행 경계선 교차점을 클릭하세요.\n");
                 ed.WriteMessage("편집 방식 : 잠금 없음, 필요 시 OVIA 전용 조정 명령으로 직사각형 유지\n");
                 ed.WriteMessage("상단 조정 : OVIABOXTOP\n");
@@ -282,20 +289,28 @@ namespace OVIA.AutoCAD_2027
                 previousOsMode = Application.GetSystemVariable("OSMODE");
 
                 /*
-                 * OVIA 정확 선택 모드:
+                 * OVIA 2026-05-27 보정:
+                 * 대표님 요청으로 OVIABOX 시작점/끝점 선택 시 AutoCAD의 네모형 끝점 스냅과
+                 * 교차점 스냅이 다시 동작하도록 복구합니다.
+                 *
                  * 1   = Endpoint
                  * 32  = Intersection
+                 * 33  = Endpoint + Intersection
                  *
-                 * 이전 버전에서는 Nearest(512)까지 켰기 때문에 사용자가 번호 컬럼 왼쪽을 찍어도
-                 * AutoCAD가 더 가까운 내부 세로선으로 스냅시키는 문제가 있었습니다.
-                 * 이번 버전부터는 Endpoint + Intersection만 임시 적용합니다.
+                 * 주의:
+                 * 이전에 문제가 되었던 것은 AutoCAD 스냅 자체가 아니라,
+                 * OVIA 내부의 추가 라인 스냅/좌측 자동 확장 보정이 사용자가 선택한 범위를
+                 * 임의로 넓힌 것이었습니다.
+                 * 따라서 객체스냅은 켜되, 노란 선택박스는 반환된 스냅 좌표 그대로 생성하고
+                 * OVIA가 별도로 좌/우/상/하 확장하지 않습니다.
                  */
                 Application.SetSystemVariable("OSMODE", 33);
 
                 if (ed != null)
                 {
-                    ed.WriteMessage("\nOVIA 정확 선택 모드: 끝점/교차점 객체스냅을 임시 적용했습니다.\n");
-                    ed.WriteMessage("번호 컬럼 왼쪽 외곽선과 행 경계선이 만나는 교차점에서 시작하고, 오른쪽 경계선과 끝 행 경계선에서 마무리하세요.\n");
+                    ed.WriteMessage("\nOVIA 테이블 선택 모드: 끝점/교차점 객체스냅을 임시 적용했습니다.\n");
+                    ed.WriteMessage("표 외곽선과 행 경계선이 만나는 교차점에서 시작하고, 끝 행의 반대쪽 교차점에서 마무리하세요.\n");
+                    ed.WriteMessage("노란 선택박스는 스냅된 좌표 그대로 생성하며, OVIA가 임의로 범위를 확장하지 않습니다.\n");
                 }
             }
             catch
@@ -1472,7 +1487,7 @@ namespace OVIA.AutoCAD_2027
                     }
                 }
 
-                if (row.RowType == "DATA")
+                if (row.RowType == "DATA" && headerMap.HeaderRowIndex < 0)
                 {
                     SupplementStandardDataFromRawText(rawText, row);
                 }
@@ -1517,14 +1532,20 @@ namespace OVIA.AutoCAD_2027
         {
             List<OviaHeaderColumn> columns = new List<OviaHeaderColumn>();
 
+            /*
+             * OVIA BarList 사용자 화면/CSV 고정 헤더 순서입니다.
+             * CAD 도면의 실제 헤더명은 매핑 사전으로 치환하되, 출력은 이 순서를 유지합니다.
+             */
             columns.Add(CreateHeaderColumn("MARK_NO", "번호", 0));
-            columns.Add(CreateHeaderColumn("SHAPE", "철근형상", 1));
-            columns.Add(CreateHeaderColumn("SPEC", "규격", 2));
-            columns.Add(CreateHeaderColumn("LENGTH_MM", "길이(mm)", 3));
-            columns.Add(CreateHeaderColumn("QUANTITY_EA", "수량(EA)", 4));
-            columns.Add(CreateHeaderColumn("TOTAL_LENGTH_M", "총길이(M)", 5));
-            columns.Add(CreateHeaderColumn("TOTAL_WEIGHT", "중량(TON)", 6));
-            columns.Add(CreateHeaderColumn("NOTE", "비고", 7));
+            columns.Add(CreateHeaderColumn("PART", "부위", 1));
+            columns.Add(CreateHeaderColumn("SPEC", "철근규격", 2));
+            columns.Add(CreateHeaderColumn("SHAPE_NO", "형상번호", 3));
+            columns.Add(CreateHeaderColumn("SHAPE", "철근형상", 4));
+            columns.Add(CreateHeaderColumn("LENGTH_MM", "길이(mm)", 5));
+            columns.Add(CreateHeaderColumn("QUANTITY_EA", "수량(EA)", 6));
+            columns.Add(CreateHeaderColumn("TOTAL_LENGTH_M", "총길이(M)", 7));
+            columns.Add(CreateHeaderColumn("TOTAL_WEIGHT", "중량(Ton)", 8));
+            columns.Add(CreateHeaderColumn("NOTE", "비고", 9));
 
             return columns;
         }
@@ -1586,38 +1607,40 @@ namespace OVIA.AutoCAD_2027
             string[] titles;
 
             /*
-             * 중요 수정 기준
-             * ------------------------------------------------------------
-             * 도면의 기본 BarList 표는 대부분 아래 순서입니다.
-             *   번호 | 철근형상 | 규격 | 길이 | 수량 | 총길이 | 총중량 | 비고
-             *
-             * 기존 02번 패치에서는 columnCount >= 8이면 무조건 두 번째 컬럼을
-             * SHAPE_NO(형상번호/부호명칭)로 가정했습니다. 그 결과 실제 철근형상 칸이
-             * 한 칸씩 밀리고, 철근형상 JSON 캡처 범위도 잘못 잡혔습니다.
-             *
-             * 형상번호/부호명칭 컬럼은 실제 헤더에서 확인될 때만 사용해야 하므로,
-             * 헤더 인식이 실패한 fallback 상태에서는 8컬럼까지는 기존 기본 순서를 유지합니다.
-             * 9컬럼 이상일 때만 별도 형상번호/부호명칭 컬럼이 있다고 추정합니다.
+             * 헤더 인식이 실패했을 때만 사용하는 보조 순서입니다.
+             * 가능하면 실제 CAD 헤더를 우선 사용하고, 이 fallback은 기존에 잘 되던 기본 표 구조를 흔들지 않게 최소화합니다.
              */
-            if (columnCount == 7)
+            if (columnCount == 6)
             {
-                /*
-                 * 일부 CAD BarList는 다음 순서입니다.
-                 *   번호 | 규격 | 형상 | 길이 | 수량 | 총길이 | 중량
-                 * 헤더 인식이 약해 fallback으로 들어온 경우에도 이 순서를 우선 보존합니다.
-                 */
-                keys = new string[] { "MARK_NO", "SPEC", "SHAPE", "LENGTH_MM", "QUANTITY_EA", "TOTAL_LENGTH_M", "TOTAL_WEIGHT" };
-                titles = new string[] { "번호", "규격", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(TON)" };
+                // 번호 | 규격 | 형상 | 길이(mm) | 수량 | 중량(Ton)
+                keys = new string[] { "MARK_NO", "SPEC", "SHAPE", "LENGTH_MM", "QUANTITY_EA", "TOTAL_WEIGHT" };
+                titles = new string[] { "번호", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "중량(Ton)" };
             }
-            else if (columnCount >= 9)
+            else if (columnCount == 7)
             {
-                keys = new string[] { "MARK_NO", "SHAPE_NO", "SHAPE", "SPEC", "LENGTH_MM", "QUANTITY_EA", "TOTAL_LENGTH_M", "TOTAL_WEIGHT", "NOTE" };
-                titles = new string[] { "번호", "부호/명칭", "철근형상", "규격", "길이(mm)", "수량(EA)", "총길이(M)", "중량(TON)", "비고" };
+                // 번호 | 규격 | 형상 | 길이 | 수량 | 총길이(M) | 중량(Ton)
+                keys = new string[] { "MARK_NO", "SPEC", "SHAPE", "LENGTH_MM", "QUANTITY_EA", "TOTAL_LENGTH_M", "TOTAL_WEIGHT" };
+                titles = new string[] { "번호", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(Ton)" };
+            }
+            else if (columnCount >= 10)
+            {
+                keys = new string[] { "MARK_NO", "PART", "SPEC", "SHAPE_NO", "SHAPE", "LENGTH_MM", "QUANTITY_EA", "TOTAL_LENGTH_M", "TOTAL_WEIGHT", "NOTE" };
+                titles = new string[] { "번호", "부위", "철근규격", "형상번호", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(Ton)", "비고" };
+            }
+            else if (columnCount == 9)
+            {
+                keys = new string[] { "MARK_NO", "PART", "SPEC", "SHAPE", "LENGTH_MM", "QUANTITY_EA", "TOTAL_LENGTH_M", "TOTAL_WEIGHT", "NOTE" };
+                titles = new string[] { "번호", "부위", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(Ton)", "비고" };
+            }
+            else if (columnCount == 8)
+            {
+                keys = new string[] { "MARK_NO", "SPEC", "SHAPE", "LENGTH_MM", "QUANTITY_EA", "TOTAL_LENGTH_M", "TOTAL_WEIGHT", "NOTE" };
+                titles = new string[] { "번호", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(Ton)", "비고" };
             }
             else
             {
-                keys = new string[] { "MARK_NO", "SHAPE", "SPEC", "LENGTH_MM", "QUANTITY_EA", "TOTAL_LENGTH_M", "TOTAL_WEIGHT", "NOTE" };
-                titles = new string[] { "번호", "철근형상", "규격", "길이(mm)", "수량(EA)", "총길이(M)", "중량(TON)", "비고" };
+                keys = new string[] { "MARK_NO", "SPEC", "SHAPE", "LENGTH_MM", "QUANTITY_EA", "TOTAL_WEIGHT", "NOTE" };
+                titles = new string[] { "번호", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "중량(Ton)", "비고" };
             }
 
             int limit = Math.Min(columnCount, keys.Length);
@@ -1868,16 +1891,6 @@ namespace OVIA.AutoCAD_2027
                 return "번호";
             }
 
-            if (standardKey == "PART")
-            {
-                return "부위";
-            }
-
-            if (standardKey == "SYMBOL")
-            {
-                return "부호";
-            }
-
             if (standardKey == "SHAPE_NO")
             {
                 return "형상번호";
@@ -1890,7 +1903,7 @@ namespace OVIA.AutoCAD_2027
 
             if (standardKey == "SPEC")
             {
-                return "규격";
+                return "철근규격";
             }
 
             if (standardKey == "LENGTH_MM")
@@ -1908,9 +1921,14 @@ namespace OVIA.AutoCAD_2027
                 return "총길이(M)";
             }
 
+            if (standardKey == "TOTAL_WEIGHT_KG")
+            {
+                return "중량(Ton)";
+            }
+
             if (standardKey == "TOTAL_WEIGHT")
             {
-                return "중량(TON)";
+                return "중량(Ton)";
             }
 
             if (standardKey == "NOTE")
@@ -1964,6 +1982,7 @@ namespace OVIA.AutoCAD_2027
             value = value.Replace("_", "");
             value = value.Replace("-", "");
             value = value.Replace(".", "");
+            value = value.Replace(",", "");
             value = value.Replace("(", "");
             value = value.Replace(")", "");
             value = value.Replace("[", "");
@@ -1981,8 +2000,15 @@ namespace OVIA.AutoCAD_2027
                 return "NOTE";
             }
 
+            if (value.IndexOf("KG", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "TOTAL_WEIGHT_KG";
+            }
+
             if (value.IndexOf("총중량", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("중량", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("톤", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("TON", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("WEIGHT", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("WT", StringComparison.OrdinalIgnoreCase) >= 0)
             {
@@ -1992,7 +2018,8 @@ namespace OVIA.AutoCAD_2027
             if (value.IndexOf("총길이", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("총연장", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("연장", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                value.IndexOf("TOTALLENGTH", StringComparison.OrdinalIgnoreCase) >= 0)
+                value.IndexOf("TOTALLENGTH", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value == "TL")
             {
                 return "TOTAL_LENGTH_M";
             }
@@ -2000,6 +2027,7 @@ namespace OVIA.AutoCAD_2027
             if (value.IndexOf("수량", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("본수", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("개수", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("갯수", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("QTY", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("EA", StringComparison.OrdinalIgnoreCase) >= 0)
             {
@@ -2012,6 +2040,17 @@ namespace OVIA.AutoCAD_2027
                 return "LENGTH_MM";
             }
 
+            if (value.IndexOf("부위", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("위치", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("구간", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("ZONE", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("AREA", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("LOCATION", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "PART";
+            }
+
+
             if (value.IndexOf("철근규격", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("규격", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("강종", StringComparison.OrdinalIgnoreCase) >= 0 ||
@@ -2019,15 +2058,6 @@ namespace OVIA.AutoCAD_2027
                 value.IndexOf("DIA", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return "SPEC";
-            }
-
-            if (value.IndexOf("부위", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                value.IndexOf("위치", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                value.IndexOf("구간", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                value.IndexOf("AREA", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                value.IndexOf("ZONE", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return "PART";
             }
 
             if (value.IndexOf("형상번호", StringComparison.OrdinalIgnoreCase) >= 0 ||
@@ -2041,18 +2071,14 @@ namespace OVIA.AutoCAD_2027
 
             if (value.IndexOf("철근형상", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("형상", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("형태", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("SHAPE", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return "SHAPE";
             }
 
-            if (value.IndexOf("부호", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                value.IndexOf("SYMBOL", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return "SYMBOL";
-            }
-
             if (value.IndexOf("번호", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("부호", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value == "NO" ||
                 value == "N" ||
                 value.IndexOf("MARK", StringComparison.OrdinalIgnoreCase) >= 0 ||
@@ -2080,10 +2106,6 @@ namespace OVIA.AutoCAD_2027
             {
                 row.Part = AppendCell(row.Part, value);
             }
-            else if (key == "SYMBOL")
-            {
-                row.Symbol = AppendCell(row.Symbol, value);
-            }
             else if (key == "SHAPE_NO")
             {
                 row.ShapeNo = AppendCell(row.ShapeNo, value);
@@ -2109,6 +2131,10 @@ namespace OVIA.AutoCAD_2027
             else if (key == "TOTAL_LENGTH_M")
             {
                 row.TotalLength = AppendCell(row.TotalLength, value);
+            }
+            else if (key == "TOTAL_WEIGHT_KG")
+            {
+                row.TotalWeight = AppendCell(row.TotalWeight, ConvertKgTextToTonText(value));
             }
             else if (key == "TOTAL_WEIGHT")
             {
@@ -2145,11 +2171,6 @@ namespace OVIA.AutoCAD_2027
             if (key == "PART")
             {
                 return row.Part;
-            }
-
-            if (key == "SYMBOL")
-            {
-                return row.Symbol;
             }
 
             if (key == "SHAPE_NO")
@@ -2190,7 +2211,7 @@ namespace OVIA.AutoCAD_2027
                 return row.TotalLength;
             }
 
-            if (key == "TOTAL_WEIGHT")
+            if (key == "TOTAL_WEIGHT" || key == "TOTAL_WEIGHT_KG")
             {
                 return row.TotalWeight;
             }
@@ -2201,6 +2222,41 @@ namespace OVIA.AutoCAD_2027
             }
 
             return "";
+        }
+
+        private string ConvertKgTextToTonText(string value)
+        {
+            if (value == null)
+            {
+                return "";
+            }
+
+            Match match = Regex.Match(value.Replace(",", ""), @"-?\d+(\.\d+)?");
+
+            if (!match.Success)
+            {
+                return CleanCellText(value);
+            }
+
+            decimal kg;
+
+            if (!Decimal.TryParse(match.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out kg))
+            {
+                if (!Decimal.TryParse(match.Value, out kg))
+                {
+                    return CleanCellText(value);
+                }
+            }
+
+            decimal ton = kg / 1000m;
+            string formatted = ton.ToString("0.###", CultureInfo.InvariantCulture);
+
+            if (formatted.IndexOf(".", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                formatted = formatted + ".000";
+            }
+
+            return formatted;
         }
 
         private string ExtractNumbersText(string text)
@@ -2504,10 +2560,9 @@ namespace OVIA.AutoCAD_2027
              */
             int baseIndex = numbersAfterSpec.Count - 4;
 
-            // 표 선/헤더 인식이 실패한 경우에만 rawText로 누락값을 보강합니다.
-            // 이미 grid column 좌표로 들어온 길이/수량/총길이/중량 값은 절대 덮어쓰지 않습니다.
-            // 철근형상 내부 치수(120, 490 등)가 rawText 뒤쪽에 붙는 도면에서는
-            // 기존 값을 덮어쓰면 길이/수량/중량이 한 칸씩 밀리는 큰 오류가 발생합니다.
+            // 표 선/헤더 인식이 일부 어긋나면 길이/수량/총길이/중량이 한 칸씩 밀릴 수 있습니다.
+            // BarList 데이터 행에서는 규격 뒤쪽 숫자 중 마지막 4개가 산정값
+            // 길이(mm) / 수량(EA) / 총길이(M) / 총중량(TON)이므로 이 값을 우선 보정합니다.
             if (row.Length == "")
             {
                 row.Length = numbersAfterSpec[baseIndex];
@@ -3087,6 +3142,16 @@ namespace OVIA.AutoCAD_2027
                     File.WriteAllText(jsonFilePath, BuildCadShapeJson(row, elements), new UTF8Encoding(true));
                     row.CadShapeJsonPath = "Shapes/" + jsonFileName;
                     row.CadShapeTextValues = BuildCadShapeTextValues(elements);
+
+                    /*
+                     * OVIA 2026-05-27 보정:
+                     * CAD 원본 형상은 JSON 안의 TEXT 요소가 실제 치수 표시입니다.
+                     * 이전에는 철근형상 셀의 보조 텍스트가 OVIA_형상치수에 "0"으로 들어가면서
+                     * 화면 렌더링 시 CAD 원본 치수 위에 0이 덮이는 문제가 있었습니다.
+                     * 원본 CAD 형상은 JSON 값을 기준으로 수정창에서 다시 읽도록 하고,
+                     * 추출 직후에는 수동 치수 오버레이 값을 비워 둡니다.
+                     */
+                    row.ShapeDimensionText = "";
                     row.ShapeSource = "CAD";
                     row.ShapeStatus = "CAD_CAPTURED";
                 }
@@ -3115,15 +3180,89 @@ namespace OVIA.AutoCAD_2027
             }
 
             /*
-             * 중요:
-             * 철근형상 칸 안의 객체만 가져와야 합니다.
-             * SelectCrossingWindow는 셀을 가로지르는 표 전체 선, 전체 표 BlockReference까지 잡을 수 있습니다.
-             * 그래서 우선 후보를 넓게 잡되, 실제 추가 단계에서 좌표가 해당 셀 내부에 있는 객체만 보존합니다.
+             * OVIA 2026-05-27 보정:
+             * 데이터 값은 헤더 기준으로 정상 추출되고 있으므로 여기서는 철근형상 렌더링만 보정합니다.
+             * 일부 CAD는 철근형상 컬럼의 좌/우 테이블 세로선이 BlockReference 또는 긴 LINE으로
+             * 같이 선택되어 OVIA 화면에 세로선 2개가 형상처럼 표시되었습니다.
+             *
+             * 따라서 형상 캡처 범위는 셀 전체가 아니라 안쪽 안전 영역을 우선 사용합니다.
+             * 형상 내부 치수와 실제 형상선은 보존하고, 테이블 경계선/행 경계선은 제외합니다.
              */
-            double insetX = Math.Max(width * 0.015, 0.05);
-            double insetY = Math.Max(height * 0.015, 0.05);
-            Point3d selectMin = new Point3d(minX + insetX, minY + insetY, 0);
-            Point3d selectMax = new Point3d(maxX - insetX, maxY - insetY, 0);
+            double primaryInsetX = Math.Max(width * 0.065, 0.08);
+            double primaryInsetY = Math.Max(height * 0.045, 0.06);
+
+            if (primaryInsetX > width * 0.20)
+            {
+                primaryInsetX = width * 0.20;
+            }
+
+            if (primaryInsetY > height * 0.18)
+            {
+                primaryInsetY = height * 0.18;
+            }
+
+            double captureWidth;
+            double captureHeight;
+
+            elements = ExtractCadShapeElementsByBounds(
+                ed,
+                db,
+                minX + primaryInsetX,
+                maxX - primaryInsetX,
+                minY + primaryInsetY,
+                maxY - primaryInsetY,
+                out captureWidth,
+                out captureHeight
+            );
+
+            if (elements.Count == 0)
+            {
+                double fallbackInsetX = Math.Max(width * 0.025, 0.03);
+                double fallbackInsetY = Math.Max(height * 0.020, 0.03);
+
+                if (fallbackInsetX > width * 0.12)
+                {
+                    fallbackInsetX = width * 0.12;
+                }
+
+                if (fallbackInsetY > height * 0.10)
+                {
+                    fallbackInsetY = height * 0.10;
+                }
+
+                elements = ExtractCadShapeElementsByBounds(
+                    ed,
+                    db,
+                    minX + fallbackInsetX,
+                    maxX - fallbackInsetX,
+                    minY + fallbackInsetY,
+                    maxY - fallbackInsetY,
+                    out captureWidth,
+                    out captureHeight
+                );
+            }
+
+            RemoveCadShapeNoise(elements, captureWidth, captureHeight);
+            RemoveCadShapeTableBorderLines(elements, captureWidth, captureHeight);
+            KeepOnlyActualCadShapeElements(row, elements, captureWidth, captureHeight);
+            PreferDominantWhiteCadShapeElements(elements);
+            return elements;
+        }
+
+        private List<OviaCadShapeElement> ExtractCadShapeElementsByBounds(Editor ed, Database db, double minX, double maxX, double minY, double maxY, out double width, out double height)
+        {
+            List<OviaCadShapeElement> elements = new List<OviaCadShapeElement>();
+
+            width = maxX - minX;
+            height = maxY - minY;
+
+            if (ed == null || db == null || width <= 0.0001 || height <= 0.0001)
+            {
+                return elements;
+            }
+
+            Point3d selectMin = new Point3d(minX, minY, 0);
+            Point3d selectMax = new Point3d(maxX, maxY, 0);
             PromptSelectionResult selectionResult = ed.SelectCrossingWindow(selectMin, selectMax);
 
             if (selectionResult.Status != PromptStatus.OK || selectionResult.Value == null)
@@ -3151,8 +3290,6 @@ namespace OVIA.AutoCAD_2027
                 tr.Commit();
             }
 
-            RemoveCadShapeNoise(elements, width, height);
-            KeepOnlyActualCadShapeElements(row, elements, width, height);
             return elements;
         }
 
@@ -3185,6 +3322,7 @@ namespace OVIA.AutoCAD_2027
 
                 OviaCadShapeElement item = new OviaCadShapeElement();
                 item.Type = "LINE";
+                item.ColorIndex = GetEntityColorIndex(entity);
                 item.X1 = NormalizeCadShapeX(p1.X, originX);
                 item.Y1 = NormalizeCadShapeY(p1.Y, topY);
                 item.X2 = NormalizeCadShapeX(p2.X, originX);
@@ -3212,6 +3350,7 @@ namespace OVIA.AutoCAD_2027
 
                     OviaCadShapeElement item = new OviaCadShapeElement();
                     item.Type = "LINE";
+                    item.ColorIndex = GetEntityColorIndex(entity);
                     item.X1 = NormalizeCadShapeX(p1.X, originX);
                     item.Y1 = NormalizeCadShapeY(p1.Y, topY);
                     item.X2 = NormalizeCadShapeX(p2.X, originX);
@@ -3228,6 +3367,7 @@ namespace OVIA.AutoCAD_2027
                     {
                         OviaCadShapeElement item = new OviaCadShapeElement();
                         item.Type = "LINE";
+                        item.ColorIndex = GetEntityColorIndex(entity);
                         item.X1 = NormalizeCadShapeX(p1.X, originX);
                         item.Y1 = NormalizeCadShapeY(p1.Y, topY);
                         item.X2 = NormalizeCadShapeX(p2.X, originX);
@@ -3257,6 +3397,7 @@ namespace OVIA.AutoCAD_2027
 
                 OviaCadShapeElement item = new OviaCadShapeElement();
                 item.Type = "ARC";
+                item.ColorIndex = GetEntityColorIndex(entity);
                 item.CX = NormalizeCadShapeX(center.X, originX);
                 item.CY = NormalizeCadShapeY(center.Y, topY);
                 item.Radius = arc.Radius;
@@ -3284,6 +3425,7 @@ namespace OVIA.AutoCAD_2027
 
                 OviaCadShapeElement item = new OviaCadShapeElement();
                 item.Type = "CIRCLE";
+                item.ColorIndex = GetEntityColorIndex(entity);
                 item.CX = NormalizeCadShapeX(center.X, originX);
                 item.CY = NormalizeCadShapeY(center.Y, topY);
                 item.Radius = circle.Radius;
@@ -3295,7 +3437,7 @@ namespace OVIA.AutoCAD_2027
 
             if (dbText != null)
             {
-                Point3d p = dbText.Position.TransformBy(transform);
+                Point3d p = GetTextReferencePoint(dbText, dbText.Position, transform);
 
                 if (!IsPointInCadShapeCell(p, minX, maxX, minY, maxY, width, height))
                 {
@@ -3309,6 +3451,7 @@ namespace OVIA.AutoCAD_2027
                 item.Y1 = NormalizeCadShapeY(p.Y, topY);
                 item.Height = dbText.Height;
                 item.Rotation = dbText.Rotation * 180.0 / Math.PI;
+                item.ColorIndex = GetEntityColorIndex(entity);
                 elements.Add(item);
                 return;
             }
@@ -3317,7 +3460,7 @@ namespace OVIA.AutoCAD_2027
 
             if (mText != null)
             {
-                Point3d p = mText.Location.TransformBy(transform);
+                Point3d p = GetTextReferencePoint(mText, mText.Location, transform);
 
                 if (!IsPointInCadShapeCell(p, minX, maxX, minY, maxY, width, height))
                 {
@@ -3331,6 +3474,7 @@ namespace OVIA.AutoCAD_2027
                 item.Y1 = NormalizeCadShapeY(p.Y, topY);
                 item.Height = mText.TextHeight;
                 item.Rotation = mText.Rotation * 180.0 / Math.PI;
+                item.ColorIndex = GetEntityColorIndex(entity);
                 elements.Add(item);
                 return;
             }
@@ -3362,6 +3506,134 @@ namespace OVIA.AutoCAD_2027
             }
         }
 
+        private int GetEntityColorIndex(Entity entity)
+        {
+            if (entity == null || entity.Color == null)
+            {
+                return 256;
+            }
+
+            try
+            {
+                return entity.Color.ColorIndex;
+            }
+            catch
+            {
+                return 256;
+            }
+        }
+
+        private bool IsWhiteLikeCadShapeColor(int colorIndex)
+        {
+            return colorIndex == 0 || colorIndex == 7 || colorIndex == 8 || colorIndex == 9 || colorIndex == 256 || colorIndex >= 250;
+        }
+
+        private void PreferDominantWhiteCadShapeElements(List<OviaCadShapeElement> elements)
+        {
+            if (elements == null || elements.Count == 0)
+            {
+                return;
+            }
+
+            int whiteGeometryCount = 0;
+            int explicitColoredGeometryCount = 0;
+            int i;
+
+            for (i = 0; i < elements.Count; i++)
+            {
+                OviaCadShapeElement item = elements[i];
+
+                if (item == null || item.Type == "TEXT")
+                {
+                    continue;
+                }
+
+                if (IsWhiteLikeCadShapeColor(item.ColorIndex))
+                {
+                    whiteGeometryCount++;
+                }
+                else
+                {
+                    explicitColoredGeometryCount++;
+                }
+            }
+
+            if (whiteGeometryCount <= 0 || explicitColoredGeometryCount <= 0)
+            {
+                return;
+            }
+
+            for (i = elements.Count - 1; i >= 0; i--)
+            {
+                OviaCadShapeElement item = elements[i];
+
+                if (item == null || item.Type == "TEXT")
+                {
+                    continue;
+                }
+
+                if (!IsWhiteLikeCadShapeColor(item.ColorIndex))
+                {
+                    elements.RemoveAt(i);
+                }
+            }
+        }
+
+        private void RemoveCadShapeTableBorderLines(List<OviaCadShapeElement> elements, double width, double height)
+        {
+            if (elements == null || elements.Count == 0)
+            {
+                return;
+            }
+
+            double axisTolerance = Math.Max(Math.Min(width, height) * 0.025, 0.02);
+            double edgeToleranceX = Math.Max(width * 0.055, 0.05);
+            double edgeToleranceY = Math.Max(height * 0.055, 0.05);
+            int i;
+
+            for (i = elements.Count - 1; i >= 0; i--)
+            {
+                OviaCadShapeElement item = elements[i];
+
+                if (item == null || item.Type != "LINE")
+                {
+                    continue;
+                }
+
+                double dx = Math.Abs(item.X1 - item.X2);
+                double dy = Math.Abs(item.Y1 - item.Y2);
+                double centerX = (item.X1 + item.X2) / 2.0;
+                double centerY = (item.Y1 + item.Y2) / 2.0;
+                bool vertical = dx <= axisTolerance;
+                bool horizontal = dy <= axisTolerance;
+
+                /*
+                 * 형상 셀 좌/우 경계에 붙은 수직선은 대부분 테이블 세로선입니다.
+                 * 실제 철근형상 안의 짧은 끝단 표시는 셀 중앙 쪽에 있으므로 보존됩니다.
+                 */
+                if (vertical && dy >= height * 0.22)
+                {
+                    if (centerX <= edgeToleranceX || centerX >= width - edgeToleranceX)
+                    {
+                        elements.RemoveAt(i);
+                        continue;
+                    }
+                }
+
+                /*
+                 * 행 상/하 경계에 붙은 긴 수평선은 테이블 가로선입니다.
+                 */
+                if (horizontal && dx >= width * 0.35)
+                {
+                    if (centerY <= edgeToleranceY || centerY >= height - edgeToleranceY)
+                    {
+                        elements.RemoveAt(i);
+                        continue;
+                    }
+                }
+            }
+        }
+
         private bool ShouldKeepCadShapeLine(Point3d p1, Point3d p2, double minX, double maxX, double minY, double maxY, double width, double height)
         {
             Point3d center = new Point3d((p1.X + p2.X) / 2.0, (p1.Y + p2.Y) / 2.0, 0);
@@ -3379,22 +3651,43 @@ namespace OVIA.AutoCAD_2027
             bool horizontal = dy <= axisTolerance;
             bool vertical = dx <= axisTolerance;
 
-            if (horizontal && dx >= width * 0.82)
+            double edgeToleranceX = Math.Max(width * 0.055, 0.05);
+            double edgeToleranceY = Math.Max(height * 0.055, 0.05);
+
+            if (vertical && dy >= height * 0.22)
+            {
+                if (center.X <= minX + edgeToleranceX || center.X >= maxX - edgeToleranceX)
+                {
+                    return false;
+                }
+            }
+
+            if (horizontal && dx >= width * 0.35)
+            {
+                if (center.Y <= minY + edgeToleranceY || center.Y >= maxY - edgeToleranceY)
+                {
+                    return false;
+                }
+            }
+
+            bool horizontalBorder = horizontal
+                && dx >= width * 0.90
+                && Math.Min(p1.X, p2.X) <= minX + axisTolerance
+                && Math.Max(p1.X, p2.X) >= maxX - axisTolerance
+                && (Math.Abs(center.Y - minY) <= axisTolerance || Math.Abs(center.Y - maxY) <= axisTolerance);
+
+            if (horizontalBorder)
             {
                 return false;
             }
 
-            if (vertical && dy >= height * 0.82)
-            {
-                return false;
-            }
+            bool verticalBorder = vertical
+                && dy >= height * 0.90
+                && Math.Min(p1.Y, p2.Y) <= minY + axisTolerance
+                && Math.Max(p1.Y, p2.Y) >= maxY - axisTolerance
+                && (Math.Abs(center.X - minX) <= axisTolerance || Math.Abs(center.X - maxX) <= axisTolerance);
 
-            if (horizontal && (Math.Abs(center.Y - minY) <= axisTolerance || Math.Abs(center.Y - maxY) <= axisTolerance))
-            {
-                return false;
-            }
-
-            if (vertical && (Math.Abs(center.X - minX) <= axisTolerance || Math.Abs(center.X - maxX) <= axisTolerance))
+            if (verticalBorder)
             {
                 return false;
             }
@@ -3404,8 +3697,12 @@ namespace OVIA.AutoCAD_2027
 
         private bool IsPointInCadShapeCell(Point3d point, double minX, double maxX, double minY, double maxY, double width, double height)
         {
-            double marginX = Math.Max(width * 0.08, 0.15);
-            double marginY = Math.Max(height * 0.08, 0.15);
+            /*
+             * 형상 캡처는 이미 셀 안쪽 안전 영역을 기준으로 수행합니다.
+             * 여기서 여백을 크게 주면 BlockReference 내부의 테이블 경계선이 다시 살아납니다.
+             */
+            double marginX = Math.Max(width * 0.018, 0.02);
+            double marginY = Math.Max(height * 0.018, 0.02);
 
             return point.X >= minX - marginX
                 && point.X <= maxX + marginX
@@ -3454,7 +3751,27 @@ namespace OVIA.AutoCAD_2027
                         continue;
                     }
 
-                    if (dx >= width * 0.90 || dy >= height * 0.90)
+                    double edgeTolerance = Math.Max(Math.Min(width, height) * 0.025, 0.03);
+                    bool nearTopOrBottom = item.Y1 <= edgeTolerance || item.Y2 <= edgeTolerance || item.Y1 >= height - edgeTolerance || item.Y2 >= height - edgeTolerance;
+                    bool nearLeftOrRight = item.X1 <= edgeTolerance || item.X2 <= edgeTolerance || item.X1 >= width - edgeTolerance || item.X2 >= width - edgeTolerance;
+
+                    bool horizontalBorder = dx >= width * 0.90
+                        && nearTopOrBottom
+                        && Math.Min(item.X1, item.X2) <= edgeTolerance
+                        && Math.Max(item.X1, item.X2) >= width - edgeTolerance;
+
+                    if (horizontalBorder)
+                    {
+                        elements.RemoveAt(i);
+                        continue;
+                    }
+
+                    bool verticalBorder = dy >= height * 0.90
+                        && nearLeftOrRight
+                        && Math.Min(item.Y1, item.Y2) <= edgeTolerance
+                        && Math.Max(item.Y1, item.Y2) >= height - edgeTolerance;
+
+                    if (verticalBorder)
                     {
                         elements.RemoveAt(i);
                         continue;
@@ -3515,15 +3832,18 @@ namespace OVIA.AutoCAD_2027
                     continue;
                 }
 
-                bool inLooseShapeBox = item.X1 >= looseMinX && item.X1 <= looseMaxX && item.Y1 >= looseMinY && item.Y1 <= looseMaxY;
                 bool inTightShapeBox = item.X1 >= tightMinX && item.X1 <= tightMaxX && item.Y1 >= tightMinY && item.Y1 <= tightMaxY;
 
-                if (!inLooseShapeBox)
-                {
-                    elements.RemoveAt(i);
-                    continue;
-                }
-
+                /*
+                 * OVIA 2026-05-27 보정:
+                 * 단순 직선형/ㄱ자형 철근은 형상선의 높이가 매우 작습니다.
+                 * 이때 geomHeight 기준 looseBox가 지나치게 얇아져서 형상 위쪽의 치수 텍스트
+                 * 10000, 9000, 9640 같은 값이 삭제되고, 화면에는 0만 남는 문제가 있었습니다.
+                 *
+                 * 이 함수는 이미 철근형상 셀 안에서 수집된 TEXT만 처리하므로,
+                 * 텍스트를 looseBox 밖이라는 이유만으로 제거하지 않습니다.
+                 * 단, 번호/규격처럼 명확한 외부 행 값이 형상 셀에 섞인 경우만 제거합니다.
+                 */
                 if (IsExternalRowValueText(row, item.Text) && !inTightShapeBox)
                 {
                     elements.RemoveAt(i);
@@ -3587,21 +3907,8 @@ namespace OVIA.AutoCAD_2027
                 return true;
             }
 
-            if (IsSameCadShapeCompareValue(value, row.Qty))
-            {
-                return true;
-            }
-
-            if (IsSameCadShapeCompareValue(value, row.TotalLength))
-            {
-                return true;
-            }
-
-            if (IsSameCadShapeCompareValue(value, row.TotalWeight))
-            {
-                return true;
-            }
-
+            // 철근형상 내부 치수값은 길이/수량/중량 값과 동일한 숫자일 수 있습니다.
+            // 따라서 숫자 계열 데이터값을 이유로 CAD 형상 텍스트를 제거하지 않습니다.
             return false;
         }
 
@@ -3894,28 +4201,6 @@ namespace OVIA.AutoCAD_2027
             sb.Append('"');
         }
 
-
-        private List<OviaHeaderColumn> CreateStandardOutputHeaderColumns()
-        {
-            List<OviaHeaderColumn> columns = new List<OviaHeaderColumn>();
-
-            // 사용자 화면/CSV의 고정 출력 순서입니다.
-            // 번호 / 부위 / 부호 / 규격 / 형상번호 / 철근형상 / 길이 / 총길이(M) / 수량 / 중량(Ton) / 비고
-            columns.Add(CreateHeaderColumn("MARK_NO", "번호", 0));
-            columns.Add(CreateHeaderColumn("PART", "부위", 1));
-            columns.Add(CreateHeaderColumn("SYMBOL", "부호", 2));
-            columns.Add(CreateHeaderColumn("SPEC", "규격", 3));
-            columns.Add(CreateHeaderColumn("SHAPE_NO", "형상번호", 4));
-            columns.Add(CreateHeaderColumn("SHAPE", "철근형상", 5));
-            columns.Add(CreateHeaderColumn("LENGTH_MM", "길이(mm)", 6));
-            columns.Add(CreateHeaderColumn("TOTAL_LENGTH_M", "총길이(M)", 7));
-            columns.Add(CreateHeaderColumn("QUANTITY_EA", "수량(EA)", 8));
-            columns.Add(CreateHeaderColumn("TOTAL_WEIGHT", "중량(TON)", 9));
-            columns.Add(CreateHeaderColumn("NOTE", "비고", 10));
-
-            return columns;
-        }
-
         private void WriteBarTableCsv(string filePath, List<OviaBarTableRow> rows)
         {
             using (StreamWriter writer = new StreamWriter(filePath, false, new UTF8Encoding(true)))
@@ -3925,12 +4210,12 @@ namespace OVIA.AutoCAD_2027
                  * 헤더 자동 인식 결과가 일부 컬럼만 잡힌 경우에도 출력 컬럼이 줄어들면 안 됩니다.
                  *
                  * 출력 기준:
-                 * 번호 | 부위 | 부호 | 규격 | 형상번호 | 철근형상 | 길이(mm) | 총길이(M) | 수량(EA) | 중량(TON) | 비고
+                 * 번호 | 부위 | 철근규격 | 형상번호 | 철근형상 | 길이(mm) | 수량(EA) | 총길이(M) | 중량(Ton) | 비고
                  *
                  * lastDetectedHeaderColumns는 CAD 셀 위치 분석/추출용으로만 사용하고,
                  * CSV 출력은 표준 컬럼으로 고정합니다.
                  */
-                List<OviaHeaderColumn> columns = CreateStandardOutputHeaderColumns();
+                List<OviaHeaderColumn> columns = CreateFallbackHeaderColumns();
 
                 writer.Write("No,RowType,SourceRowNo");
 
@@ -4019,7 +4304,7 @@ namespace OVIA.AutoCAD_2027
                     ", 길이=" + row.Length +
                     ", 수량=" + row.Qty +
                     ", 총길이=" + row.TotalLength +
-                    ", 중량=" + row.TotalWeight +
+                    ", 총중량=" + row.TotalWeight +
                     "\n"
                 );
             }
@@ -4716,16 +5001,6 @@ namespace OVIA.AutoCAD_2027
                 }
             }
 
-            // 헤더를 선택하지 않아도 분석창에서 상단 헤더를 찾아 실제 표 컬럼 경계만 유지합니다.
-            // 철근형상 내부의 작은 사각형/치수선이 여러 행에서 같은 X좌표로 반복되면
-            // 표 세로선으로 오인될 수 있으므로, 헤더 행을 관통하지 않는 세로선 후보는 제거합니다.
-            List<double> headerFilteredVerticalXs = FilterVerticalCoordinatesByHeaderBand(verticalXs, gridLines, textRows, axisTolerance, mergeTolerance);
-
-            if (headerFilteredVerticalXs != null && headerFilteredVerticalXs.Count >= 3)
-            {
-                verticalXs = headerFilteredVerticalXs;
-            }
-
             int i;
 
             if (verticalXs.Count < 3 || horizontalYs.Count < 3)
@@ -4735,6 +5010,22 @@ namespace OVIA.AutoCAD_2027
             }
 
             string[,] cellTexts = BuildGridCellTextMatrix(textRows, verticalXs, horizontalYs, mergeTolerance);
+
+            if (cellTexts == null)
+            {
+                diagnostic = "셀 텍스트 매트릭스를 만들지 못했습니다.";
+                return result;
+            }
+
+            /*
+             * OVIA 2026-05-27 보정:
+             * 철근형상 셀 내부의 짧은 수직선/꺾임선이 표 세로선으로 오인되면
+             * 6컬럼 표가 7~9컬럼처럼 쪼개지고, 길이/수량/중량이 밀립니다.
+             * 헤더 행이 확인되는 경우, 헤더가 비어 있는 내부 분할 컬럼은 실제 표 컬럼이
+             * 아니므로 먼저 제거한 뒤 다시 셀 매트릭스를 구성합니다.
+             */
+            NormalizeGridColumnsByHeader(textRows, ref verticalXs, horizontalYs, mergeTolerance);
+            cellTexts = BuildGridCellTextMatrix(textRows, verticalXs, horizontalYs, mergeTolerance);
 
             if (cellTexts == null)
             {
@@ -4772,6 +5063,15 @@ namespace OVIA.AutoCAD_2027
             }
 
             ApplyGridHeaderColumnBoundsFromLines(columns, verticalXs);
+
+            /*
+             * OVIA 2026-05-27 보정:
+             * 표 선 검출에 철근형상 내부 선/치수선이 섞이면 일부 행에서
+             * 철근형상 셀의 치수값이 길이/수량/총길이/중량 칸으로 들어갈 수 있습니다.
+             * 헤더 문자의 실제 X 위치를 기준으로 안전한 컬럼 범위를 다시 보정해서,
+             * 형상 칸의 값은 형상 전용 데이터로만 사용되도록 합니다.
+             */
+            ApplyTextHeaderColumnBoundsIfAvailable(textRows, columns);
 
             lastDetectedHeaderColumns = columns;
 
@@ -4854,6 +5154,31 @@ namespace OVIA.AutoCAD_2027
                     ApplyValueByStandardKey(row, column.StandardKey, value);
                 }
 
+                /*
+                 * 형상 셀 안의 치수 문자(120, 190 등)는 오직 CAD 형상 렌더링용입니다.
+                 * 이 값들이 길이/수량/총길이/중량으로 들어가면 안 되므로,
+                 * 헤더 기준 실제 데이터 컬럼에서 다시 한 번 값을 복구/보정합니다.
+                 */
+                ApplyGridShapeCellBoundsByHeaderColumn(row, columns, rowTopY, rowBottomY);
+                RecoverGridRowValuesByHeaderBounds(textRows, row, columns, rowTopY, rowBottomY, mergeTolerance);
+
+                /*
+                 * OVIA 2026-05-27 재보정:
+                 * 철근형상 내부 숫자는 데이터로 쓰지 않되, 규격(SHD10 등) 오른쪽에 있는 실제 산정값은
+                 * 반드시 복구해야 합니다. 셀/선 기반 범위가 조금 어긋나도 같은 행의 원문을 X순서로 모아
+                 * 규격 뒤 마지막 숫자들을 길이/수량/총길이/중량으로 재확인합니다.
+                 */
+                if (row.RowType == "DATA")
+                {
+                    string rowBandText = JoinGridRowBandTextInSelectedRange(textRows, rowTopY, rowBottomY, selectedMinPoint.X, selectedMaxPoint.X, mergeTolerance);
+
+                    if (rowBandText != "")
+                    {
+                        row.RawText = rowBandText;
+                        SupplementGridDataFromSpecAnchoredText(rowBandText, row, columns);
+                    }
+                }
+
                 if (row.MarkNo == "" && row.BarNo == "")
                 {
                     string recoveredMarkNo = RecoverGridMarkNo(textRows, rowTopY, rowBottomY, columns, verticalXs, mergeTolerance, rowNo);
@@ -4896,9 +5221,17 @@ namespace OVIA.AutoCAD_2027
                     row.BarNo = leftMostMarkNo;
                 }
 
-                if (row.RowType == "DATA")
+                if (row.RowType == "DATA" && headerRowIndex < 0)
                 {
-                    SupplementStandardDataFromRawText(rawText, row);
+                    /*
+                     * 형상 셀 내부 치수값은 데이터 컬럼 값으로 쓰면 안 됩니다.
+                     * 표 선 기반 파서에서는 이미 셀/헤더 범위로 값을 복구했으므로,
+                     * 형상 컬럼이 확인된 행에서는 rawText 전체 숫자를 다시 훑어 보정하지 않습니다.
+                     */
+                    if (!row.HasShapeCellBounds())
+                    {
+                        SupplementStandardDataFromRawText(rawText, row);
+                    }
                 }
 
                 if (row.RowType == "SUBTOTAL" || row.RowType == "TOTAL")
@@ -4921,6 +5254,82 @@ namespace OVIA.AutoCAD_2027
 
             diagnostic = "세로선 " + verticalXs.Count.ToString() + "개, 가로선 " + horizontalYs.Count.ToString() + "개, " + (headerRowIndex >= 0 ? "헤더 행 " + (headerRowIndex + 1).ToString() + "번" : "기본 컬럼 순서 적용");
             return result;
+        }
+
+        private void NormalizeGridColumnsByHeader(List<OviaTextRow> textRows, ref List<double> verticalXs, List<double> horizontalYs, double mergeTolerance)
+        {
+            if (textRows == null || verticalXs == null || horizontalYs == null)
+            {
+                return;
+            }
+
+            if (verticalXs.Count < 4 || horizontalYs.Count < 2)
+            {
+                return;
+            }
+
+            int pass;
+
+            for (pass = 0; pass < 6; pass++)
+            {
+                string[,] matrix = BuildGridCellTextMatrix(textRows, verticalXs, horizontalYs, mergeTolerance);
+
+                if (matrix == null)
+                {
+                    return;
+                }
+
+                int headerRowIndex = DetectGridHeaderRow(matrix, verticalXs, horizontalYs);
+
+                if (headerRowIndex < 0)
+                {
+                    return;
+                }
+
+                int colCount = verticalXs.Count - 1;
+                int removeIndex = -1;
+                int boundary;
+
+                for (boundary = 1; boundary < colCount; boundary++)
+                {
+                    string leftTitle = CleanHeaderText(matrix[headerRowIndex, boundary - 1]);
+                    string rightTitle = CleanHeaderText(matrix[headerRowIndex, boundary]);
+                    bool leftHeader = IsKnownGridHeaderTitle(leftTitle);
+                    bool rightHeader = IsKnownGridHeaderTitle(rightTitle);
+                    bool leftBlank = leftTitle.Trim() == "";
+                    bool rightBlank = rightTitle.Trim() == "";
+
+                    /*
+                     * 실제 표 컬럼이면 양쪽 모두 헤더가 있거나, 최소한 다음/이전 실제 헤더와
+                     * 독립된 의미를 갖습니다. 철근형상 내부 수직선이 컬럼 경계로 섞이면
+                     * 헤더 행에서는 한쪽이 빈칸으로 남는 경우가 많으므로 이 경계를 제거합니다.
+                     */
+                    if ((leftHeader && rightBlank) || (leftBlank && rightHeader))
+                    {
+                        removeIndex = boundary;
+                        break;
+                    }
+                }
+
+                if (removeIndex <= 0 || removeIndex >= verticalXs.Count - 1)
+                {
+                    return;
+                }
+
+                verticalXs.RemoveAt(removeIndex);
+            }
+        }
+
+        private bool IsKnownGridHeaderTitle(string title)
+        {
+            if (title == null || title.Trim() == "")
+            {
+                return false;
+            }
+
+            string key = ClassifyGridHeaderTitle(title, false);
+
+            return key != null && key.Trim() != "";
         }
 
         private void ApplyGridHeaderColumnBoundsFromLines(List<OviaHeaderColumn> columns, List<double> verticalXs)
@@ -4957,207 +5366,715 @@ namespace OVIA.AutoCAD_2027
             }
         }
 
-
-        private List<double> FilterVerticalCoordinatesByHeaderBand(List<double> verticalXs, List<OviaGridLineSegment> gridLines, List<OviaTextRow> textRows, double axisTolerance, double mergeTolerance)
+        private void ApplyTextHeaderColumnBoundsIfAvailable(List<OviaTextRow> textRows, List<OviaHeaderColumn> columns)
         {
-            if (verticalXs == null || verticalXs.Count < 3 || gridLines == null || gridLines.Count == 0 || textRows == null || textRows.Count == 0)
+            if (textRows == null || textRows.Count == 0 || columns == null || columns.Count == 0)
             {
-                return verticalXs;
+                return;
             }
 
-            double headerY = FindLikelyGridHeaderY(textRows);
+            OviaHeaderMap textHeaderMap = null;
 
-            if (headerY == Double.MinValue)
+            try
             {
-                return verticalXs;
+                textHeaderMap = DetectHeaderMap(GroupRowsByY(textRows), textRows);
+            }
+            catch
+            {
+                textHeaderMap = null;
             }
 
-            List<double> filtered = new List<double>();
-            double xTolerance = Math.Max(mergeTolerance * 1.5, axisTolerance * 3.0);
-            double yTolerance = Math.Max(mergeTolerance * 0.75, 0.5);
+            if (textHeaderMap == null || textHeaderMap.Columns == null || textHeaderMap.Columns.Count < 3)
+            {
+                return;
+            }
+
             int i;
 
-            for (i = 0; i < verticalXs.Count; i++)
+            for (i = 0; i < columns.Count; i++)
             {
-                double x = verticalXs[i];
+                OviaHeaderColumn target = columns[i];
 
-                if (HasVerticalGridLineAcrossY(gridLines, x, headerY, xTolerance, yTolerance))
+                if (target == null)
                 {
-                    filtered.Add(x);
+                    continue;
                 }
+
+                OviaHeaderColumn source = FindMatchingHeaderColumnForBounds(textHeaderMap.Columns, target.StandardKey);
+
+                if (source == null)
+                {
+                    continue;
+                }
+
+                if (source.RightX <= source.LeftX)
+                {
+                    continue;
+                }
+
+                target.LeftX = source.LeftX;
+                target.RightX = source.RightX;
+                target.X = source.X;
             }
 
-            // 필터 후 컬럼 수가 과도하게 줄면 기존 후보를 유지합니다.
-            // 단, 철근형상 내부선이 제거되어 후보 수가 줄어드는 정상 케이스는 필터 결과를 사용합니다.
-            if (filtered.Count >= 3 && filtered.Count <= verticalXs.Count)
+            /*
+             * OVIA 2026-05-27 보정:
+             * 표 선/셀 분할 과정에서 총길이(M) 같은 실제 헤더 컬럼이 누락되면
+             * 이후 보정 로직이 3개 값(길이/수량/중량) 표로 오인하여
+             * 길이 칸에 수량, 수량 칸에 총길이가 들어갑니다.
+             *
+             * 사용자가 BarList 항목 매핑을 만든 목적은 CAD 헤더명을 기준으로 OVIA 표준 컬럼에
+             * 정확히 넣는 것이므로, 문자 헤더 분석에서 확인된 표준 컬럼은 기존 grid columns에
+             * 없더라도 추가합니다. 이 추가 컬럼은 SourceColumnIndex가 없어도 LeftX/RightX 범위로
+             * 실제 행 값을 다시 읽을 수 있습니다.
+             */
+            for (i = 0; i < textHeaderMap.Columns.Count; i++)
             {
-                return MergeGridCoordinates(filtered, mergeTolerance, true);
+                OviaHeaderColumn source = textHeaderMap.Columns[i];
+
+                if (source == null || source.StandardKey == null || source.StandardKey.Trim() == "")
+                {
+                    continue;
+                }
+
+                if (!IsBarListDataHeaderKey(source.StandardKey))
+                {
+                    continue;
+                }
+
+                if (FindMatchingHeaderColumnForBounds(columns, source.StandardKey) != null)
+                {
+                    continue;
+                }
+
+                if (source.RightX <= source.LeftX)
+                {
+                    continue;
+                }
+
+                OviaHeaderColumn added = new OviaHeaderColumn();
+                added.StandardKey = source.StandardKey;
+                added.OriginalTitle = source.OriginalTitle;
+                added.X = source.X;
+                added.LeftX = source.LeftX;
+                added.RightX = source.RightX;
+                added.SourceColumnIndex = -1;
+                columns.Add(added);
             }
 
-            return verticalXs;
+            columns.Sort(delegate (OviaHeaderColumn a, OviaHeaderColumn b)
+            {
+                return a.X.CompareTo(b.X);
+            });
         }
 
-        private double FindLikelyGridHeaderY(List<OviaTextRow> textRows)
+        private bool IsBarListDataHeaderKey(string key)
         {
-            if (textRows == null || textRows.Count == 0)
+            if (key == null)
             {
-                return Double.MinValue;
+                return false;
             }
 
-            Dictionary<string, HeaderYVote> votes = new Dictionary<string, HeaderYVote>();
+            return key == "MARK_NO" ||
+                   key == "PART" ||
+                   key == "SPEC" ||
+                   key == "SHAPE_NO" ||
+                   key == "SHAPE" ||
+                   key == "LENGTH_MM" ||
+                   key == "TOTAL_LENGTH_M" ||
+                   key == "QUANTITY_EA" ||
+                   key == "TOTAL_WEIGHT" ||
+                   key == "TOTAL_WEIGHT_KG" ||
+                   key == "NOTE";
+        }
+
+        private OviaHeaderColumn FindMatchingHeaderColumnForBounds(List<OviaHeaderColumn> columns, string key)
+        {
+            if (columns == null || key == null)
+            {
+                return null;
+            }
+
+            OviaHeaderColumn exact = FindHeaderColumnByKey(columns, key);
+
+            if (exact != null)
+            {
+                return exact;
+            }
+
+            if (key == "TOTAL_WEIGHT" || key == "TOTAL_WEIGHT_KG")
+            {
+                exact = FindHeaderColumnByKey(columns, "TOTAL_WEIGHT");
+
+                if (exact != null)
+                {
+                    return exact;
+                }
+
+                return FindHeaderColumnByKey(columns, "TOTAL_WEIGHT_KG");
+            }
+
+            return null;
+        }
+
+        private void ApplyGridShapeCellBoundsByHeaderColumn(OviaBarTableRow row, List<OviaHeaderColumn> columns, double rowTopY, double rowBottomY)
+        {
+            if (row == null || columns == null)
+            {
+                return;
+            }
+
+            OviaHeaderColumn shapeColumn = FindHeaderColumnByKey(columns, "SHAPE");
+
+            if (shapeColumn == null)
+            {
+                return;
+            }
+
+            if (shapeColumn.RightX <= shapeColumn.LeftX)
+            {
+                return;
+            }
+
+            row.ShapeCellMinX = shapeColumn.LeftX;
+            row.ShapeCellMaxX = shapeColumn.RightX;
+            row.ShapeCellMinY = rowBottomY;
+            row.ShapeCellMaxY = rowTopY;
+        }
+
+        private void RecoverGridRowValuesByHeaderBounds(List<OviaTextRow> textRows, OviaBarTableRow row, List<OviaHeaderColumn> columns, double rowTopY, double rowBottomY, double tolerance)
+        {
+            if (textRows == null || row == null || columns == null)
+            {
+                return;
+            }
+
+            if (row.RowType != "DATA")
+            {
+                return;
+            }
+
+            OviaHeaderColumn shapeColumn = FindHeaderColumnByKey(columns, "SHAPE");
+
+            string markText = GetGridColumnTextByHeaderBounds(textRows, columns, "MARK_NO", rowTopY, rowBottomY, tolerance, shapeColumn, false);
+            string partText = GetGridColumnTextByHeaderBounds(textRows, columns, "PART", rowTopY, rowBottomY, tolerance, shapeColumn, false);
+            string specText = GetGridColumnTextByHeaderBounds(textRows, columns, "SPEC", rowTopY, rowBottomY, tolerance, shapeColumn, false);
+            string shapeNoText = GetGridColumnTextByHeaderBounds(textRows, columns, "SHAPE_NO", rowTopY, rowBottomY, tolerance, shapeColumn, false);
+            string shapeText = GetGridColumnTextByHeaderBounds(textRows, columns, "SHAPE", rowTopY, rowBottomY, tolerance, shapeColumn, true);
+            string lengthText = GetGridColumnTextByHeaderBounds(textRows, columns, "LENGTH_MM", rowTopY, rowBottomY, tolerance, shapeColumn, false);
+            string qtyText = GetGridColumnTextByHeaderBounds(textRows, columns, "QUANTITY_EA", rowTopY, rowBottomY, tolerance, shapeColumn, false);
+            string totalLengthText = GetGridColumnTextByHeaderBounds(textRows, columns, "TOTAL_LENGTH_M", rowTopY, rowBottomY, tolerance, shapeColumn, false);
+            string totalWeightText = GetGridColumnTextByHeaderBounds(textRows, columns, "TOTAL_WEIGHT", rowTopY, rowBottomY, tolerance, shapeColumn, false);
+
+            if (totalWeightText == "")
+            {
+                totalWeightText = GetGridColumnTextByHeaderBounds(textRows, columns, "TOTAL_WEIGHT_KG", rowTopY, rowBottomY, tolerance, shapeColumn, false);
+            }
+
+            string value;
+
+            value = FirstSimpleNumber(markText);
+            if (value != "")
+            {
+                row.MarkNo = value;
+                row.BarNo = value;
+            }
+
+            if (partText != "")
+            {
+                row.Part = partText;
+            }
+
+            value = DetectSpec(specText);
+            if (value != "")
+            {
+                row.Spec = value;
+            }
+            else if (specText != "")
+            {
+                row.Spec = specText;
+            }
+
+            if (shapeNoText != "")
+            {
+                row.ShapeNo = shapeNoText;
+            }
+
+            if (shapeText != "")
+            {
+                row.ShapeText = shapeText;
+                row.ShapeRawText = shapeText;
+                row.ShapeDimensionText = ExtractNumbersText(shapeText);
+            }
+
+            value = PickGridNumericValue(lengthText, "LENGTH_MM");
+            if (value != "")
+            {
+                row.Length = value;
+            }
+
+            value = PickGridNumericValue(qtyText, "QUANTITY_EA");
+            if (value != "")
+            {
+                row.Qty = value;
+            }
+
+            if (FindMatchingHeaderColumnForBounds(columns, "TOTAL_LENGTH_M") != null)
+            {
+                value = PickGridNumericValue(totalLengthText, "TOTAL_LENGTH_M");
+                if (value != "")
+                {
+                    row.TotalLength = value;
+                }
+            }
+            else
+            {
+                row.TotalLength = "";
+            }
+
+            value = PickGridNumericValue(totalWeightText, "TOTAL_WEIGHT");
+            if (value != "")
+            {
+                OviaHeaderColumn kgColumn = FindMatchingHeaderColumnForBounds(columns, "TOTAL_WEIGHT_KG");
+
+                if (kgColumn != null && FindHeaderColumnByKey(columns, "TOTAL_WEIGHT") == null)
+                {
+                    row.TotalWeight = ConvertKgTextToTonText(value);
+                }
+                else
+                {
+                    row.TotalWeight = value;
+                }
+            }
+        }
+
+        private string GetGridColumnTextByHeaderBounds(List<OviaTextRow> textRows, List<OviaHeaderColumn> columns, string key, double rowTopY, double rowBottomY, double tolerance, OviaHeaderColumn shapeColumn, bool targetIsShape)
+        {
+            if (textRows == null || columns == null || key == null)
+            {
+                return "";
+            }
+
+            OviaHeaderColumn column = FindMatchingHeaderColumnForBounds(columns, key);
+
+            if (column == null || column.RightX <= column.LeftX)
+            {
+                return "";
+            }
+
+            List<OviaTextRow> candidates = new List<OviaTextRow>();
+            double yMargin = Math.Max(tolerance * 2.5, 0.5);
+            double xMargin = Math.Max(tolerance * 0.6, 0.15);
             int i;
 
             for (i = 0; i < textRows.Count; i++)
             {
-                OviaTextRow textRow = textRows[i];
+                OviaTextRow text = textRows[i];
 
-                if (textRow == null)
+                if (text == null)
                 {
                     continue;
                 }
 
-                string text = CleanHeaderText(textRow.TextValue);
-
-                if (text == "")
+                if (text.Y < rowBottomY - yMargin || text.Y > rowTopY + yMargin)
                 {
                     continue;
                 }
 
-                string key = ClassifyGridHeaderTitle(text, false);
+                string value = CleanCellText(text.TextValue);
 
-                if (key == "")
-                {
-                    key = ClassifyHeaderTitle(text);
-                }
-
-                if (key == "")
+                if (value == "")
                 {
                     continue;
                 }
 
-                // 비고만 단독으로 잡힌 행은 헤더 후보로 약하므로 제외합니다.
-                if (key == "NOTE")
+                if (IsHeaderRow(value) || IsSummaryText(value))
                 {
                     continue;
                 }
 
-                string bucket = Math.Round(textRow.Y, 2).ToString("0.00", CultureInfo.InvariantCulture);
-                HeaderYVote vote;
-
-                if (!votes.TryGetValue(bucket, out vote))
+                if (!IsXInsideHeaderColumn(text.X, column, xMargin))
                 {
-                    vote = new HeaderYVote();
-                    vote.Y = textRow.Y;
-                    votes.Add(bucket, vote);
+                    continue;
                 }
 
-                if (!ContainsText(vote.Keys, key))
+                if (!targetIsShape && IsXInsideHeaderColumn(text.X, shapeColumn, Math.Max(tolerance, 0.5)))
                 {
-                    vote.Keys.Add(key);
+                    continue;
                 }
 
-                vote.Count++;
+                candidates.Add(text);
             }
 
-            HeaderYVote best = null;
-
-            foreach (HeaderYVote vote in votes.Values)
+            if (candidates.Count == 0)
             {
-                if (vote == null)
+                return "";
+            }
+
+            candidates.Sort(delegate (OviaTextRow a, OviaTextRow b)
+            {
+                double yDiff = Math.Abs(a.Y - b.Y);
+
+                if (yDiff > Math.Max(tolerance, 0.2))
+                {
+                    return b.Y.CompareTo(a.Y);
+                }
+
+                return a.X.CompareTo(b.X);
+            });
+
+            StringBuilder sb = new StringBuilder();
+
+            for (i = 0; i < candidates.Count; i++)
+            {
+                string value = CleanCellText(candidates[i].TextValue);
+
+                if (value == "")
                 {
                     continue;
                 }
 
-                int score = vote.Keys.Count * 10 + vote.Count;
-
-                if (ContainsText(vote.Keys, "MARK_NO"))
+                if (sb.Length > 0)
                 {
-                    score += 5;
+                    sb.Append(" ");
                 }
 
-                if (ContainsText(vote.Keys, "SPEC"))
-                {
-                    score += 5;
-                }
-
-                if (ContainsText(vote.Keys, "SHAPE"))
-                {
-                    score += 5;
-                }
-
-                if (ContainsText(vote.Keys, "LENGTH_MM"))
-                {
-                    score += 5;
-                }
-
-                if (ContainsText(vote.Keys, "QUANTITY_EA"))
-                {
-                    score += 5;
-                }
-
-                if (ContainsText(vote.Keys, "TOTAL_LENGTH_M"))
-                {
-                    score += 5;
-                }
-
-                if (ContainsText(vote.Keys, "TOTAL_WEIGHT"))
-                {
-                    score += 5;
-                }
-
-                vote.Score = score;
-
-                if (best == null || vote.Score > best.Score)
-                {
-                    best = vote;
-                }
+                sb.Append(value);
             }
 
-            if (best == null || best.Keys.Count < 3)
-            {
-                return Double.MinValue;
-            }
-
-            return best.Y;
+            return sb.ToString().Trim();
         }
 
-        private bool HasVerticalGridLineAcrossY(List<OviaGridLineSegment> gridLines, double x, double y, double xTolerance, double yTolerance)
+        private bool IsXInsideHeaderColumn(double x, OviaHeaderColumn column, double margin)
         {
-            if (gridLines == null)
+            if (column == null)
+            {
+                return false;
+            }
+
+            return x >= column.LeftX - margin && x <= column.RightX + margin;
+        }
+
+        private string PickGridNumericValue(string text, string key)
+        {
+            text = CleanCellText(text);
+
+            if (text == "")
+            {
+                return "";
+            }
+
+            MatchCollection matches = Regex.Matches(text, @"-?\d+(\.\d+)?");
+
+            if (matches == null || matches.Count == 0)
+            {
+                return "";
+            }
+
+            if (key == "QUANTITY_EA")
+            {
+                int i;
+
+                for (i = 0; i < matches.Count; i++)
+                {
+                    if (Regex.IsMatch(matches[i].Value, @"^-?\d+$"))
+                    {
+                        return matches[i].Value;
+                    }
+                }
+            }
+
+            return matches[0].Value;
+        }
+
+
+        private string JoinGridRowBandTextInSelectedRange(List<OviaTextRow> textRows, double rowTopY, double rowBottomY, double selectedX1, double selectedX2, double tolerance)
+        {
+            if (textRows == null || textRows.Count == 0)
+            {
+                return "";
+            }
+
+            double leftX = Math.Min(selectedX1, selectedX2);
+            double rightX = Math.Max(selectedX1, selectedX2);
+            double width = Math.Abs(rightX - leftX);
+
+            if (width <= 0.0001)
+            {
+                width = 1.0;
+            }
+
+            double xMargin = Math.Max(width * 0.035, Math.Max(tolerance * 2.0, 1.0));
+            double yMargin = Math.Max(tolerance * 2.5, 0.5);
+            List<OviaTextRow> candidates = new List<OviaTextRow>();
+            int i;
+
+            for (i = 0; i < textRows.Count; i++)
+            {
+                OviaTextRow text = textRows[i];
+
+                if (text == null)
+                {
+                    continue;
+                }
+
+                if (text.Y < rowBottomY - yMargin || text.Y > rowTopY + yMargin)
+                {
+                    continue;
+                }
+
+                if (text.X < leftX - xMargin || text.X > rightX + xMargin)
+                {
+                    continue;
+                }
+
+                string value = CleanCellText(text.TextValue);
+
+                if (value == "")
+                {
+                    continue;
+                }
+
+                if (IsHeaderRow(value) || IsSummaryText(value))
+                {
+                    continue;
+                }
+
+                candidates.Add(text);
+            }
+
+            if (candidates.Count == 0)
+            {
+                return "";
+            }
+
+            candidates.Sort(delegate (OviaTextRow a, OviaTextRow b)
+            {
+                return a.X.CompareTo(b.X);
+            });
+
+            StringBuilder sb = new StringBuilder();
+
+            for (i = 0; i < candidates.Count; i++)
+            {
+                string value = CleanCellText(candidates[i].TextValue);
+
+                if (value == "")
+                {
+                    continue;
+                }
+
+                if (sb.Length > 0)
+                {
+                    sb.Append(" ");
+                }
+
+                sb.Append(value);
+            }
+
+            return sb.ToString().Trim();
+        }
+
+        private void SupplementGridDataFromSpecAnchoredText(string rawText, OviaBarTableRow row, List<OviaHeaderColumn> columns)
+        {
+            if (row == null || rawText == null)
+            {
+                return;
+            }
+
+            if (row.RowType != "DATA")
+            {
+                return;
+            }
+
+            string text = CleanCellText(rawText);
+
+            if (text == "")
+            {
+                return;
+            }
+
+            string[] parts = text.Split(new char[] { ' ', '\t', ',', ';', '|', '/', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+
+            if (parts == null || parts.Length == 0)
+            {
+                return;
+            }
+
+            int specIndex = -1;
+            string detectedSpec = "";
+            int i;
+
+            for (i = 0; i < parts.Length; i++)
+            {
+                detectedSpec = DetectSpec(parts[i]);
+
+                if (detectedSpec != "")
+                {
+                    specIndex = i;
+                    break;
+                }
+            }
+
+            if (specIndex < 0)
+            {
+                return;
+            }
+
+            row.Spec = detectedSpec;
+
+            List<string> numbersAfterSpec = new List<string>();
+
+            for (i = specIndex + 1; i < parts.Length; i++)
+            {
+                string token = parts[i];
+
+                if (DetectSpec(token) != "")
+                {
+                    continue;
+                }
+
+                MatchCollection matches = Regex.Matches(token.Replace(",", ""), @"-?\d+(\.\d+)?");
+                int j;
+
+                for (j = 0; j < matches.Count; j++)
+                {
+                    numbersAfterSpec.Add(matches[j].Value);
+                }
+            }
+
+            if (numbersAfterSpec.Count < 3)
+            {
+                return;
+            }
+
+            bool hasTotalLengthColumn = FindMatchingHeaderColumnForBounds(columns, "TOTAL_LENGTH_M") != null;
+            bool hasKgWeightColumn = FindMatchingHeaderColumnForBounds(columns, "TOTAL_WEIGHT_KG") != null && FindHeaderColumnByKey(columns, "TOTAL_WEIGHT") == null;
+
+            string lengthValue = "";
+            string qtyValue = "";
+            string totalLengthValue = "";
+            string totalWeightValue = "";
+            bool pickedWithTotalLength = false;
+
+            /*
+             * OVIA 2026-05-27 핵심 보정:
+             * BarList 항목 매핑의 목적은 숫자의 순서가 아니라 CAD 표 헤더 기준으로
+             * OVIA 표준 컬럼에 넣는 것입니다.
+             *
+             * 따라서 총길이(M) 헤더가 실제로 확인된 도면에서만
+             *   길이 / 수량 / 총길이 / 중량
+             * 4개 패턴을 허용합니다.
+             *
+             * 총길이(M) 헤더가 없는 SSBAR 계열 도면은
+             *   길이 / 수량 / 중량
+             * 3개 패턴만 허용하며, 이때 총길이(M)는 반드시 빈칸으로 유지합니다.
+             *
+             * 형상/형태 셀 내부 치수값은 계속 형상 전용으로만 사용합니다.
+             */
+            if (hasTotalLengthColumn)
+            {
+                if (!TryPickSpecAnchoredBarValues(numbersAfterSpec, true, out lengthValue, out qtyValue, out totalLengthValue, out totalWeightValue))
+                {
+                    return;
+                }
+
+                pickedWithTotalLength = totalLengthValue != "";
+            }
+            else
+            {
+                if (!TryPickSpecAnchoredBarValues(numbersAfterSpec, false, out lengthValue, out qtyValue, out totalLengthValue, out totalWeightValue))
+                {
+                    return;
+                }
+
+                pickedWithTotalLength = false;
+                totalLengthValue = "";
+            }
+
+            if (lengthValue != "")
+            {
+                row.Length = lengthValue;
+            }
+
+            if (qtyValue != "")
+            {
+                row.Qty = qtyValue;
+            }
+
+            if (pickedWithTotalLength && totalLengthValue != "")
+            {
+                row.TotalLength = totalLengthValue;
+            }
+            else if (!hasTotalLengthColumn)
+            {
+                row.TotalLength = "";
+            }
+
+            if (totalWeightValue != "")
+            {
+                if (hasKgWeightColumn)
+                {
+                    row.TotalWeight = ConvertKgTextToTonText(totalWeightValue);
+                }
+                else
+                {
+                    row.TotalWeight = totalWeightValue;
+                }
+            }
+        }
+
+        private bool TryPickSpecAnchoredBarValues(List<string> numbers, bool preferTotalLength, out string lengthValue, out string qtyValue, out string totalLengthValue, out string totalWeightValue)
+        {
+            lengthValue = "";
+            qtyValue = "";
+            totalLengthValue = "";
+            totalWeightValue = "";
+
+            if (numbers == null || numbers.Count < 3)
             {
                 return false;
             }
 
             int i;
 
-            for (i = 0; i < gridLines.Count; i++)
+            if (preferTotalLength && numbers.Count >= 4)
             {
-                OviaGridLineSegment segment = gridLines[i];
-
-                if (segment == null)
+                for (i = numbers.Count - 4; i >= 0; i--)
                 {
-                    continue;
+                    string candidateLength = numbers[i];
+                    string candidateQty = numbers[i + 1];
+                    string candidateTotalLength = numbers[i + 2];
+                    string candidateWeight = numbers[i + 3];
+
+                    if (IsLikelyBarLengthValue(candidateLength) &&
+                        IsLikelyBarQuantityValue(candidateQty) &&
+                        IsLikelyBarTotalLengthValue(candidateTotalLength) &&
+                        IsLikelyBarWeightValue(candidateWeight))
+                    {
+                        lengthValue = candidateLength;
+                        qtyValue = candidateQty;
+                        totalLengthValue = candidateTotalLength;
+                        totalWeightValue = candidateWeight;
+                        return true;
+                    }
                 }
+            }
 
-                double dx = Math.Abs(segment.X1 - segment.X2);
+            for (i = numbers.Count - 3; i >= 0; i--)
+            {
+                string candidateLength = numbers[i];
+                string candidateQty = numbers[i + 1];
+                string candidateWeight = numbers[i + 2];
 
-                if (dx > xTolerance)
+                if (IsLikelyBarLengthValue(candidateLength) &&
+                    IsLikelyBarQuantityValue(candidateQty) &&
+                    IsLikelyBarWeightValue(candidateWeight))
                 {
-                    continue;
-                }
-
-                double segmentX = (segment.X1 + segment.X2) / 2.0;
-
-                if (Math.Abs(segmentX - x) > xTolerance)
-                {
-                    continue;
-                }
-
-                double minY = Math.Min(segment.Y1, segment.Y2) - yTolerance;
-                double maxY = Math.Max(segment.Y1, segment.Y2) + yTolerance;
-
-                if (y >= minY && y <= maxY)
-                {
+                    lengthValue = candidateLength;
+                    qtyValue = candidateQty;
+                    totalLengthValue = "";
+                    totalWeightValue = candidateWeight;
                     return true;
                 }
             }
@@ -5165,25 +6082,86 @@ namespace OVIA.AutoCAD_2027
             return false;
         }
 
-
-        private bool ContainsText(List<string> list, string value)
+        private bool IsLikelyBarLengthValue(string value)
         {
-            if (list == null || value == null)
+            decimal number;
+
+            if (!TryParseDecimalText(value, out number))
             {
                 return false;
             }
 
-            int i;
-
-            for (i = 0; i < list.Count; i++)
+            if (!Regex.IsMatch(value == null ? "" : value.Trim(), @"^-?\d+(\.0+)?$"))
             {
-                if (String.Equals(list[i], value, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
+                return false;
             }
 
-            return false;
+            return number >= 50 && number <= 100000;
+        }
+
+        private bool IsLikelyBarQuantityValue(string value)
+        {
+            decimal number;
+
+            if (!TryParseDecimalText(value, out number))
+            {
+                return false;
+            }
+
+            if (!Regex.IsMatch(value == null ? "" : value.Trim(), @"^-?\d+$"))
+            {
+                return false;
+            }
+
+            return number >= 0 && number <= 100000;
+        }
+
+        private bool IsLikelyBarTotalLengthValue(string value)
+        {
+            decimal number;
+
+            if (!TryParseDecimalText(value, out number))
+            {
+                return false;
+            }
+
+            return number >= 0 && number <= 10000000;
+        }
+
+        private bool IsLikelyBarWeightValue(string value)
+        {
+            decimal number;
+
+            if (!TryParseDecimalText(value, out number))
+            {
+                return false;
+            }
+
+            return number >= 0 && number <= 100000;
+        }
+
+        private bool TryParseDecimalText(string value, out decimal number)
+        {
+            number = 0;
+
+            if (value == null)
+            {
+                return false;
+            }
+
+            value = value.Trim().Replace(",", "");
+
+            if (value == "")
+            {
+                return false;
+            }
+
+            if (Decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out number))
+            {
+                return true;
+            }
+
+            return Decimal.TryParse(value, out number);
         }
 
         private List<OviaGridLineSegment> ExtractGridLineSegmentsByWindow(Editor ed, Database db, Point3d point1, Point3d point2)
@@ -6282,7 +7260,7 @@ namespace OVIA.AutoCAD_2027
 
                 if (pattern == "alpha_numeric_mark")
                 {
-                    return "SYMBOL";
+                    return "SHAPE_NO";
                 }
 
                 if (hasShapeNoHeader)
@@ -6293,7 +7271,7 @@ namespace OVIA.AutoCAD_2027
                 if (normalizedTitle.IndexOf("명칭", StringComparison.OrdinalIgnoreCase) >= 0 ||
                     normalizedTitle.IndexOf("NAME", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    return "SYMBOL";
+                    return "SHAPE_NO";
                 }
 
                 return "MARK_NO";
@@ -6580,6 +7558,7 @@ namespace OVIA.AutoCAD_2027
             value = value.Replace("_", "");
             value = value.Replace("-", "");
             value = value.Replace(".", "");
+            value = value.Replace(",", "");
             value = value.Replace("(", "");
             value = value.Replace(")", "");
             value = value.Replace("[", "");
@@ -6604,8 +7583,15 @@ namespace OVIA.AutoCAD_2027
                 return "NOTE";
             }
 
+            if (value.IndexOf("KG", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "TOTAL_WEIGHT_KG";
+            }
+
             if (value.IndexOf("총중량", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("중량", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("톤", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("TON", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("WEIGHT", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("WT", StringComparison.OrdinalIgnoreCase) >= 0)
             {
@@ -6615,7 +7601,8 @@ namespace OVIA.AutoCAD_2027
             if (value.IndexOf("총길이", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("총연장", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("연장", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                value.IndexOf("TOTALLENGTH", StringComparison.OrdinalIgnoreCase) >= 0)
+                value.IndexOf("TOTALLENGTH", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value == "TL")
             {
                 return "TOTAL_LENGTH_M";
             }
@@ -6623,6 +7610,7 @@ namespace OVIA.AutoCAD_2027
             if (value.IndexOf("수량", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("본수", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("개수", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("갯수", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("QTY", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("EA", StringComparison.OrdinalIgnoreCase) >= 0)
             {
@@ -6635,6 +7623,17 @@ namespace OVIA.AutoCAD_2027
                 return "LENGTH_MM";
             }
 
+            if (value.IndexOf("부위", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("위치", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("구간", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("ZONE", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("AREA", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("LOCATION", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "PART";
+            }
+
+
             if (value.IndexOf("철근규격", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("규격", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("강종", StringComparison.OrdinalIgnoreCase) >= 0 ||
@@ -6642,15 +7641,6 @@ namespace OVIA.AutoCAD_2027
                 value.IndexOf("DIA", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return "SPEC";
-            }
-
-            if (value.IndexOf("부위", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                value.IndexOf("위치", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                value.IndexOf("구간", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                value.IndexOf("AREA", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                value.IndexOf("ZONE", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return "PART";
             }
 
             if (value.IndexOf("형번", StringComparison.OrdinalIgnoreCase) >= 0 ||
@@ -6664,6 +7654,7 @@ namespace OVIA.AutoCAD_2027
 
             if (value.IndexOf("철근형상", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("형상", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                value.IndexOf("형태", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 value.IndexOf("SHAPE", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return "SHAPE";
@@ -6676,7 +7667,8 @@ namespace OVIA.AutoCAD_2027
 
             if (value.IndexOf("부호", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                return "SYMBOL";
+                // OVIA 기본 매핑 기준: 번호 = 부호
+                return "MARK_NO";
             }
 
             if (value.IndexOf("MARK", StringComparison.OrdinalIgnoreCase) >= 0 || value.IndexOf("BARNO", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -6694,16 +7686,6 @@ namespace OVIA.AutoCAD_2027
                 return "번호";
             }
 
-            if (standardKey == "PART")
-            {
-                return "부위";
-            }
-
-            if (standardKey == "SYMBOL")
-            {
-                return "부호";
-            }
-
             if (standardKey == "SHAPE_NO")
             {
                 return "형상번호";
@@ -6716,7 +7698,7 @@ namespace OVIA.AutoCAD_2027
 
             if (standardKey == "SPEC")
             {
-                return "규격";
+                return "철근규격";
             }
 
             if (standardKey == "LENGTH_MM")
@@ -6734,14 +7716,14 @@ namespace OVIA.AutoCAD_2027
                 return "총길이(M)";
             }
 
+            if (standardKey == "TOTAL_WEIGHT_KG")
+            {
+                return "중량(Ton)";
+            }
+
             if (standardKey == "TOTAL_WEIGHT")
             {
-                if (originalTitle != null && originalTitle.ToUpperInvariant().IndexOf("KG", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    return "중량(KG)";
-                }
-
-                return "중량(TON)";
+                return "중량(Ton)";
             }
 
             if (standardKey == "NOTE")
@@ -7775,14 +8757,6 @@ namespace OVIA.AutoCAD_2027
         }
     }
 
-    public class HeaderYVote
-    {
-        public double Y = 0;
-        public int Count = 0;
-        public int Score = 0;
-        public List<string> Keys = new List<string>();
-    }
-
     public class OviaTextRow
     {
         public int RowNo = 0;
@@ -7806,7 +8780,6 @@ namespace OVIA.AutoCAD_2027
         public string BarNo = "";
         public string MarkNo = "";
         public string Part = "";
-        public string Symbol = "";
         public string ShapeNo = "";
         public string ShapeText = "";
         public string ShapeRawText = "";
@@ -7848,6 +8821,7 @@ namespace OVIA.AutoCAD_2027
         public double EndAngle = 0;
         public double Height = 0;
         public double Rotation = 0;
+        public int ColorIndex = 256;
     }
 
     public class OviaHeaderColumn

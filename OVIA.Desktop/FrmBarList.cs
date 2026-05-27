@@ -3228,34 +3228,6 @@ namespace OVIA.Desktop
             return candidates[0];
         }
 
-
-        private string NormalizeBarListDisplayHeader(string header)
-        {
-            if (header == null)
-            {
-                return "";
-            }
-
-            string value = header.Trim();
-
-            if (value == "")
-            {
-                return value;
-            }
-
-            if (value.IndexOf("총중량", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return "중량(TON)";
-            }
-
-            if (value.Equals("부호/명칭", StringComparison.OrdinalIgnoreCase) || value.Equals("부호 및 명칭", StringComparison.OrdinalIgnoreCase))
-            {
-                return "부호";
-            }
-
-            return value;
-        }
-
         private bool IsOviaAutoCadTableCsvFile(string fileName)
         {
             if (fileName == null)
@@ -3335,7 +3307,7 @@ namespace OVIA.Desktop
 
                 for (i = 0; i < mappedTable.Columns.Count; i++)
                 {
-                    string header = NormalizeBarListDisplayHeader(mappedTable.Columns[i].DisplayName);
+                    string header = mappedTable.Columns[i].DisplayName;
 
                     if (header == null || header.Trim() == "")
                     {
@@ -3378,6 +3350,7 @@ namespace OVIA.Desktop
                     SetRowOriginalValues(newRowIndex, cells);
                 }
 
+                ApplyUnitConversionAfterMapping(mappedTable);
                 ApplyGridColumnStyle();
 
                 // 형상번호 표시 컬럼은 수동 형상코드 선택 시 코드값을 보여주기 위해 유지합니다.
@@ -4055,6 +4028,102 @@ namespace OVIA.Desktop
             }
         }
 
+
+        private void ApplyUnitConversionAfterMapping(OviaBarListMappedTable mappedTable)
+        {
+            if (grid == null || mappedTable == null)
+            {
+                return;
+            }
+
+            int i;
+
+            for (i = 0; i < grid.Columns.Count && i < mappedTable.Columns.Count; i++)
+            {
+                OviaBarListMappedColumn mapped = mappedTable.Columns[i];
+
+                if (mapped == null || !String.Equals(mapped.StandardKey, "weight_ton", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!HeaderLooksKg(mapped.SourceHeader))
+                {
+                    continue;
+                }
+
+                ConvertColumnKgToTon(i);
+            }
+        }
+
+        private bool HeaderLooksKg(string header)
+        {
+            if (header == null)
+            {
+                return false;
+            }
+
+            string value = header.Trim().ToUpperInvariant();
+            value = value.Replace(" ", "");
+
+            return value.IndexOf("KG", StringComparison.OrdinalIgnoreCase) >= 0
+                || value.IndexOf("KGS", StringComparison.OrdinalIgnoreCase) >= 0
+                || value.IndexOf("킬로", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private void ConvertColumnKgToTon(int columnIndex)
+        {
+            int r;
+
+            for (r = 0; r < grid.Rows.Count; r++)
+            {
+                if (grid.Rows[r].IsNewRow)
+                {
+                    continue;
+                }
+
+                string text = GetCellText(r, columnIndex);
+                double value;
+
+                if (!TryParseNumber(text, out value))
+                {
+                    continue;
+                }
+
+                double ton = value / 1000.0;
+                grid.Rows[r].Cells[columnIndex].Value = ton.ToString("0.###", CultureInfo.InvariantCulture);
+            }
+        }
+
+        private bool TryParseNumber(string text, out double value)
+        {
+            value = 0;
+
+            if (text == null)
+            {
+                return false;
+            }
+
+            text = text.Trim().Replace(",", "").Replace(" ", "");
+
+            if (text == "")
+            {
+                return false;
+            }
+
+            if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out value))
+            {
+                return true;
+            }
+
+            if (double.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out value))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
         private string GetSafeColumnName(string header, int index)
         {
             string name = header == null ? "" : header.Trim();
@@ -4082,11 +4151,9 @@ namespace OVIA.Desktop
 
         private OviaBarListMappingStore GetMappingStore()
         {
-            if (mappingStore == null)
-            {
-                mappingStore = OviaBarListMappingStore.LoadDefault();
-            }
-
+            // BarList 항목 매핑은 관리자 화면에서 실행 중에도 변경될 수 있습니다.
+            // CSV를 새로 불러올 때마다 최신 매핑 파일을 다시 읽어 기존 화면 구조를 유지하면서 변경사항을 반영합니다.
+            mappingStore = OviaBarListMappingStore.LoadDefault();
             return mappingStore;
         }
 
@@ -4429,7 +4496,7 @@ namespace OVIA.Desktop
                 {
                     baseWidth = 48;
                 }
-                else if (ContainsAny(name, "규격"))
+                else if (ContainsAny(name, "규격", "철근규격"))
                 {
                     baseWidth = 90;
                 }
@@ -4986,7 +5053,99 @@ namespace OVIA.Desktop
                 store = CreateBuiltInDefault();
             }
 
+            NormalizeStandardColumnOrder(store);
+
             return store;
+        }
+
+        private static void NormalizeStandardColumnOrder(OviaBarListMappingStore store)
+        {
+            if (store == null || store.StandardColumns == null)
+            {
+                return;
+            }
+
+            string[] order = new string[]
+            {
+                "no",
+                "part",
+                "dia",
+                "shape_no",
+                "shape",
+                "length_mm",
+                "qty_ea",
+                "total_length_m",
+                "weight_ton",
+                "remark"
+            };
+
+            Dictionary<string, OviaBarListMappingColumn> current = new Dictionary<string, OviaBarListMappingColumn>(StringComparer.OrdinalIgnoreCase);
+            int i;
+
+            for (i = 0; i < store.StandardColumns.Count; i++)
+            {
+                OviaBarListMappingColumn col = store.StandardColumns[i];
+
+                if (col == null || col.Key == null || col.Key.Trim() == "")
+                {
+                    continue;
+                }
+
+                if (!current.ContainsKey(col.Key))
+                {
+                    current.Add(col.Key, col);
+                }
+            }
+
+            OviaBarListMappingStore builtIn = CreateBuiltInDefault();
+            Dictionary<string, OviaBarListMappingColumn> builtInMap = new Dictionary<string, OviaBarListMappingColumn>(StringComparer.OrdinalIgnoreCase);
+
+            for (i = 0; i < builtIn.StandardColumns.Count; i++)
+            {
+                OviaBarListMappingColumn col = builtIn.StandardColumns[i];
+
+                if (col != null && col.Key != null && col.Key.Trim() != "" && !builtInMap.ContainsKey(col.Key))
+                {
+                    builtInMap.Add(col.Key, col);
+                }
+            }
+
+            List<OviaBarListMappingColumn> ordered = new List<OviaBarListMappingColumn>();
+            Dictionary<string, bool> used = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+            for (i = 0; i < order.Length; i++)
+            {
+                string key = order[i];
+
+                if (current.ContainsKey(key))
+                {
+                    ordered.Add(current[key]);
+                    used[key] = true;
+                }
+                else if (builtInMap.ContainsKey(key))
+                {
+                    ordered.Add(builtInMap[key]);
+                    used[key] = true;
+                }
+            }
+
+            for (i = 0; i < store.StandardColumns.Count; i++)
+            {
+                OviaBarListMappingColumn col = store.StandardColumns[i];
+
+                if (col == null || col.Key == null || col.Key.Trim() == "")
+                {
+                    continue;
+                }
+
+                if (!used.ContainsKey(col.Key))
+                {
+                    ordered.Add(col);
+                    used[col.Key] = true;
+                }
+            }
+
+            store.StandardColumns = ordered;
         }
 
         private static string FindMappingFilePath()
@@ -4995,16 +5154,18 @@ namespace OVIA.Desktop
             string startup = Application.StartupPath;
             string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
 
+            // 시스템관리자가 저장한 사용자 설정을 배포 기본값보다 먼저 적용합니다.
+            // 기존에는 실행 폴더의 기본 JSON이 먼저 잡혀 관리자 저장값이 무시될 수 있었습니다.
+            if (appData != null && appData.Trim() != "")
+            {
+                candidates.Add(Path.Combine(appData, "OVIA", "Mapping", "barlist_mapping.json"));
+            }
+
             if (startup != null && startup.Trim() != "")
             {
                 candidates.Add(Path.Combine(startup, "Data", "Mapping", "barlist_mapping.json"));
                 candidates.Add(Path.GetFullPath(Path.Combine(startup, "..", "..", "Data", "Mapping", "barlist_mapping.json")));
                 candidates.Add(Path.GetFullPath(Path.Combine(startup, "..", "..", "..", "Data", "Mapping", "barlist_mapping.json")));
-            }
-
-            if (appData != null && appData.Trim() != "")
-            {
-                candidates.Add(Path.Combine(appData, "OVIA", "Mapping", "barlist_mapping.json"));
             }
 
             int i;
@@ -5018,6 +5179,99 @@ namespace OVIA.Desktop
             }
 
             return "";
+        }
+
+        public static string GetWritableMappingFilePath()
+        {
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+
+            if (appData == null || appData.Trim() == "")
+            {
+                appData = Application.StartupPath;
+            }
+
+            return Path.Combine(appData, "OVIA", "Mapping", "barlist_mapping.json");
+        }
+
+        public void SaveToDefaultPath()
+        {
+            SaveToFile(GetWritableMappingFilePath());
+        }
+
+        public void SaveToFile(string path)
+        {
+            if (path == null || path.Trim() == "")
+            {
+                throw new ArgumentException("저장 경로가 비어 있습니다.");
+            }
+
+            string dir = Path.GetDirectoryName(path);
+
+            if (dir != null && dir.Trim() != "" && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            File.WriteAllText(path, ToJson(), Encoding.UTF8);
+        }
+
+        public string ToJson()
+        {
+            StringBuilder sb = new StringBuilder();
+            int i;
+
+            sb.Append("{\r\n");
+            sb.Append("  \"version\": \"" + EscapeJson(Version) + "\",\r\n");
+            sb.Append("  \"updatedAt\": \"" + EscapeJson(UpdatedAt) + "\",\r\n");
+            sb.Append("  \"standardColumns\": [\r\n");
+
+            for (i = 0; i < StandardColumns.Count; i++)
+            {
+                OviaBarListMappingColumn col = StandardColumns[i];
+                int j;
+
+                sb.Append("    {\r\n");
+                sb.Append("      \"key\": \"" + EscapeJson(col.Key) + "\",\r\n");
+                sb.Append("      \"displayName\": \"" + EscapeJson(col.DisplayName) + "\",\r\n");
+                sb.Append("      \"dataType\": \"" + EscapeJson(col.DataType) + "\",\r\n");
+                sb.Append("      \"priority\": " + col.Priority.ToString() + ",\r\n");
+                sb.Append("      \"aliases\": [");
+
+                for (j = 0; j < col.Aliases.Count; j++)
+                {
+                    if (j > 0)
+                    {
+                        sb.Append(", ");
+                    }
+
+                    sb.Append("\"" + EscapeJson(col.Aliases[j]) + "\"");
+                }
+
+                sb.Append("]\r\n");
+                sb.Append("    }");
+
+                if (i < StandardColumns.Count - 1)
+                {
+                    sb.Append(",");
+                }
+
+                sb.Append("\r\n");
+            }
+
+            sb.Append("  ]\r\n");
+            sb.Append("}\r\n");
+
+            return sb.ToString();
+        }
+
+        private static string EscapeJson(string value)
+        {
+            if (value == null)
+            {
+                return "";
+            }
+
+            return value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n");
         }
 
         public OviaBarListMappedTable BuildMappedTable(List<string> sourceHeaders)
@@ -5063,11 +5317,24 @@ namespace OVIA.Desktop
 
             for (i = 0; i < StandardColumns.Count; i++)
             {
-                string key = StandardColumns[i].Key;
+                OviaBarListMappingColumn standardColumn = StandardColumns[i];
+                string key = standardColumn.Key;
 
                 if (matchedByKey.ContainsKey(key))
                 {
                     table.Columns.Add(matchedByKey[key]);
+                }
+                else
+                {
+                    // OVIA 기본 헤더는 CAD 원본에 해당 컬럼이 없어도 항상 유지합니다.
+                    // 예: 총길이(M)가 없는 도면은 총길이(M) 컬럼을 빈 값으로 표시/저장합니다.
+                    OviaBarListMappedColumn emptyCol = new OviaBarListMappedColumn();
+                    emptyCol.SourceIndex = -1;
+                    emptyCol.SourceHeader = "";
+                    emptyCol.StandardKey = standardColumn.Key;
+                    emptyCol.DisplayName = standardColumn.DisplayName;
+                    emptyCol.IsMapped = false;
+                    table.Columns.Add(emptyCol);
                 }
             }
 
@@ -5361,22 +5628,23 @@ namespace OVIA.Desktop
             return false;
         }
 
-        private static OviaBarListMappingStore CreateBuiltInDefault()
+        public static OviaBarListMappingStore CreateBuiltInDefault()
         {
             OviaBarListMappingStore store = new OviaBarListMappingStore();
-            store.Version = "built-in-2026.05.22.001";
-            store.UpdatedAt = "2026-05-22";
+            store.Version = "built-in-2026.05.27.009";
+            store.UpdatedAt = "2026-05-27";
 
-            store.AddColumn("no", "번호", "number_or_text", 100, "NO", "NO.", "No", "No.", "순번", "번호", "번", "숫자");
+            // OVIA BarList 고정 헤더 순서입니다.
+            // 이 순서는 CAD 도면마다 헤더명이 달라도 화면/저장 기준으로 유지합니다.
+            store.AddColumn("no", "번호", "number_or_text", 100, "NO", "NO.", "No", "No.", "순번", "번호", "번", "부호", "부호번호", "기호", "ITEM");
             store.AddColumn("part", "부위", "text", 100, "부위", "위치", "층", "구간", "시공부위", "ZONE", "AREA", "LOCATION");
-            store.AddColumn("mark", "부호", "text", 100, "부호", "명칭", "부호명", "부호 및 명칭", "BAR MARK", "MARK", "기호", "철근명", "ITEM", "SYMBOL", "CODE");
-            store.AddColumn("dia", "규격", "rebar_diameter", 100, "규격", "DIA", "D", "직경", "철근규격", "BAR DIA", "SIZE", "강종");
-            store.AddColumn("shape_no", "형상번호", "number_or_text", 100, "형번", "형상번호", "형상코드", "SHAPE NO", "SHAPE CODE", "SHAPENO", "SHAPECODE");
-            store.AddColumn("shape", "철근형상", "text_or_image", 100, "형상", "철근형상", "SHAPE", "BENT", "BAR SHAPE", "절곡형상");
+            store.AddColumn("dia", "철근규격", "rebar_diameter", 100, "규격", "철근규격", "DIA", "D", "직경", "BAR DIA", "SIZE", "강종");
+            store.AddColumn("shape_no", "형상번호", "text", 100, "형상번호", "형번", "형상코드", "SHAPE NO", "SHAPE CODE", "BAR MARK", "MARK");
+            store.AddColumn("shape", "철근형상", "text_or_image", 100, "형상", "형태", "철근형상", "SHAPE", "BENT", "BAR SHAPE", "절곡형상");
             store.AddColumn("length_mm", "길이(mm)", "number", 100, "길이", "L", "LENGTH", "절단길이", "산출길이", "MM", "길이MM", "길이(MM)");
+            store.AddColumn("qty_ea", "수량(EA)", "number", 100, "수량", "개수", "갯수", "본수", "EA", "QTY", "QUANTITY", "수량EA", "수량(EA)");
             store.AddColumn("total_length_m", "총길이(M)", "number", 90, "총길이", "총연장", "연장", "TOTAL LENGTH", "T.L", "M", "총길이M", "총길이(M)");
-            store.AddColumn("qty_ea", "수량(EA)", "number", 100, "수량", "EA", "QTY", "QUANTITY", "개수", "갯수", "본수", "수량EA", "수량(EA)");
-            store.AddColumn("total_weight_ton", "중량(TON)", "number", 90, "중량", "총중량", "WEIGHT", "WT", "TON", "톤", "KG", "TOTAL WEIGHT", "총중량TON", "중량(TON)", "총중량(TON)");
+            store.AddColumn("weight_ton", "중량(Ton)", "number_ton", 90, "중량", "총중량", "톤", "TON", "Ton", "ton", "WEIGHT", "WT", "TOTAL WEIGHT", "중량TON", "중량(TON)", "총중량TON", "총중량(TON)", "KG", "kg", "중량KG", "중량(KG)");
             store.AddColumn("remark", "비고", "text", 80, "비고", "REMARK", "NOTE", "메모", "특기사항", "비고사항");
 
             return store;

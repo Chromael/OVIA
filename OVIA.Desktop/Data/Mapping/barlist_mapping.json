@@ -1,33 +1,30 @@
 {
-  "version": "2026.05.23.003",
-  "updatedAt": "2026-05-23",
-  "description": "OVIA BarList 표준 컬럼 매핑 사전입니다. 번호/부호/형번 조건부 매핑 규칙을 추가했습니다. 부호 컬럼은 값이 1,2,3 순번이면 번호로, G1005/D1002 같은 문자+숫자이면 부호/명칭으로 판단합니다.",
+  "version": "ovia-barlist-mapping-2026.05.27.009",
+  "updatedAt": "2026-05-27",
   "standardColumns": [
     {
       "key": "no",
       "displayName": "번호",
+      "dataType": "number_or_text",
+      "priority": 100,
       "aliases": [
+        "번호",
+        "순번",
         "NO",
         "NO.",
         "No",
         "No.",
-        "순번",
-        "번호",
-        "번",
-        "숫자",
-        "NUM",
-        "NUMBER",
-        "부호_순번",
+        "부호",
         "부호번호",
-        "MARK NO",
-        "BAR NO"
-      ],
-      "priority": 100,
-      "dataType": "number_or_text"
+        "기호",
+        "ITEM"
+      ]
     },
     {
       "key": "part",
       "displayName": "부위",
+      "dataType": "text",
+      "priority": 100,
       "aliases": [
         "부위",
         "위치",
@@ -37,72 +34,61 @@
         "ZONE",
         "AREA",
         "LOCATION"
-      ],
-      "priority": 100,
-      "dataType": "text"
-    },
-    {
-      "key": "mark",
-      "displayName": "부호/명칭",
-      "aliases": [
-        "부호",
-        "명칭",
-        "부호명",
-        "부호 및 명칭",
-        "BAR MARK",
-        "MARK",
-        "기호",
-        "철근명",
-        "ITEM",
-        "형번",
-        "형상번호",
-        "형상코드",
-        "SHAPE NO",
-        "SHAPE CODE",
-        "SHAPENO",
-        "SHAPECODE",
-        "GIRDER MARK",
-        "BARCODE",
-        "도면부호",
-        "형상마크"
-      ],
-      "priority": 100,
-      "dataType": "text"
-    },
-    {
-      "key": "shape",
-      "displayName": "철근형상",
-      "aliases": [
-        "형상",
-        "철근형상",
-        "SHAPE",
-        "BENT",
-        "BAR SHAPE",
-        "절곡형상"
-      ],
-      "priority": 100,
-      "dataType": "text_or_image"
+      ]
     },
     {
       "key": "dia",
-      "displayName": "규격",
+      "displayName": "철근규격",
+      "dataType": "rebar_diameter",
+      "priority": 100,
       "aliases": [
+        "철근규격",
         "규격",
         "DIA",
         "D",
         "직경",
-        "철근규격",
         "BAR DIA",
         "SIZE",
         "강종"
-      ],
+      ]
+    },
+    {
+      "key": "shape_no",
+      "displayName": "형상번호",
+      "dataType": "text",
       "priority": 100,
-      "dataType": "rebar_diameter"
+      "aliases": [
+        "형상번호",
+        "형번",
+        "형상코드",
+        "SHAPE NO",
+        "SHAPE CODE",
+        "BAR MARK",
+        "MARK"
+      ]
+    },
+    {
+      "key": "shape",
+      "displayName": "철근형상",
+      "dataType": "text_or_image",
+      "priority": 100,
+      "aliases": [
+        "철근형상",
+        "형상",
+        "형태",
+        "SHAPE",
+        "BENT",
+        "BAR SHAPE",
+        "절곡형상"
+      ]
     },
     {
       "key": "length_mm",
       "displayName": "길이(mm)",
+      "dataType": "number",
+      "priority": 100,
       "aliases": [
+        "길이(mm)",
         "길이",
         "L",
         "LENGTH",
@@ -111,64 +97,72 @@
         "MM",
         "길이MM",
         "길이(MM)"
-      ],
-      "priority": 100,
-      "dataType": "number"
+      ]
     },
     {
       "key": "qty_ea",
       "displayName": "수량(EA)",
+      "dataType": "number",
+      "priority": 100,
       "aliases": [
+        "수량(EA)",
         "수량",
-        "EA",
-        "QTY",
-        "QUANTITY",
         "개수",
         "갯수",
         "본수",
-        "수량EA",
-        "수량(EA)"
-      ],
-      "priority": 100,
-      "dataType": "number"
+        "EA",
+        "QTY",
+        "QUANTITY",
+        "수량EA"
+      ]
     },
     {
       "key": "total_length_m",
       "displayName": "총길이(M)",
+      "dataType": "number",
+      "priority": 90,
       "aliases": [
+        "총길이(M)",
         "총길이",
         "총연장",
         "연장",
         "TOTAL LENGTH",
         "T.L",
         "M",
-        "총길이M",
-        "총길이(M)"
-      ],
-      "priority": 90,
-      "dataType": "number"
+        "총길이M"
+      ]
     },
     {
-      "key": "total_weight_ton",
-      "displayName": "총중량(TON)",
+      "key": "weight_ton",
+      "displayName": "중량(Ton)",
+      "dataType": "number_ton",
+      "priority": 90,
       "aliases": [
-        "총중량",
+        "중량(Ton)",
         "중량",
+        "총중량",
+        "톤",
+        "TON",
+        "Ton",
+        "ton",
         "WEIGHT",
         "WT",
-        "TON",
-        "톤",
-        "KG",
         "TOTAL WEIGHT",
+        "중량TON",
+        "중량(TON)",
         "총중량TON",
-        "총중량(TON)"
-      ],
-      "priority": 90,
-      "dataType": "number"
+        "총중량(TON)",
+        "KG",
+        "kg",
+        "중량KG",
+        "중량(KG)"
+      ]
     },
     {
       "key": "remark",
       "displayName": "비고",
+      "dataType": "text",
+      "priority": 80,
       "aliases": [
         "비고",
         "REMARK",
@@ -176,68 +170,7 @@
         "메모",
         "특기사항",
         "비고사항"
-      ],
-      "priority": 80,
-      "dataType": "text"
-    }
-  ],
-  "conditionalRules": [
-    {
-      "ruleId": "ambiguous_buho_to_no",
-      "headerAliases": [
-        "부호",
-        "NO",
-        "No.",
-        "번호",
-        "순번",
-        "번"
-      ],
-      "target": "번호",
-      "whenValuePattern": "sequential_number",
-      "priority": 130,
-      "description": "헤더가 부호여도 아래 값이 1,2,3처럼 순번이면 OVIA 표준 번호로 본다."
-    },
-    {
-      "ruleId": "ambiguous_buho_to_mark",
-      "headerAliases": [
-        "부호",
-        "MARK",
-        "BAR MARK",
-        "명칭",
-        "부호명"
-      ],
-      "target": "부호/명칭",
-      "whenValuePattern": "alpha_numeric_mark",
-      "priority": 125,
-      "description": "헤더가 부호/명칭 계열이고 아래 값이 G1005, D1002처럼 문자+숫자이면 부호/명칭으로 본다."
-    },
-    {
-      "ruleId": "shape_no_to_mark",
-      "headerAliases": [
-        "형번",
-        "형상번호",
-        "형상코드",
-        "SHAPE NO",
-        "SHAPE CODE",
-        "SHAPENO",
-        "SHAPECODE"
-      ],
-      "target": "부호/명칭",
-      "whenValuePattern": "any",
-      "priority": 140,
-      "description": "형번/형상번호는 번호가 아니라 철근 마크/부호명으로 본다."
-    },
-    {
-      "ruleId": "avoid_rebar_spec_as_mark",
-      "headerAliases": [
-        "부호",
-        "MARK",
-        "BARNO"
-      ],
-      "target": "검토필요",
-      "whenValuePattern": "rebar_spec",
-      "priority": 60,
-      "description": "값이 SHD10, HD13 같은 철근 규격이면 번호/부호로 강제 매핑하지 않는다."
+      ]
     }
   ]
 }

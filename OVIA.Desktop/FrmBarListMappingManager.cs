@@ -1,0 +1,1385 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.IO;
+using System.Windows.Forms;
+
+namespace OVIA.Desktop
+{
+    public class FrmBarListMappingManager : Form
+    {
+        private readonly string companyId;
+        private readonly string userId;
+
+        private readonly Color SurfaceColor = Color.FromArgb(244, 248, 255);
+        private readonly Color TextDark = Color.FromArgb(28, 33, 72);
+        private readonly Color TextSub = Color.FromArgb(102, 111, 135);
+        private readonly Color BrandViolet = Color.FromArgb(91, 49, 225);
+
+        private DataGridView grid;
+        private Label lblStatus;
+        private ContextMenuStrip columnMenu;
+        private ToolStripMenuItem deleteColumnMenuItem;
+        private int aliasColumnSeed = 0;
+        private int columnMenuIndex = -1;
+        private int activeRowIndex = -1;
+        private int activeColumnIndex = -1;
+        private int selectedCellRowIndex = -1;
+        private int selectedCellColumnIndex = -1;
+        private int editingCellRowIndex = -1;
+        private int editingCellColumnIndex = -1;
+        private bool suppressNextCellClick = false;
+        private bool restoringSnapshot = false;
+        private GridSnapshot editBeforeSnapshot = null;
+        private string editBeforeValue = "";
+        private readonly Stack<GridSnapshot> undoStack = new Stack<GridSnapshot>();
+        private readonly Stack<GridSnapshot> redoStack = new Stack<GridSnapshot>();
+        private readonly HashSet<string> changedCells = new HashSet<string>();
+        private readonly Color ActiveRowBackColor = Color.FromArgb(255, 248, 205);
+        private readonly Color ActiveCellBorderColor = Color.FromArgb(255, 204, 0);
+        private readonly Color ActiveColumnBackColor = Color.FromArgb(222, 242, 255);
+        private readonly Color EditCellBorderColor = Color.FromArgb(20, 20, 20);
+        private readonly Color ChangedTextColor = Color.FromArgb(220, 40, 40);
+
+        public FrmBarListMappingManager(string companyId, string userId)
+        {
+            this.companyId = companyId == null ? "" : companyId;
+            this.userId = userId == null ? "" : userId;
+
+            BuildUI();
+            LoadStoreToGrid(OviaBarListMappingStore.LoadDefault());
+        }
+
+        private void BuildUI()
+        {
+            this.SuspendLayout();
+            this.Controls.Clear();
+
+            this.Text = "OVIA - BarList 항목 매핑";
+            this.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.FormBorderStyle = FormBorderStyle.Sizable;
+            this.MinimizeBox = true;
+            this.MaximizeBox = true;
+            this.ClientSize = new Size(1080, 680);
+            this.MinimumSize = new Size(980, 620);
+            this.BackColor = SurfaceColor;
+
+            Label title = new Label();
+            title.Text = "BarList 항목 매핑";
+            title.AutoSize = true;
+            title.Font = new Font("맑은 고딕", 20F, FontStyle.Bold);
+            title.ForeColor = TextDark;
+            title.BackColor = SurfaceColor;
+            title.Location = new Point(28, 24);
+            this.Controls.Add(title);
+
+            Label desc = new Label();
+            desc.Text = "CAD 도면마다 다른 철근재료표 헤더명을 OVIA 기본 헤더로 치환합니다. 매핑 텍스트는 셀 단위로 추가/수정할 수 있으며, 매핑 열은 드래그로 순서를 바꿀 수 있습니다.";
+            desc.AutoSize = false;
+            desc.Size = new Size(980, 42);
+            desc.Font = new Font("맑은 고딕", 9.5F, FontStyle.Regular);
+            desc.ForeColor = TextSub;
+            desc.BackColor = SurfaceColor;
+            desc.Location = new Point(31, 68);
+            this.Controls.Add(desc);
+
+            grid = new DataGridView();
+            grid.Location = new Point(32, 122);
+            grid.Size = new Size(1016, 430);
+            grid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            grid.AllowUserToAddRows = false;
+            grid.AllowUserToDeleteRows = false;
+            grid.AllowUserToOrderColumns = true;
+            grid.MultiSelect = false;
+            grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
+            grid.EditMode = DataGridViewEditMode.EditProgrammatically;
+            grid.RowHeadersVisible = false;
+            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+            grid.BackgroundColor = Color.White;
+            grid.BorderStyle = BorderStyle.FixedSingle;
+            grid.EnableHeadersVisualStyles = false;
+            grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(235, 240, 250);
+            grid.ColumnHeadersDefaultCellStyle.ForeColor = TextDark;
+            grid.ColumnHeadersDefaultCellStyle.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
+            grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            grid.DefaultCellStyle.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+            grid.DefaultCellStyle.SelectionBackColor = ActiveRowBackColor;
+            grid.DefaultCellStyle.SelectionForeColor = TextDark;
+            grid.RowTemplate.Height = 34;
+            grid.ColumnHeaderMouseClick += Grid_ColumnHeaderMouseClick;
+            grid.CellMouseDown += Grid_CellMouseDown;
+            grid.CellClick += Grid_CellClick;
+            grid.CellDoubleClick += Grid_CellDoubleClick;
+            grid.CellBeginEdit += Grid_CellBeginEdit;
+            grid.CellEndEdit += Grid_CellEndEdit;
+            grid.CellPainting += Grid_CellPainting;
+            grid.EditingControlShowing += Grid_EditingControlShowing;
+            grid.KeyDown += Grid_KeyDown;
+            this.Controls.Add(grid);
+
+            BuildColumnContextMenu();
+
+            Button btnAddColumn = CreateButton("매핑 열 추가", 32, 570, 130);
+            btnAddColumn.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
+            btnAddColumn.Click += AddAliasColumn_Click;
+            this.Controls.Add(btnAddColumn);
+
+            Button btnClearCell = CreateButton("선택 셀 비우기", 172, 570, 130);
+            btnClearCell.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
+            btnClearCell.Click += ClearSelectedCell_Click;
+            this.Controls.Add(btnClearCell);
+
+            Button btnReset = CreateButton("기본값 복원", 312, 570, 120);
+            btnReset.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
+            btnReset.Click += ResetDefault_Click;
+            this.Controls.Add(btnReset);
+
+            Button btnSave = CreateButton("저장하기", 792, 570, 120);
+            btnSave.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            btnSave.BackColor = BrandViolet;
+            btnSave.ForeColor = Color.White;
+            btnSave.Click += Save_Click;
+            this.Controls.Add(btnSave);
+
+            Button btnClose = CreateButton("닫기", 928, 570, 120);
+            btnClose.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            btnClose.Click += delegate { this.Close(); };
+            this.Controls.Add(btnClose);
+
+            lblStatus = new Label();
+            lblStatus.Text = "매핑 설정을 불러오는 중입니다.";
+            lblStatus.AutoSize = false;
+            lblStatus.Size = new Size(1016, 40);
+            lblStatus.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+            lblStatus.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+            lblStatus.ForeColor = TextSub;
+            lblStatus.BackColor = SurfaceColor;
+            lblStatus.Location = new Point(32, 622);
+            this.Controls.Add(lblStatus);
+
+            this.ResumeLayout(false);
+        }
+
+        private Button CreateButton(string text, int x, int y, int width)
+        {
+            Button button = new Button();
+            button.Text = text;
+            button.Location = new Point(x, y);
+            button.Size = new Size(width, 38);
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderColor = Color.FromArgb(205, 214, 235);
+            button.BackColor = Color.White;
+            button.ForeColor = TextDark;
+            button.Font = new Font("맑은 고딕", 9.5F, FontStyle.Bold);
+            button.Cursor = Cursors.Hand;
+
+            return button;
+        }
+
+        private void LoadStoreToGrid(OviaBarListMappingStore store)
+        {
+            if (store == null || store.StandardColumns == null || store.StandardColumns.Count == 0)
+            {
+                store = OviaBarListMappingStore.CreateBuiltInDefault();
+            }
+
+            grid.SuspendLayout();
+            restoringSnapshot = true;
+
+            try
+            {
+                grid.Columns.Clear();
+                grid.Rows.Clear();
+                aliasColumnSeed = 0;
+
+                DataGridViewTextBoxColumn noColumn = new DataGridViewTextBoxColumn();
+                noColumn.Name = "No";
+                noColumn.HeaderText = "순서";
+                noColumn.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                noColumn.Width = 58;
+                noColumn.ReadOnly = true;
+                noColumn.SortMode = DataGridViewColumnSortMode.NotSortable;
+                noColumn.Frozen = true;
+                noColumn.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                grid.Columns.Add(noColumn);
+
+                DataGridViewTextBoxColumn displayColumn = new DataGridViewTextBoxColumn();
+                displayColumn.Name = "DisplayName";
+                displayColumn.HeaderText = "OVIA 기본 헤더";
+                displayColumn.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                displayColumn.Width = 145;
+                displayColumn.ReadOnly = true;
+                displayColumn.SortMode = DataGridViewColumnSortMode.NotSortable;
+                displayColumn.Frozen = true;
+                displayColumn.DefaultCellStyle.BackColor = Color.FromArgb(248, 250, 255);
+                displayColumn.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                grid.Columns.Add(displayColumn);
+
+                int maxAliasCount = 2;
+                int i;
+
+                for (i = 0; i < store.StandardColumns.Count; i++)
+                {
+                    List<string> aliases = GetEditableAliases(store.StandardColumns[i]);
+
+                    if (aliases.Count > maxAliasCount)
+                    {
+                        maxAliasCount = aliases.Count;
+                    }
+                }
+
+                for (i = 0; i < maxAliasCount; i++)
+                {
+                    AddAliasColumn();
+                }
+
+                for (i = 0; i < store.StandardColumns.Count; i++)
+                {
+                    OviaBarListMappingColumn col = store.StandardColumns[i];
+                    List<string> aliases = GetEditableAliases(col);
+                    object[] values = new object[grid.Columns.Count];
+                    int j;
+
+                    values[0] = (i + 1).ToString();
+                    values[1] = col.DisplayName;
+
+                    for (j = 0; j < aliases.Count && j + 2 < values.Length; j++)
+                    {
+                        values[j + 2] = aliases[j];
+                    }
+
+                    int rowIndex = grid.Rows.Add(values);
+                    grid.Rows[rowIndex].Tag = col;
+                }
+
+                lblStatus.Text = "현재 매핑 사전: " + store.Version + "  |  저장 위치: " + OviaBarListMappingStore.GetWritableMappingFilePath();
+                lblStatus.ForeColor = TextSub;
+            }
+            finally
+            {
+                restoringSnapshot = false;
+                NormalizeAliasColumnHeadersByDisplayOrder();
+                ApplyColumnHeaderAlignment();
+                changedCells.Clear();
+                activeRowIndex = -1;
+                activeColumnIndex = -1;
+                selectedCellRowIndex = -1;
+                selectedCellColumnIndex = -1;
+                editingCellRowIndex = -1;
+                editingCellColumnIndex = -1;
+                ApplyActiveRowHighlight();
+                grid.ResumeLayout();
+            }
+        }
+
+        private void AddAliasColumn_Click(object sender, EventArgs e)
+        {
+            PushUndoSnapshot();
+            AddAliasColumn();
+            NormalizeAliasColumnHeadersByDisplayOrder();
+            ApplyColumnHeaderAlignment();
+            lblStatus.Text = "매핑 열을 추가했습니다. 필요한 헤더명을 입력한 뒤 저장하세요.";
+            lblStatus.ForeColor = TextSub;
+        }
+
+        private void AddAliasColumn()
+        {
+            aliasColumnSeed++;
+
+            DataGridViewTextBoxColumn column = new DataGridViewTextBoxColumn();
+            column.Name = "Alias_" + aliasColumnSeed.ToString();
+            column.HeaderText = "매핑 " + aliasColumnSeed.ToString();
+            column.Width = 118;
+            column.SortMode = DataGridViewColumnSortMode.NotSortable;
+            column.ReadOnly = false;
+            column.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            column.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            grid.Columns.Add(column);
+        }
+
+        private void ClearSelectedCell_Click(object sender, EventArgs e)
+        {
+            ClearSelectedCellWithConfirm();
+        }
+
+        private void ResetDefault_Click(object sender, EventArgs e)
+        {
+            DialogResult result = MessageBox.Show(
+                "OVIA 기본 BarList 매핑값으로 화면을 되돌리시겠습니까?\r\n\r\n저장하기를 클릭해야 실제 설정 파일에 반영됩니다.",
+                "OVIA 기본값 복원",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question
+            );
+
+            if (result != DialogResult.Yes)
+            {
+                return;
+            }
+
+            PushUndoSnapshot();
+            LoadStoreToGrid(OviaBarListMappingStore.CreateBuiltInDefault());
+            lblStatus.Text = "기본값으로 화면을 복원했습니다. 저장하기를 클릭하면 기본값이 설정 파일에 저장됩니다.";
+            lblStatus.ForeColor = TextSub;
+        }
+
+        private void Save_Click(object sender, EventArgs e)
+        {
+            DialogResult result = MessageBox.Show(
+                "현재 설정을 저장하시겠습니까?\r\n\r\n저장 후 새로 불러오는 BarList CSV부터 변경된 매핑 기준이 적용됩니다.",
+                "OVIA BarList 항목 매핑 저장",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question
+            );
+
+            if (result != DialogResult.Yes)
+            {
+                return;
+            }
+
+            try
+            {
+                OviaBarListMappingStore newStore = BuildStoreFromGrid();
+                newStore.SaveToDefaultPath();
+
+                lblStatus.Text = "저장 완료: " + OviaBarListMappingStore.GetWritableMappingFilePath();
+                lblStatus.ForeColor = Color.FromArgb(18, 166, 91);
+
+                MessageBox.Show(
+                    "BarList 항목 매핑을 저장했습니다.\r\n\r\n이미 열린 BarList 데이터는 다시 불러오면 변경된 기준으로 매핑됩니다.",
+                    "OVIA 저장 완료",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+            }
+            catch (Exception ex)
+            {
+                lblStatus.Text = "저장 오류: " + ex.Message;
+                lblStatus.ForeColor = Color.FromArgb(210, 78, 78);
+
+                MessageBox.Show(
+                    "BarList 항목 매핑 저장 중 오류가 발생했습니다.\r\n\r\n" + ex.Message,
+                    "OVIA 저장 오류",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
+            }
+        }
+
+        private void BuildColumnContextMenu()
+        {
+            columnMenu = new ContextMenuStrip();
+            deleteColumnMenuItem = new ToolStripMenuItem("해당 매핑 세로줄 전체삭제");
+            deleteColumnMenuItem.Click += DeleteSelectedAliasColumn_Click;
+            columnMenu.Items.Add(deleteColumnMenuItem);
+        }
+
+        private void Grid_ColumnHeaderMouseClick(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            if (IsAliasColumn(e.ColumnIndex))
+            {
+                SelectEntireColumn(e.ColumnIndex);
+
+                if (e.Button == MouseButtons.Right)
+                {
+                    ShowColumnContextMenu(e.ColumnIndex);
+                }
+
+                return;
+            }
+
+            activeColumnIndex = -1;
+            activeRowIndex = -1;
+            selectedCellRowIndex = -1;
+            selectedCellColumnIndex = -1;
+            ApplyActiveRowHighlight();
+
+            if (e.Button == MouseButtons.Right)
+            {
+                columnMenuIndex = e.ColumnIndex;
+                deleteColumnMenuItem.Enabled = false;
+                deleteColumnMenuItem.Text = "고정 헤더는 삭제할 수 없습니다";
+                columnMenu.Show(grid, grid.PointToClient(Cursor.Position));
+            }
+        }
+
+        private void Grid_CellMouseDown(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            if (e.Button != MouseButtons.Right)
+            {
+                return;
+            }
+
+            suppressNextCellClick = true;
+            grid.CurrentCell = grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
+
+            if (IsAliasColumn(e.ColumnIndex))
+            {
+                SelectEntireColumn(e.ColumnIndex);
+                ShowColumnContextMenu(e.ColumnIndex);
+            }
+            else
+            {
+                grid.DefaultCellStyle.SelectionBackColor = ActiveRowBackColor;
+                activeColumnIndex = -1;
+                activeRowIndex = e.RowIndex;
+                selectedCellRowIndex = e.RowIndex;
+                selectedCellColumnIndex = e.ColumnIndex;
+                ApplyActiveRowHighlight();
+            }
+        }
+
+        private void ShowColumnContextMenu(int columnIndex)
+        {
+            columnMenuIndex = columnIndex;
+            deleteColumnMenuItem.Enabled = IsAliasColumn(columnIndex);
+            deleteColumnMenuItem.Text = IsAliasColumn(columnIndex) ? "해당 매핑 세로줄 전체삭제" : "고정 헤더는 삭제할 수 없습니다";
+            columnMenu.Show(grid, grid.PointToClient(Cursor.Position));
+        }
+
+        private void Grid_CellClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (restoringSnapshot)
+            {
+                return;
+            }
+
+            if (suppressNextCellClick)
+            {
+                suppressNextCellClick = false;
+                return;
+            }
+
+            if (e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            grid.DefaultCellStyle.SelectionBackColor = ActiveRowBackColor;
+            activeColumnIndex = -1;
+            activeRowIndex = e.RowIndex;
+            selectedCellRowIndex = e.RowIndex;
+            selectedCellColumnIndex = e.ColumnIndex;
+            ApplyActiveRowHighlight();
+        }
+
+        private void Grid_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 2)
+            {
+                return;
+            }
+
+            activeColumnIndex = -1;
+            activeRowIndex = e.RowIndex;
+            selectedCellRowIndex = e.RowIndex;
+            selectedCellColumnIndex = e.ColumnIndex;
+            grid.CurrentCell = grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
+            ApplyActiveRowHighlight();
+            grid.BeginEdit(true);
+        }
+
+        private void Grid_CellBeginEdit(object sender, DataGridViewCellCancelEventArgs e)
+        {
+            if (restoringSnapshot || e.RowIndex < 0 || e.ColumnIndex < 2)
+            {
+                editBeforeSnapshot = null;
+                editBeforeValue = "";
+                editingCellRowIndex = -1;
+                editingCellColumnIndex = -1;
+                return;
+            }
+
+            editingCellRowIndex = e.RowIndex;
+            editingCellColumnIndex = e.ColumnIndex;
+            editBeforeSnapshot = CaptureSnapshot();
+            editBeforeValue = Convert.ToString(grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value);
+            grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Style.BackColor = Color.White;
+            grid.InvalidateCell(e.ColumnIndex, e.RowIndex);
+        }
+
+        private void Grid_CellEndEdit(object sender, DataGridViewCellEventArgs e)
+        {
+            if (restoringSnapshot || editBeforeSnapshot == null || e.RowIndex < 0 || e.ColumnIndex < 2)
+            {
+                editBeforeSnapshot = null;
+                editBeforeValue = "";
+                editingCellRowIndex = -1;
+                editingCellColumnIndex = -1;
+                return;
+            }
+
+            string afterValue = Convert.ToString(grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value);
+
+            if (!String.Equals(editBeforeValue, afterValue, StringComparison.Ordinal))
+            {
+                undoStack.Push(editBeforeSnapshot);
+                redoStack.Clear();
+                MarkCellChanged(e.RowIndex, e.ColumnIndex);
+                lblStatus.Text = "셀 내용을 수정했습니다. Ctrl+Z로 되돌릴 수 있습니다.";
+                lblStatus.ForeColor = TextSub;
+            }
+
+            editingCellRowIndex = -1;
+            editingCellColumnIndex = -1;
+            editBeforeSnapshot = null;
+            editBeforeValue = "";
+            ApplyActiveRowHighlight();
+            grid.Invalidate();
+        }
+
+        private void Grid_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            bool isEditingCell = e.RowIndex == editingCellRowIndex && e.ColumnIndex == editingCellColumnIndex;
+            bool isSelectedCell = e.RowIndex == selectedCellRowIndex && e.ColumnIndex == selectedCellColumnIndex && activeColumnIndex < 0;
+
+            if (!isEditingCell && !isSelectedCell)
+            {
+                return;
+            }
+
+            if (isEditingCell)
+            {
+                e.CellStyle.BackColor = Color.White;
+                e.CellStyle.SelectionBackColor = Color.White;
+                e.CellStyle.SelectionForeColor = TextDark;
+            }
+
+            e.Paint(e.CellBounds, e.PaintParts);
+
+            Rectangle rect = e.CellBounds;
+            rect.Width = rect.Width - 1;
+            rect.Height = rect.Height - 1;
+
+            Color borderColor = isEditingCell ? EditCellBorderColor : ActiveCellBorderColor;
+            int borderWidth = isEditingCell ? 3 : 2;
+
+            using (Pen pen = new Pen(borderColor, borderWidth))
+            {
+                pen.Alignment = System.Drawing.Drawing2D.PenAlignment.Inset;
+                e.Graphics.DrawRectangle(pen, rect);
+            }
+
+            e.Handled = true;
+        }
+
+        private void Grid_EditingControlShowing(object sender, DataGridViewEditingControlShowingEventArgs e)
+        {
+            if (editingCellRowIndex < 0 || editingCellColumnIndex < 2)
+            {
+                return;
+            }
+
+            if (e.Control != null)
+            {
+                e.Control.BackColor = Color.White;
+                e.Control.ForeColor = TextDark;
+            }
+        }
+
+        private void Grid_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Control && e.Shift && e.KeyCode == Keys.Z)
+            {
+                RedoLastAction();
+                e.SuppressKeyPress = true;
+                e.Handled = true;
+                return;
+            }
+
+            if (e.Control && e.KeyCode == Keys.Z)
+            {
+                UndoLastAction();
+                e.SuppressKeyPress = true;
+                e.Handled = true;
+                return;
+            }
+
+            if (e.KeyCode == Keys.Delete && !grid.IsCurrentCellInEditMode)
+            {
+                ClearSelectedCellWithConfirm();
+                e.SuppressKeyPress = true;
+                e.Handled = true;
+            }
+        }
+
+        private void SelectEntireColumn(int columnIndex)
+        {
+            if (columnIndex < 0 || columnIndex >= grid.Columns.Count)
+            {
+                return;
+            }
+
+            grid.ClearSelection();
+            grid.DefaultCellStyle.SelectionBackColor = ActiveColumnBackColor;
+            activeRowIndex = -1;
+            activeColumnIndex = columnIndex;
+            selectedCellRowIndex = -1;
+            selectedCellColumnIndex = -1;
+
+            if (grid.Rows.Count > 0)
+            {
+                grid.CurrentCell = grid.Rows[0].Cells[columnIndex];
+                grid.CurrentCell.Selected = false;
+            }
+
+            ApplyActiveRowHighlight();
+        }
+
+        private void DeleteSelectedAliasColumn_Click(object sender, EventArgs e)
+        {
+            DeleteAliasColumn(columnMenuIndex);
+        }
+
+        private void DeleteAliasColumn(int columnIndex)
+        {
+            if (columnIndex < 0 || columnIndex >= grid.Columns.Count)
+            {
+                return;
+            }
+
+            if (!IsAliasColumn(columnIndex))
+            {
+                MessageBox.Show(
+                    "순서와 OVIA 기본 헤더는 고정값이므로 삭제할 수 없습니다.",
+                    "OVIA",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+
+                return;
+            }
+
+            string headerText = grid.Columns[columnIndex].HeaderText;
+
+            if (!ShowConfirmDialog("매핑 열 삭제", "선택한 [" + headerText + "] 세로 매핑 열 전체를 삭제하시겠습니까?", "삭제"))
+            {
+                return;
+            }
+
+            PushUndoSnapshot();
+            grid.Columns.RemoveAt(columnIndex);
+            NormalizeAliasColumnHeadersByDisplayOrder();
+            ApplyColumnHeaderAlignment();
+            activeRowIndex = -1;
+            activeColumnIndex = -1;
+            selectedCellRowIndex = -1;
+            selectedCellColumnIndex = -1;
+            ApplyActiveRowHighlight();
+
+            lblStatus.Text = "선택한 매핑 열 전체를 삭제했습니다. 저장하기 전까지 실제 설정에는 반영되지 않습니다.";
+            lblStatus.ForeColor = TextSub;
+        }
+
+        private bool IsAliasColumn(int columnIndex)
+        {
+            if (columnIndex < 0 || columnIndex >= grid.Columns.Count)
+            {
+                return false;
+            }
+
+            string name = grid.Columns[columnIndex].Name;
+            return name != null && name.StartsWith("Alias_", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void ClearSelectedCellWithConfirm()
+        {
+            if (grid.CurrentCell == null)
+            {
+                return;
+            }
+
+            if (grid.CurrentCell.ColumnIndex < 2)
+            {
+                MessageBox.Show(
+                    "순서와 OVIA 기본 헤더는 고정값이므로 비울 수 없습니다.",
+                    "OVIA",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+
+                return;
+            }
+
+            if (!ShowConfirmDialog("매핑 셀 삭제", "선택한 매핑 셀의 내용을 삭제하시겠습니까?", "삭제"))
+            {
+                return;
+            }
+
+            PushUndoSnapshot();
+            int rowIndex = grid.CurrentCell.RowIndex;
+            int columnIndex = grid.CurrentCell.ColumnIndex;
+            ShiftAliasCellsLeft(rowIndex, columnIndex);
+            ClearChangedCellsFromAliasColumn(rowIndex, columnIndex);
+            activeColumnIndex = -1;
+            activeRowIndex = rowIndex;
+            selectedCellRowIndex = rowIndex;
+            selectedCellColumnIndex = columnIndex;
+            ApplyActiveRowHighlight();
+
+            lblStatus.Text = "선택한 매핑 셀의 내용을 삭제했습니다.";
+            lblStatus.ForeColor = TextSub;
+        }
+
+        private void ShiftAliasCellsLeft(int rowIndex, int columnIndex)
+        {
+            if (rowIndex < 0 || rowIndex >= grid.Rows.Count)
+            {
+                return;
+            }
+
+            List<DataGridViewColumn> aliasColumns = GetAliasColumnsByDisplayOrder();
+            int startIndex = -1;
+            int i;
+
+            for (i = 0; i < aliasColumns.Count; i++)
+            {
+                if (aliasColumns[i].Index == columnIndex)
+                {
+                    startIndex = i;
+                    break;
+                }
+            }
+
+            if (startIndex < 0)
+            {
+                return;
+            }
+
+            DataGridViewRow row = grid.Rows[rowIndex];
+
+            for (i = startIndex; i < aliasColumns.Count - 1; i++)
+            {
+                row.Cells[aliasColumns[i].Index].Value = row.Cells[aliasColumns[i + 1].Index].Value;
+            }
+
+            if (aliasColumns.Count > 0)
+            {
+                row.Cells[aliasColumns[aliasColumns.Count - 1].Index].Value = "";
+            }
+        }
+
+        private bool ShowConfirmDialog(string title, string message, string confirmText)
+        {
+            Form dialog = new Form();
+            dialog.Text = title;
+            dialog.StartPosition = FormStartPosition.CenterParent;
+            dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+            dialog.MinimizeBox = false;
+            dialog.MaximizeBox = false;
+            dialog.ShowInTaskbar = false;
+            dialog.ClientSize = new Size(420, 170);
+            dialog.BackColor = Color.White;
+            dialog.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+
+            Label label = new Label();
+            label.Text = message;
+            label.AutoSize = false;
+            label.Location = new Point(24, 24);
+            label.Size = new Size(372, 72);
+            label.ForeColor = TextDark;
+            label.BackColor = Color.White;
+            dialog.Controls.Add(label);
+
+            Button btnCancel = new Button();
+            btnCancel.Text = "취소";
+            btnCancel.Size = new Size(92, 34);
+            btnCancel.Location = new Point(208, 112);
+            btnCancel.DialogResult = DialogResult.Cancel;
+            btnCancel.FlatStyle = FlatStyle.Flat;
+            btnCancel.FlatAppearance.BorderColor = Color.FromArgb(205, 214, 235);
+            btnCancel.BackColor = Color.White;
+            btnCancel.ForeColor = TextDark;
+            dialog.Controls.Add(btnCancel);
+
+            Button btnConfirm = new Button();
+            btnConfirm.Text = confirmText;
+            btnConfirm.Size = new Size(92, 34);
+            btnConfirm.Location = new Point(304, 112);
+            btnConfirm.DialogResult = DialogResult.OK;
+            btnConfirm.FlatStyle = FlatStyle.Flat;
+            btnConfirm.FlatAppearance.BorderColor = Color.FromArgb(180, 55, 65);
+            btnConfirm.BackColor = Color.FromArgb(210, 78, 78);
+            btnConfirm.ForeColor = Color.White;
+            dialog.Controls.Add(btnConfirm);
+
+            dialog.AcceptButton = btnConfirm;
+            dialog.CancelButton = btnCancel;
+
+            DialogResult result = dialog.ShowDialog(this);
+            dialog.Dispose();
+
+            return result == DialogResult.OK;
+        }
+
+        private void ApplyActiveRowHighlight()
+        {
+            if (grid == null || grid.Rows == null)
+            {
+                return;
+            }
+
+            int r;
+
+            for (r = 0; r < grid.Rows.Count; r++)
+            {
+                if (grid.Rows[r].IsNewRow)
+                {
+                    continue;
+                }
+
+                int c;
+
+                for (c = 0; c < grid.Columns.Count; c++)
+                {
+                    DataGridViewCell cell = grid.Rows[r].Cells[c];
+
+                    if (r == editingCellRowIndex && c == editingCellColumnIndex)
+                    {
+                        cell.Style.BackColor = Color.White;
+                    }
+                    else if (c == activeColumnIndex && IsAliasColumn(c))
+                    {
+                        cell.Style.BackColor = ActiveColumnBackColor;
+                    }
+                    else if (r == activeRowIndex)
+                    {
+                        cell.Style.BackColor = ActiveRowBackColor;
+                    }
+                    else if (grid.Columns[c].Name != null && String.Equals(grid.Columns[c].Name, "DisplayName", StringComparison.OrdinalIgnoreCase))
+                    {
+                        cell.Style.BackColor = Color.FromArgb(248, 250, 255);
+                    }
+                    else
+                    {
+                        cell.Style.BackColor = Color.Empty;
+                    }
+
+                    ApplyChangedCellForeColor(r, c);
+                }
+            }
+
+            grid.Invalidate();
+        }
+
+        private void ApplyChangedCellForeColor(int rowIndex, int columnIndex)
+        {
+            if (rowIndex < 0 || rowIndex >= grid.Rows.Count || columnIndex < 0 || columnIndex >= grid.Columns.Count)
+            {
+                return;
+            }
+
+            DataGridViewCell cell = grid.Rows[rowIndex].Cells[columnIndex];
+            string text = Convert.ToString(cell.Value);
+
+            if (columnIndex >= 2 && text != null && text.Trim() != "" && changedCells.Contains(GetCellKey(rowIndex, columnIndex)))
+            {
+                cell.Style.ForeColor = ChangedTextColor;
+            }
+            else
+            {
+                cell.Style.ForeColor = Color.Empty;
+            }
+        }
+
+        private void MarkCellChanged(int rowIndex, int columnIndex)
+        {
+            if (rowIndex < 0 || columnIndex < 2 || rowIndex >= grid.Rows.Count || columnIndex >= grid.Columns.Count)
+            {
+                return;
+            }
+
+            changedCells.Add(GetCellKey(rowIndex, columnIndex));
+        }
+
+        private void ClearChangedCellsFromAliasColumn(int rowIndex, int columnIndex)
+        {
+            List<DataGridViewColumn> aliasColumns = GetAliasColumnsByDisplayOrder();
+            bool clear = false;
+            int i;
+
+            for (i = 0; i < aliasColumns.Count; i++)
+            {
+                if (aliasColumns[i].Index == columnIndex)
+                {
+                    clear = true;
+                }
+
+                if (clear)
+                {
+                    changedCells.Remove(GetCellKey(rowIndex, aliasColumns[i].Index));
+                    ApplyChangedCellForeColor(rowIndex, aliasColumns[i].Index);
+                }
+            }
+        }
+
+        private string GetCellKey(int rowIndex, int columnIndex)
+        {
+            if (columnIndex < 0 || columnIndex >= grid.Columns.Count)
+            {
+                return rowIndex.ToString() + "|";
+            }
+
+            return rowIndex.ToString() + "|" + grid.Columns[columnIndex].Name;
+        }
+
+        private void ApplyColumnHeaderAlignment()
+        {
+            if (grid == null || grid.Columns == null)
+            {
+                return;
+            }
+
+            int i;
+
+            for (i = 0; i < grid.Columns.Count; i++)
+            {
+                grid.Columns[i].HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            }
+        }
+
+        private void NormalizeAliasColumnHeadersByDisplayOrder()
+        {
+            List<DataGridViewColumn> aliasColumns = GetAliasColumnsByDisplayOrder();
+            int i;
+
+            for (i = 0; i < aliasColumns.Count; i++)
+            {
+                aliasColumns[i].HeaderText = "매핑 " + (i + 1).ToString();
+            }
+        }
+
+        private void PushUndoSnapshot()
+        {
+            if (restoringSnapshot || grid == null)
+            {
+                return;
+            }
+
+            undoStack.Push(CaptureSnapshot());
+            redoStack.Clear();
+        }
+
+        private GridSnapshot CaptureSnapshot()
+        {
+            GridSnapshot snapshot = new GridSnapshot();
+            snapshot.AliasColumnSeed = aliasColumnSeed;
+            snapshot.ActiveRowIndex = activeRowIndex;
+            snapshot.ActiveColumnIndex = activeColumnIndex;
+            snapshot.SelectedCellRowIndex = selectedCellRowIndex;
+            snapshot.SelectedCellColumnIndex = selectedCellColumnIndex;
+            snapshot.CurrentRowIndex = grid.CurrentCell == null ? -1 : grid.CurrentCell.RowIndex;
+            snapshot.CurrentColumnIndex = grid.CurrentCell == null ? -1 : grid.CurrentCell.ColumnIndex;
+
+            foreach (string key in changedCells)
+            {
+                snapshot.ChangedCellKeys.Add(key);
+            }
+
+            int c;
+            int r;
+
+            for (c = 0; c < grid.Columns.Count; c++)
+            {
+                DataGridViewColumn column = grid.Columns[c];
+                ColumnSnapshot columnSnapshot = new ColumnSnapshot();
+                columnSnapshot.Name = column.Name;
+                columnSnapshot.HeaderText = column.HeaderText;
+                columnSnapshot.Width = column.Width;
+                columnSnapshot.ReadOnly = column.ReadOnly;
+                columnSnapshot.Frozen = column.Frozen;
+                columnSnapshot.DisplayIndex = column.DisplayIndex;
+                snapshot.Columns.Add(columnSnapshot);
+            }
+
+            for (r = 0; r < grid.Rows.Count; r++)
+            {
+                if (grid.Rows[r].IsNewRow)
+                {
+                    continue;
+                }
+
+                List<string> rowValues = new List<string>();
+
+                for (c = 0; c < grid.Columns.Count; c++)
+                {
+                    rowValues.Add(Convert.ToString(grid.Rows[r].Cells[c].Value));
+                }
+
+                snapshot.Values.Add(rowValues);
+                snapshot.RowTags.Add(grid.Rows[r].Tag as OviaBarListMappingColumn);
+            }
+
+            return snapshot;
+        }
+
+        private void ApplySnapshot(GridSnapshot snapshot)
+        {
+            if (snapshot == null)
+            {
+                return;
+            }
+
+            restoringSnapshot = true;
+            grid.SuspendLayout();
+
+            try
+            {
+                grid.Columns.Clear();
+                grid.Rows.Clear();
+
+                int c;
+                int r;
+
+                for (c = 0; c < snapshot.Columns.Count; c++)
+                {
+                    ColumnSnapshot columnSnapshot = snapshot.Columns[c];
+                    DataGridViewTextBoxColumn column = new DataGridViewTextBoxColumn();
+                    column.Name = columnSnapshot.Name;
+                    column.HeaderText = columnSnapshot.HeaderText;
+                    column.Width = columnSnapshot.Width;
+                    column.ReadOnly = columnSnapshot.ReadOnly;
+                    column.SortMode = DataGridViewColumnSortMode.NotSortable;
+                    column.Frozen = columnSnapshot.Frozen;
+                    column.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+
+                    if (String.Equals(columnSnapshot.Name, "No", StringComparison.OrdinalIgnoreCase))
+                    {
+                        column.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                    }
+                    else if (String.Equals(columnSnapshot.Name, "DisplayName", StringComparison.OrdinalIgnoreCase))
+                    {
+                        column.DefaultCellStyle.BackColor = Color.FromArgb(248, 250, 255);
+                        column.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                    }
+                    else
+                    {
+                        column.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                    }
+
+                    grid.Columns.Add(column);
+                }
+
+                for (c = 0; c < snapshot.Columns.Count; c++)
+                {
+                    try
+                    {
+                        if (snapshot.Columns[c].DisplayIndex >= 0 && snapshot.Columns[c].DisplayIndex < grid.Columns.Count)
+                        {
+                            grid.Columns[c].DisplayIndex = snapshot.Columns[c].DisplayIndex;
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                for (r = 0; r < snapshot.Values.Count; r++)
+                {
+                    object[] values = new object[grid.Columns.Count];
+
+                    for (c = 0; c < grid.Columns.Count && c < snapshot.Values[r].Count; c++)
+                    {
+                        values[c] = snapshot.Values[r][c];
+                    }
+
+                    int rowIndex = grid.Rows.Add(values);
+
+                    if (r < snapshot.RowTags.Count)
+                    {
+                        grid.Rows[rowIndex].Tag = snapshot.RowTags[r];
+                    }
+                }
+
+                aliasColumnSeed = snapshot.AliasColumnSeed;
+                activeRowIndex = snapshot.ActiveRowIndex;
+                activeColumnIndex = snapshot.ActiveColumnIndex;
+                selectedCellRowIndex = snapshot.SelectedCellRowIndex;
+                selectedCellColumnIndex = snapshot.SelectedCellColumnIndex;
+                editingCellRowIndex = -1;
+                editingCellColumnIndex = -1;
+                changedCells.Clear();
+
+                int k;
+
+                for (k = 0; k < snapshot.ChangedCellKeys.Count; k++)
+                {
+                    changedCells.Add(snapshot.ChangedCellKeys[k]);
+                }
+
+                if (snapshot.CurrentRowIndex >= 0 && snapshot.CurrentRowIndex < grid.Rows.Count && snapshot.CurrentColumnIndex >= 0 && snapshot.CurrentColumnIndex < grid.Columns.Count)
+                {
+                    grid.CurrentCell = grid.Rows[snapshot.CurrentRowIndex].Cells[snapshot.CurrentColumnIndex];
+                }
+            }
+            finally
+            {
+                NormalizeAliasColumnHeadersByDisplayOrder();
+                ApplyColumnHeaderAlignment();
+                ApplyActiveRowHighlight();
+                grid.ResumeLayout();
+                restoringSnapshot = false;
+            }
+        }
+
+        private void UndoLastAction()
+        {
+            if (undoStack.Count == 0)
+            {
+                lblStatus.Text = "되돌릴 작업이 없습니다.";
+                lblStatus.ForeColor = TextSub;
+                return;
+            }
+
+            if (grid.IsCurrentCellInEditMode)
+            {
+                grid.EndEdit();
+            }
+
+            GridSnapshot current = CaptureSnapshot();
+            GridSnapshot previous = undoStack.Pop();
+            redoStack.Push(current);
+            ApplySnapshot(previous);
+
+            lblStatus.Text = "이전 상태로 되돌렸습니다. Shift+Ctrl+Z로 다시 실행할 수 있습니다.";
+            lblStatus.ForeColor = TextSub;
+        }
+
+        private void RedoLastAction()
+        {
+            if (redoStack.Count == 0)
+            {
+                lblStatus.Text = "다시 실행할 작업이 없습니다.";
+                lblStatus.ForeColor = TextSub;
+                return;
+            }
+
+            if (grid.IsCurrentCellInEditMode)
+            {
+                grid.EndEdit();
+            }
+
+            GridSnapshot current = CaptureSnapshot();
+            GridSnapshot next = redoStack.Pop();
+            undoStack.Push(current);
+            ApplySnapshot(next);
+
+            lblStatus.Text = "다시 실행했습니다. Ctrl+Z로 되돌릴 수 있습니다.";
+            lblStatus.ForeColor = TextSub;
+        }
+
+        private class GridSnapshot
+        {
+            public List<ColumnSnapshot> Columns = new List<ColumnSnapshot>();
+            public List<List<string>> Values = new List<List<string>>();
+            public List<OviaBarListMappingColumn> RowTags = new List<OviaBarListMappingColumn>();
+            public int CurrentRowIndex = -1;
+            public int CurrentColumnIndex = -1;
+            public int ActiveRowIndex = -1;
+            public int ActiveColumnIndex = -1;
+            public int SelectedCellRowIndex = -1;
+            public int SelectedCellColumnIndex = -1;
+            public int AliasColumnSeed = 0;
+            public List<string> ChangedCellKeys = new List<string>();
+        }
+
+        private class ColumnSnapshot
+        {
+            public string Name = "";
+            public string HeaderText = "";
+            public int Width = 118;
+            public bool ReadOnly = false;
+            public bool Frozen = false;
+            public int DisplayIndex = 0;
+        }
+
+        private OviaBarListMappingStore BuildStoreFromGrid()
+        {
+            OviaBarListMappingStore store = new OviaBarListMappingStore();
+            store.Version = "ovia-barlist-mapping-" + DateTime.Now.ToString("yyyy.MM.dd.HHmmss");
+            store.UpdatedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
+            List<DataGridViewColumn> aliasColumns = GetAliasColumnsByDisplayOrder();
+            int r;
+
+            for (r = 0; r < grid.Rows.Count; r++)
+            {
+                DataGridViewRow row = grid.Rows[r];
+
+                if (row == null || row.IsNewRow)
+                {
+                    continue;
+                }
+
+                OviaBarListMappingColumn source = row.Tag as OviaBarListMappingColumn;
+
+                if (source == null)
+                {
+                    continue;
+                }
+
+                string displayName = GetCellText(row, "DisplayName");
+
+                if (displayName.Trim() == "")
+                {
+                    displayName = source.DisplayName;
+                }
+
+                OviaBarListMappingColumn col = new OviaBarListMappingColumn();
+                col.Key = source.Key;
+                col.DisplayName = displayName.Trim();
+                col.DataType = source.DataType;
+                col.Priority = source.Priority;
+
+                AddAlias(col.Aliases, col.DisplayName);
+
+                int i;
+
+                for (i = 0; i < aliasColumns.Count; i++)
+                {
+                    string text = Convert.ToString(row.Cells[aliasColumns[i].Index].Value);
+                    AddAliasText(col.Aliases, text);
+                }
+
+                store.StandardColumns.Add(col);
+            }
+
+            return store;
+        }
+
+        private List<DataGridViewColumn> GetAliasColumnsByDisplayOrder()
+        {
+            List<DataGridViewColumn> columns = new List<DataGridViewColumn>();
+            int i;
+
+            for (i = 0; i < grid.Columns.Count; i++)
+            {
+                DataGridViewColumn column = grid.Columns[i];
+
+                if (column.Name != null && column.Name.StartsWith("Alias_", StringComparison.OrdinalIgnoreCase))
+                {
+                    columns.Add(column);
+                }
+            }
+
+            columns.Sort(delegate (DataGridViewColumn a, DataGridViewColumn b)
+            {
+                return a.DisplayIndex.CompareTo(b.DisplayIndex);
+            });
+
+            return columns;
+        }
+
+        private string GetCellText(DataGridViewRow row, string columnName)
+        {
+            if (row == null || !grid.Columns.Contains(columnName))
+            {
+                return "";
+            }
+
+            object value = row.Cells[columnName].Value;
+
+            if (value == null)
+            {
+                return "";
+            }
+
+            return Convert.ToString(value).Trim();
+        }
+
+        private void AddAliasText(List<string> list, string text)
+        {
+            if (text == null)
+            {
+                return;
+            }
+
+            string[] parts = text.Split(new char[] { ',', ';', '|', '，', '；' }, StringSplitOptions.RemoveEmptyEntries);
+            int i;
+
+            if (parts.Length == 0 && text.Trim() != "")
+            {
+                AddAlias(list, text.Trim());
+                return;
+            }
+
+            for (i = 0; i < parts.Length; i++)
+            {
+                AddAlias(list, parts[i].Trim());
+            }
+        }
+
+        private void AddAlias(List<string> list, string value)
+        {
+            if (list == null || value == null)
+            {
+                return;
+            }
+
+            value = value.Trim();
+
+            if (value == "")
+            {
+                return;
+            }
+
+            int i;
+
+            for (i = 0; i < list.Count; i++)
+            {
+                if (String.Equals(list[i], value, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+            }
+
+            list.Add(value);
+        }
+
+        private List<string> GetEditableAliases(OviaBarListMappingColumn col)
+        {
+            List<string> list = new List<string>();
+
+            if (col == null || col.Aliases == null)
+            {
+                return list;
+            }
+
+            int i;
+
+            for (i = 0; i < col.Aliases.Count; i++)
+            {
+                string value = col.Aliases[i] == null ? "" : col.Aliases[i].Trim();
+
+                if (value == "")
+                {
+                    continue;
+                }
+
+                if (String.Equals(value, col.DisplayName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                AddAlias(list, value);
+            }
+
+            return list;
+        }
+    }
+}

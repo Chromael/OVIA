@@ -1,0 +1,15 @@
+<Project>
+  <PropertyGroup>
+    <!-- OVIA AutoCAD plug-in build guard
+         AutoCAD managed assemblies can reference framework System.Drawing/Microsoft.VisualBasic
+         while the local SDK reference pack exposes a newer assembly identity.
+         This prevents MSB3277/MSB3270 reference-resolution warnings from being promoted to build errors. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);MSB3270;MSB3277</NoWarn>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);MSB3270;MSB3277</WarningsNotAsErrors>
+    <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3270;MSB3277</MSBuildWarningsAsMessages>
+    <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+  </PropertyGroup>
+</Project>
