@@ -210,18 +210,7 @@ namespace OVIA.Desktop
 
                 if (values.TryGetValue(keys[i], out value))
                 {
-                    value = value == null ? "" : value.Trim();
-
-                    /*
-                     * OVIA 2026-05-27-11 보정:
-                     * CAD 원본 형상 JSON에 실제 치수 텍스트가 있는데도 보조 치수값 A=0 등이 들어오면
-                     * 화면에서 원본 치수 위에 0이 덮이는 문제가 발생할 수 있습니다.
-                     * 0은 실제 치수로 확정된 값이 아니라면 오버레이 대체값으로 사용하지 않습니다.
-                     */
-                    if (value != "" && value != "0")
-                    {
-                        result.Add(value);
-                    }
+                    result.Add(value);
                 }
             }
 

@@ -71,7 +71,9 @@
     <Compile Include="Services\RebarShapeRepository.cs" />
     <Compile Include="Services\RebarShapeRenderer.cs" />
     <Compile Include="Services\CadShapeRenderer.cs" />
-    <Compile Include="Controls\RebarShapePreviewControl.cs" />
+    <Compile Include="Controls\RebarShapePreviewControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
     <Compile Include="FrmShapePicker.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -96,6 +98,10 @@
     <Compile Include="FrmProjectManager.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="FrmWorkspaceShell.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="OviaFluentTheme.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="Properties\Resources.resx">

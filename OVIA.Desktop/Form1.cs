@@ -16,12 +16,12 @@ namespace OVIA.Desktop
         private OviaTextInput	txtPassword;
         private CheckBox		chkSaveId;
 
-        private readonly Color	BrandIndigo	= Color.FromArgb(37, 30, 130);
-        private readonly Color	BrandViolet	= Color.FromArgb(91, 49, 225);
-        private readonly Color	TextDark		= Color.FromArgb(28, 33, 72);
-        private readonly Color	TextSub		= Color.FromArgb(102, 111, 135);
-        private readonly Color	BorderSoft	= Color.FromArgb(216, 223, 238);
-        private readonly Color	SurfaceColor	= Color.FromArgb(244, 248, 255);
+        private readonly Color	BrandIndigo	= OviaFluentTheme.AccentHover;
+        private readonly Color	BrandViolet	= OviaFluentTheme.Accent;
+        private readonly Color	TextDark		= OviaFluentTheme.TextPrimary;
+        private readonly Color	TextSub		= OviaFluentTheme.TextSecondary;
+        private readonly Color	BorderSoft	= OviaFluentTheme.ControlBorder;
+        private readonly Color	SurfaceColor	= OviaFluentTheme.AppBackground;
 
         private readonly string	SaveFilePath	= Path.Combine(Application.StartupPath, "ovia_login_save.txt");
 
@@ -34,10 +34,12 @@ namespace OVIA.Desktop
         private void BuildOviaLoginUI()
         {
             this.SuspendLayout();
+
+            OviaFluentTheme.ApplyForm(this);
             this.Controls.Clear();
 
             this.Text				= "OVIA";
-            this.Font				= new Font("맑은 고딕", 9F, FontStyle.Regular);
+            this.Font				= OviaFluentTheme.FontKorean(9F, FontStyle.Regular);
             this.StartPosition		= FormStartPosition.CenterScreen;
             this.FormBorderStyle	= FormBorderStyle.FixedSingle;
             this.MaximizeBox		= false;
@@ -47,8 +49,8 @@ namespace OVIA.Desktop
 
             GradientPanel bg		= new GradientPanel();
             bg.Dock					= DockStyle.Fill;
-            bg.StartColor			= Color.FromArgb(249, 251, 255);
-            bg.EndColor				= Color.FromArgb(235, 242, 253);
+            bg.StartColor			= OviaFluentTheme.AppBackgroundAlt;
+            bg.EndColor				= OviaFluentTheme.AppBackground;
             this.Controls.Add(bg);
 
             BuildBrandArea(bg);
@@ -75,7 +77,7 @@ namespace OVIA.Desktop
             Label slogan			= new Label();
             slogan.Text				= "Operation · Value · Intelligence · Automation";
             slogan.AutoSize			= true;
-            slogan.Font				= new Font("Segoe UI", 11F, FontStyle.Regular);
+            slogan.Font				= OviaFluentTheme.FontUI(11F, FontStyle.Regular);
             slogan.ForeColor		= TextDark;
             slogan.BackColor		= SurfaceColor;
             slogan.Location			= new Point(78, 260);
@@ -103,23 +105,23 @@ namespace OVIA.Desktop
             OviaCard card			= new OviaCard();
             card.Location			= new Point(520, 58);
             card.Size				= new Size(500, 585);
-            card.Radius				= 22;
+            card.Radius				= 8;
             card.SurfaceColor		= SurfaceColor;
             card.FillColor			= Color.White;
-            card.BorderColor		= Color.FromArgb(236, 240, 248);
+            card.BorderColor		= OviaFluentTheme.CardBorder;
             parent.Controls.Add(card);
 
             Label title			= new Label();
-            title.Text				= "OVIA에 오신 것을 환영합니다.";
+            title.Text				= "LOGIN";
             title.AutoSize			= true;
-            title.Font				= new Font("맑은 고딕", 19F, FontStyle.Bold);
+            title.Font				= OviaFluentTheme.FontKorean(19F, FontStyle.Bold);
             title.ForeColor			= TextDark;
             title.BackColor			= Color.White;
             title.Location			= new Point(55, 42);
             card.Controls.Add(title);
 
             Label sub				= new Label();
-            sub.Text				= "계정 정보를 입력하고 로그인하세요.";
+            sub.Text				= "계정정보를 입력하고 로그인하세요.";
             sub.AutoSize			= true;
             sub.Font				= new Font("맑은 고딕", 10F, FontStyle.Regular);
             sub.ForeColor			= TextSub;
@@ -137,7 +139,7 @@ namespace OVIA.Desktop
             chkSaveId.Font			= new Font("맑은 고딕", 10F, FontStyle.Regular);
             chkSaveId.ForeColor		= TextDark;
             chkSaveId.BackColor		= Color.White;
-            chkSaveId.FlatStyle		= FlatStyle.Flat;
+            OviaFluentTheme.ApplyCheckBox(chkSaveId);
             chkSaveId.Location		= new Point(55, 390);
             card.Controls.Add(chkSaveId);
 
@@ -146,9 +148,9 @@ namespace OVIA.Desktop
             btnClose.Location		= new Point(55, 430);
             btnClose.Size			= new Size(185, 46);
             btnClose.IsPrimary		= false;
-            btnClose.StartColor		= BrandViolet;
-            btnClose.EndColor		= BrandIndigo;
-            btnClose.TextColor		= BrandIndigo;
+            btnClose.StartColor		= OviaFluentTheme.ControlBorder;
+            btnClose.EndColor		= OviaFluentTheme.ControlBorder;
+            btnClose.TextColor		= OviaFluentTheme.TextPrimary;
             btnClose.SurfaceColor	= Color.White;
             btnClose.Radius			= 6;
             btnClose.Font			= new Font("맑은 고딕", 11F, FontStyle.Bold);
@@ -160,8 +162,8 @@ namespace OVIA.Desktop
             btnLogin.Location		= new Point(260, 430);
             btnLogin.Size			= new Size(185, 46);
             btnLogin.IsPrimary		= true;
-            btnLogin.StartColor		= BrandViolet;
-            btnLogin.EndColor		= BrandIndigo;
+            btnLogin.StartColor		= OviaFluentTheme.Accent;
+            btnLogin.EndColor		= OviaFluentTheme.Accent;
             btnLogin.TextColor		= Color.White;
             btnLogin.SurfaceColor	= Color.White;
             btnLogin.Radius			= 6;
@@ -172,7 +174,7 @@ namespace OVIA.Desktop
             Panel line				= new Panel();
             line.Location			= new Point(55, 505);
             line.Size				= new Size(390, 1);
-            line.BackColor			= Color.FromArgb(225, 230, 242);
+            line.BackColor			= OviaFluentTheme.CardBorder;
             card.Controls.Add(line);
 
             Label info				= new Label();
@@ -202,11 +204,11 @@ namespace OVIA.Desktop
             input.Placeholder		= placeholder;
             input.IsPassword		= isPassword;
             input.BorderColor		= BorderSoft;
-            input.FocusBorderColor	= BrandViolet;
+            input.FocusBorderColor	= OviaFluentTheme.Accent;
             input.TextColor			= TextDark;
-            input.PlaceholderColor	= Color.FromArgb(160, 166, 182);
+            input.PlaceholderColor	= OviaFluentTheme.TextTertiary;
             input.SurfaceColor		= Color.White;
-            input.Radius			= 6;
+            input.Radius			= 2;
             parent.Controls.Add(input);
 
             return input;
@@ -243,6 +245,15 @@ namespace OVIA.Desktop
 
             mainForm.FormClosed += delegate
             {
+                if (mainForm.IsLogoutRequested)
+                {
+                    txtPassword.Value = "";
+                    this.Show();
+                    this.Activate();
+                    txtPassword.Focus();
+                    return;
+                }
+
                 this.Close();
             };
 
@@ -309,9 +320,9 @@ namespace OVIA.Desktop
             LinkLabel copyright		= new LinkLabel();
             copyright.Text			= "© 2026 CELMON. All rights reserved.";
             copyright.AutoSize		= true;
-            copyright.Font			= new Font("Segoe UI", 9F, FontStyle.Regular);
+            copyright.Font			= OviaFluentTheme.FontUI(9F, FontStyle.Regular);
             copyright.LinkColor		= TextSub;
-            copyright.ActiveLinkColor	= BrandViolet;
+            copyright.ActiveLinkColor	= OviaFluentTheme.Accent;
             copyright.VisitedLinkColor	= TextSub;
             copyright.LinkBehavior		= LinkBehavior.HoverUnderline;
             copyright.LinkArea		= new LinkArea(7, 6);
@@ -324,7 +335,7 @@ namespace OVIA.Desktop
             Label version			= new Label();
             version.Text			= "Version 1.0.0";
             version.AutoSize		= true;
-            version.Font			= new Font("Segoe UI", 9F, FontStyle.Regular);
+            version.Font			= OviaFluentTheme.FontUI(9F, FontStyle.Regular);
             version.ForeColor		= TextSub;
             version.BackColor		= SurfaceColor;
             version.Location		= new Point(900, 642);
@@ -380,9 +391,9 @@ namespace OVIA.Desktop
     public class OviaCard : Panel
     {
         public int Radius = 22;
-        public Color SurfaceColor = Color.FromArgb(244, 248, 255);
+        public Color SurfaceColor = OviaFluentTheme.AppBackground;
         public Color FillColor = Color.White;
-        public Color BorderColor = Color.FromArgb(235, 239, 248);
+        public Color BorderColor = OviaFluentTheme.CardBorder;
         public int BorderWidth = 1;
 
         public OviaCard()
@@ -399,16 +410,7 @@ namespace OVIA.Desktop
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
-
-            if (this.Width > 0 && this.Height > 0)
-            {
-                Rectangle rect = new Rectangle(0, 0, this.Width - 4, this.Height - 6);
-
-                using (GraphicsPath path = OviaDrawHelper.RoundRect(rect, Radius))
-                {
-                    this.Region = new Region(path);
-                }
-            }
+            this.Region = null;
         }
 
         protected override void OnPaintBackground(PaintEventArgs e)
@@ -423,7 +425,7 @@ namespace OVIA.Desktop
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
-            Rectangle rect = new Rectangle(0, 0, this.Width - 5, this.Height - 7);
+            Rectangle rect = new Rectangle(1, 1, this.Width - 3, this.Height - 3);
 
             using (GraphicsPath path = OviaDrawHelper.RoundRect(rect, Radius))
             {
@@ -454,10 +456,10 @@ namespace OVIA.Desktop
 
         public string Placeholder = "";
         public bool IsPassword = false;
-        public Color BorderColor = Color.FromArgb(216, 223, 238);
-        public Color FocusBorderColor = Color.FromArgb(91, 49, 225);
-        public Color TextColor = Color.FromArgb(28, 33, 72);
-        public Color PlaceholderColor = Color.FromArgb(160, 166, 182);
+        public Color BorderColor = OviaFluentTheme.ControlBorder;
+        public Color FocusBorderColor = OviaFluentTheme.Accent;
+        public Color TextColor = OviaFluentTheme.TextPrimary;
+        public Color PlaceholderColor = OviaFluentTheme.TextTertiary;
         public Color SurfaceColor = Color.White;
         public int Radius = 6;
 
@@ -519,16 +521,7 @@ namespace OVIA.Desktop
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
-
-            if (this.Width > 0 && this.Height > 0)
-            {
-                Rectangle rect = new Rectangle(0, 0, this.Width, this.Height);
-
-                using (GraphicsPath path = OviaDrawHelper.RoundRect(rect, Radius))
-                {
-                    this.Region = new Region(path);
-                }
-            }
+            this.Region = null;
 
             if (innerTextBox != null)
             {
@@ -549,7 +542,7 @@ namespace OVIA.Desktop
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
-            Rectangle rect = new Rectangle(0, 0, this.Width - 1, this.Height - 1);
+            Rectangle rect = new Rectangle(1, 1, this.Width - 3, this.Height - 3);
             Color currentBorder = focused ? FocusBorderColor : BorderColor;
 
             using (GraphicsPath path = OviaDrawHelper.RoundRect(rect, Radius))
@@ -669,8 +662,8 @@ namespace OVIA.Desktop
 
     public class OviaButton : Control
     {
-        public Color StartColor = Color.FromArgb(92, 48, 224);
-        public Color EndColor = Color.FromArgb(42, 31, 145);
+        public Color StartColor = OviaFluentTheme.Accent;
+        public Color EndColor = OviaFluentTheme.AccentHover;
         public Color TextColor = Color.White;
         public Color SurfaceColor = Color.White;
         public bool IsPrimary = true;
@@ -737,10 +730,9 @@ namespace OVIA.Desktop
             {
                 if (IsPrimary)
                 {
-                    Color start = hover ? Color.FromArgb(105, 64, 236) : StartColor;
-                    Color end = hover ? Color.FromArgb(50, 38, 150) : EndColor;
+                    Color fillColor = hover ? OviaFluentTheme.AccentHover : StartColor;
 
-                    using (LinearGradientBrush brush = new LinearGradientBrush(rect, start, end, LinearGradientMode.Horizontal))
+                    using (SolidBrush brush = new SolidBrush(fillColor))
                     {
                         e.Graphics.FillPath(brush, path);
                     }
@@ -752,7 +744,7 @@ namespace OVIA.Desktop
                         e.Graphics.FillPath(brush, path);
                     }
 
-                    using (Pen pen = new Pen(StartColor, 1))
+                    using (Pen pen = new Pen(OviaFluentTheme.ControlBorder, 1))
                     {
                         e.Graphics.DrawPath(pen, path);
                     }
@@ -778,7 +770,7 @@ namespace OVIA.Desktop
         private Rectangle logoCrop;
         private bool hasImage;
 
-        public Color SurfaceColor = Color.FromArgb(244, 248, 255);
+        public Color SurfaceColor = OviaFluentTheme.AppBackground;
 
         public OviaLogoImage()
         {
@@ -882,7 +874,7 @@ namespace OVIA.Desktop
 
             using (Font wordFont = new Font("Segoe UI", 40F, FontStyle.Bold))
             {
-                using (SolidBrush textBrush = new SolidBrush(Color.FromArgb(37, 30, 130)))
+                using (SolidBrush textBrush = new SolidBrush(OviaFluentTheme.Accent))
                 {
                     g.DrawString("OVIA", wordFont, textBrush, 112, 27);
                 }
@@ -1025,7 +1017,7 @@ namespace OVIA.Desktop
                 new PointF(r.Left + r.Width * 0.08f, r.Top + r.Height * 0.25f)
             };
 
-            using (LinearGradientBrush brush = new LinearGradientBrush(r, Color.FromArgb(87, 55, 235), Color.FromArgb(30, 24, 117), LinearGradientMode.Vertical))
+            using (LinearGradientBrush brush = new LinearGradientBrush(r, OviaFluentTheme.Accent, OviaFluentTheme.AccentHover, LinearGradientMode.Vertical))
             {
                 g.FillPolygon(brush, outer);
             }
@@ -1040,7 +1032,7 @@ namespace OVIA.Desktop
                 g.DrawLine(whitePen, r.Left + r.Width * 0.50f, r.Top + r.Height * 0.60f, r.Left + r.Width * 0.75f, r.Top + r.Height * 0.73f);
             }
 
-            using (SolidBrush cyan = new SolidBrush(Color.FromArgb(0, 174, 239)))
+            using (SolidBrush cyan = new SolidBrush(Color.FromArgb(64, 156, 255)))
             {
                 PointF[] cubeTop = new PointF[]
                 {
@@ -1064,8 +1056,11 @@ namespace OVIA.Desktop
 
     public class OviaCubeIllustration : Control
     {
-        public Color SurfaceColor = Color.FromArgb(244, 248, 255);
+        public Color SurfaceColor = OviaFluentTheme.AppBackground;
 
+        // OVIA_LOGIN_SYMBOL_PATCH_260529_02
+        // 로그인 화면 좌측 장식 영역 전용 디자인입니다.
+        // AutoCAD / ERP / CELMON 상징 도형만 이 클래스 안에서 그립니다.
         public OviaCubeIllustration()
         {
             this.SetStyle(ControlStyles.UserPaint, true);
@@ -1088,51 +1083,211 @@ namespace OVIA.Desktop
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 
-            Rectangle baseRect = new Rectangle(45, 100, 275, 75);
+            Rectangle baseRect = new Rectangle(42, 102, 285, 74);
 
             using (GraphicsPath basePath = OviaDrawHelper.RoundRect(baseRect, 26))
             {
-                using (SolidBrush brush = new SolidBrush(Color.FromArgb(225, 235, 252)))
+                using (SolidBrush brush = new SolidBrush(Color.FromArgb(228, 236, 248)))
                 {
                     e.Graphics.FillPath(brush, basePath);
                 }
 
-                using (Pen pen = new Pen(Color.FromArgb(204, 217, 246), 1))
+                using (Pen pen = new Pen(Color.FromArgb(204, 215, 234), 1))
                 {
                     e.Graphics.DrawPath(pen, basePath);
                 }
             }
 
+            using (Pen line = new Pen(Color.FromArgb(196, 207, 228), 1))
+            {
+                line.StartCap = LineCap.Round;
+                line.EndCap = LineCap.Round;
+                e.Graphics.DrawLine(line, 72, 171, 141, 94);
+                e.Graphics.DrawLine(line, 231, 94, 306, 89);
+                e.Graphics.DrawLine(line, 141, 94, 118, 48);
+            }
+
             Rectangle cube = new Rectangle(135, 38, 95, 95);
 
-            using (LinearGradientBrush brush = new LinearGradientBrush(cube, Color.FromArgb(0, 174, 239), Color.FromArgb(92, 48, 224), 45F))
+            using (LinearGradientBrush brush = new LinearGradientBrush(cube, Color.FromArgb(41, 156, 236), Color.FromArgb(91, 49, 225), 45F))
             {
                 e.Graphics.FillRectangle(brush, cube);
             }
 
-            using (Pen pen = new Pen(Color.FromArgb(255, 255, 255), 2))
+            using (Pen pen = new Pen(Color.FromArgb(245, 250, 255), 2))
             {
                 e.Graphics.DrawRectangle(pen, cube);
                 e.Graphics.DrawLine(pen, cube.Left, cube.Top + cube.Height / 2, cube.Right, cube.Top + cube.Height / 2);
                 e.Graphics.DrawLine(pen, cube.Left + cube.Width / 2, cube.Top, cube.Left + cube.Width / 2, cube.Bottom);
             }
 
-            using (SolidBrush smallBrush = new SolidBrush(Color.FromArgb(210, 232, 252)))
-            {
-                e.Graphics.FillRectangle(smallBrush, 35, 150, 45, 45);
-                e.Graphics.FillRectangle(smallBrush, 290, 60, 58, 58);
-                e.Graphics.FillRectangle(smallBrush, 95, 30, 40, 40);
-            }
-
-            using (Pen line = new Pen(Color.FromArgb(205, 218, 245), 1))
-            {
-                e.Graphics.DrawLine(line, 80, 170, 135, 86);
-                e.Graphics.DrawLine(line, 230, 86, 290, 89);
-                e.Graphics.DrawLine(line, 135, 86, 115, 50);
-            }
+            DrawAutoCadSymbol(e.Graphics, new RectangleF(22, 136, 72, 72));
+            DrawErpSymbol(e.Graphics, new RectangleF(274, 48, 84, 84));
+            DrawCelmonSymbol(e.Graphics, new RectangleF(88, 18, 66, 66));
 
             base.OnPaint(e);
+        }
+
+        private void DrawSymbolCard(Graphics g, RectangleF rect, Color backColor, Color borderColor)
+        {
+            RectangleF shadowRect = new RectangleF(rect.X + 3F, rect.Y + 4F, rect.Width, rect.Height);
+
+            using (GraphicsPath shadowPath = OviaDrawHelper.RoundRect(shadowRect, 16))
+            {
+                using (SolidBrush shadowBrush = new SolidBrush(Color.FromArgb(25, 45, 58, 90)))
+                {
+                    g.FillPath(shadowBrush, shadowPath);
+                }
+            }
+
+            using (GraphicsPath path = OviaDrawHelper.RoundRect(rect, 16))
+            {
+                using (SolidBrush brush = new SolidBrush(backColor))
+                {
+                    g.FillPath(brush, path);
+                }
+
+                using (Pen pen = new Pen(borderColor, 2))
+                {
+                    g.DrawPath(pen, path);
+                }
+            }
+        }
+
+        private void DrawAutoCadSymbol(Graphics g, RectangleF rect)
+        {
+            Color cadColor = Color.FromArgb(231, 17, 82);
+            DrawSymbolCard(g, rect, Color.FromArgb(255, 255, 246, 250), Color.FromArgb(231, 17, 82));
+
+            float cx = rect.Left + rect.Width / 2F;
+            float top = rect.Top + 12F;
+            float bottom = rect.Bottom - 13F;
+
+            PointF[] mark =
+            {
+                new PointF(cx, top),
+                new PointF(rect.Right - 11F, bottom),
+                new PointF(rect.Right - 25F, bottom),
+                new PointF(cx, rect.Top + 31F),
+                new PointF(rect.Left + 25F, bottom),
+                new PointF(rect.Left + 11F, bottom)
+            };
+
+            using (SolidBrush brush = new SolidBrush(cadColor))
+            {
+                g.FillPolygon(brush, mark);
+            }
+
+            using (Pen pen = new Pen(Color.White, 4))
+            {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                g.DrawLine(pen, rect.Left + 26F, rect.Bottom - 27F, rect.Right - 26F, rect.Bottom - 27F);
+            }
+
+            using (Pen pen = new Pen(cadColor, 3))
+            {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                g.DrawLine(pen, rect.Left + 18F, rect.Bottom - 9F, rect.Right - 18F, rect.Bottom - 9F);
+            }
+        }
+
+        private void DrawErpSymbol(Graphics g, RectangleF rect)
+        {
+            Color erpBlue = Color.FromArgb(21, 132, 255);
+            Color erpMint = Color.FromArgb(20, 196, 167);
+            DrawSymbolCard(g, rect, Color.FromArgb(255, 244, 251, 255), Color.FromArgb(45, 143, 232));
+
+            RectangleF center = new RectangleF(rect.Left + 29F, rect.Top + 29F, 26F, 26F);
+            RectangleF leftTop = new RectangleF(rect.Left + 12F, rect.Top + 12F, 20F, 20F);
+            RectangleF rightTop = new RectangleF(rect.Right - 32F, rect.Top + 12F, 20F, 20F);
+            RectangleF leftBottom = new RectangleF(rect.Left + 12F, rect.Bottom - 32F, 20F, 20F);
+            RectangleF rightBottom = new RectangleF(rect.Right - 32F, rect.Bottom - 32F, 20F, 20F);
+
+            using (Pen pen = new Pen(Color.FromArgb(125, 160, 206), 3))
+            {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                g.DrawLine(pen, GetCenter(leftTop), GetCenter(center));
+                g.DrawLine(pen, GetCenter(rightTop), GetCenter(center));
+                g.DrawLine(pen, GetCenter(leftBottom), GetCenter(center));
+                g.DrawLine(pen, GetCenter(rightBottom), GetCenter(center));
+            }
+
+            using (LinearGradientBrush brush = new LinearGradientBrush(center, erpBlue, erpMint, 45F))
+            {
+                using (GraphicsPath path = OviaDrawHelper.RoundRect(center, 8))
+                {
+                    g.FillPath(brush, path);
+                }
+            }
+
+            DrawSmallNode(g, leftTop, erpBlue);
+            DrawSmallNode(g, rightTop, erpMint);
+            DrawSmallNode(g, leftBottom, Color.FromArgb(91, 49, 225));
+            DrawSmallNode(g, rightBottom, Color.FromArgb(0, 174, 239));
+        }
+
+        private void DrawSmallNode(Graphics g, RectangleF rect, Color color)
+        {
+            using (GraphicsPath path = OviaDrawHelper.RoundRect(rect, 6))
+            {
+                using (SolidBrush brush = new SolidBrush(color))
+                {
+                    g.FillPath(brush, path);
+                }
+
+                using (Pen pen = new Pen(Color.White, 2))
+                {
+                    g.DrawPath(pen, path);
+                }
+            }
+        }
+
+        private void DrawCelmonSymbol(Graphics g, RectangleF rect)
+        {
+            Color gold = Color.FromArgb(214, 165, 45);
+            Color goldDark = Color.FromArgb(166, 117, 24);
+            Color goldLight = Color.FromArgb(255, 224, 128);
+            DrawSymbolCard(g, rect, Color.FromArgb(255, 255, 251, 235), Color.FromArgb(214, 165, 45));
+
+            PointF top = new PointF(rect.Left + rect.Width / 2F, rect.Top + 10F);
+            PointF right = new PointF(rect.Right - 10F, rect.Top + rect.Height / 2F);
+            PointF bottom = new PointF(rect.Left + rect.Width / 2F, rect.Bottom - 10F);
+            PointF left = new PointF(rect.Left + 10F, rect.Top + rect.Height / 2F);
+            PointF[] diamond = { top, right, bottom, left };
+
+            using (LinearGradientBrush brush = new LinearGradientBrush(rect, goldLight, gold, 45F))
+            {
+                g.FillPolygon(brush, diamond);
+            }
+
+            using (Pen pen = new Pen(goldDark, 3))
+            {
+                pen.LineJoin = LineJoin.Round;
+                g.DrawPolygon(pen, diamond);
+            }
+
+            using (Pen pen = new Pen(Color.FromArgb(255, 250, 220), 2))
+            {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                g.DrawLine(pen, top, bottom);
+                g.DrawLine(pen, left, right);
+            }
+
+            using (SolidBrush brush = new SolidBrush(goldDark))
+            {
+                g.FillEllipse(brush, rect.Left + rect.Width / 2F - 4F, rect.Top + rect.Height / 2F - 4F, 8F, 8F);
+            }
+        }
+
+        private PointF GetCenter(RectangleF rect)
+        {
+            return new PointF(rect.Left + rect.Width / 2F, rect.Top + rect.Height / 2F);
         }
     }
 

@@ -6,7 +6,7 @@ using System.Windows.Forms;
 
 namespace OVIA.Desktop
 {
-    public class FrmProjectManager : Form
+    public class FrmProjectManager : Form, IOviaWorkspaceLayout
     {
         private readonly string companyId;
         private readonly string userId;
@@ -18,12 +18,12 @@ namespace OVIA.Desktop
         private Label lblStatus;
         private ToolTip windowToolTip;
 
-        private readonly Color BrandIndigo = Color.FromArgb(37, 30, 130);
-        private readonly Color BrandViolet = Color.FromArgb(91, 49, 225);
-        private readonly Color BrandCyan = Color.FromArgb(0, 174, 239);
-        private readonly Color SurfaceColor = Color.FromArgb(244, 248, 255);
-        private readonly Color TextDark = Color.FromArgb(28, 33, 72);
-        private readonly Color TextSub = Color.FromArgb(102, 111, 135);
+        private readonly Color BrandIndigo = OviaFluentTheme.AccentHover;
+        private readonly Color BrandViolet = OviaFluentTheme.Accent;
+        private readonly Color BrandCyan = Color.FromArgb(64, 156, 255);
+        private readonly Color SurfaceColor = OviaFluentTheme.AppBackground;
+        private readonly Color TextDark = OviaFluentTheme.TextPrimary;
+        private readonly Color TextSub = OviaFluentTheme.TextSecondary;
 
         private List<OviaProjectRow> allProjects = new List<OviaProjectRow>();
 
@@ -48,6 +48,8 @@ namespace OVIA.Desktop
         private void BuildUI()
         {
             this.SuspendLayout();
+
+            OviaFluentTheme.ApplyForm(this);
 
             this.Text = "OVIA 공사관리";
             this.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
@@ -82,6 +84,7 @@ namespace OVIA.Desktop
             scrollPanel.Controls.Add(contentPanel);
 
             BuildHeader(contentPanel);
+            BuildCommandBar(contentPanel);
             BuildSearchArea(contentPanel);
             BuildProjectGrid(contentPanel);
             BuildFooter(contentPanel);
@@ -181,26 +184,219 @@ namespace OVIA.Desktop
             }
         }
 
+        public void ApplyWorkspaceLayout()
+        {
+            UpdateScrollableContentSize();
+            ResetScrollToTopLeft();
+            QueueResetScrollToTopLeft();
+        }
+
         private void BuildHeader(Control parent)
         {
-            Label title = new Label();
-            title.Text = "공사관리";
-            title.AutoSize = true;
-            title.Font = new Font("맑은 고딕", 22F, FontStyle.Bold);
-            title.ForeColor = TextDark;
-            title.BackColor = SurfaceColor;
-            title.Location = new Point(34, 22);
-            parent.Controls.Add(title);
+            BuildExplorerHeader(parent, "메인  ›  공사관리");
+        }
 
-            Button help = CreateHelpIcon("진행 중인 공사를 검색하고 선택합니다.\r\n이후 ERP 연동 시 거래처/공사 정보를 자동으로 불러옵니다.");
-            help.Location = new Point(title.Right + 10, 36);
-            parent.Controls.Add(help);
+        private void BuildExplorerHeader(Control parent, string pathText)
+        {
+            Panel bar = new Panel();
+            bar.Location = new Point(34, 8);
+            bar.Size = new Size(Math.Max(1, parent.ClientSize.Width - 68), 32);
+            bar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            bar.BackColor = SurfaceColor;
+            parent.Controls.Add(bar);
 
-            Button defaultSize = CreateDefaultSizeButton();
-            defaultSize.Location = new Point(1106, 36);
-            defaultSize.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            defaultSize.Click += DefaultSize_Click;
-            parent.Controls.Add(defaultSize);
+            Button back = CreateExplorerButton("\uE72B", "메인(으)로 이동");
+            back.Click += delegate { NavigateToMain(); };
+            bar.Controls.Add(back);
+
+            Button forward = CreateExplorerButton("\uE72A", "앞으로");
+            forward.Location = new Point(36, 0);
+            StyleExplorerButtonInactive(forward);
+            bar.Controls.Add(forward);
+
+            Button up = CreateExplorerButton("\uE74A", "메인(으)로 이동");
+            up.Location = new Point(72, 0);
+            up.Click += delegate { NavigateToMain(); };
+            bar.Controls.Add(up);
+
+            Button refresh = CreateExplorerButton("\uE72C", "새로고침");
+            refresh.Location = new Point(108, 0);
+            refresh.Click += delegate
+            {
+                BindProjects();
+            };
+            bar.Controls.Add(refresh);
+
+            Panel addressBar = CreatePathAddressBar(pathText);
+            addressBar.Location = new Point(152, 0);
+            addressBar.Size = new Size(Math.Max(1, bar.ClientSize.Width - 188), 32);
+            addressBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            bar.Controls.Add(addressBar);
+
+            Button logout = CreateExplorerButton("\uE7E8", "로그아웃");
+            logout.Location = new Point(Math.Max(152, bar.ClientSize.Width - 30), 0);
+            logout.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            logout.Click += delegate { RequestLogout(); };
+            bar.Controls.Add(logout);
+
+            bar.Resize += delegate
+            {
+                addressBar.Width = Math.Max(1, bar.ClientSize.Width - 188);
+                logout.Location = new Point(Math.Max(152, bar.ClientSize.Width - 30), 0);
+            };
+
+            parent.Resize += delegate
+            {
+                bar.Width = Math.Max(1, parent.ClientSize.Width - 68);
+                addressBar.Width = Math.Max(1, bar.ClientSize.Width - 188);
+                logout.Location = new Point(Math.Max(152, bar.ClientSize.Width - 30), 0);
+            };
+        }
+
+        private Panel CreatePathAddressBar(string pathText)
+        {
+            Panel panel = new Panel();
+            panel.BackColor = Color.White;
+            panel.Margin = Padding.Empty;
+            panel.Padding = new Padding(10, 6, 10, 0);
+
+            TextBox textBox = null;
+            LinkLabel breadcrumb = CreateBreadcrumbLabel();
+            breadcrumb.Text = pathText == null ? "" : pathText;
+            breadcrumb.Location = new Point(10, 6);
+            breadcrumb.Size = new Size(880, 22);
+            breadcrumb.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            breadcrumb.Links.Add(0, "메인".Length, "MAIN");
+            breadcrumb.LinkClicked += Breadcrumb_LinkClicked;
+            breadcrumb.MouseClick += delegate(object sender, MouseEventArgs e)
+            {
+                if (IsPathBlankAreaClick(breadcrumb, e))
+                {
+                    ShowPathEditMode(breadcrumb, textBox);
+                }
+            };
+            panel.Controls.Add(breadcrumb);
+
+            textBox = new TextBox();
+            textBox.Text = NormalizeCopyPath(pathText);
+            textBox.ReadOnly = true;
+            textBox.BorderStyle = BorderStyle.None;
+            textBox.Font = new Font("맑은 고딕", 9.5F, FontStyle.Regular);
+            textBox.ForeColor = Color.Black;
+            textBox.BackColor = Color.White;
+            textBox.Location = new Point(10, 7);
+            textBox.Size = new Size(880, 20);
+            textBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            textBox.Margin = Padding.Empty;
+            textBox.TabStop = false;
+            textBox.Visible = false;
+            textBox.Click += delegate { textBox.SelectAll(); };
+            textBox.Enter += delegate { textBox.SelectAll(); };
+            textBox.Leave += delegate { HidePathEditMode(breadcrumb, textBox); };
+            textBox.KeyDown += PathCopy_KeyDown;
+            panel.Controls.Add(textBox);
+
+            return panel;
+        }
+
+        private bool IsPathBlankAreaClick(LinkLabel breadcrumb, MouseEventArgs e)
+        {
+            if (breadcrumb == null || e == null || e.Button != MouseButtons.Left)
+            {
+                return false;
+            }
+
+            int textWidth = TextRenderer.MeasureText(
+                breadcrumb.Text,
+                breadcrumb.Font,
+                new Size(int.MaxValue, breadcrumb.Height),
+                TextFormatFlags.NoPadding | TextFormatFlags.SingleLine
+            ).Width;
+
+            return e.X > textWidth + 8;
+        }
+
+        private string NormalizeCopyPath(string pathText)
+        {
+            return pathText == null ? "" : pathText.Replace("  ›  ", "\\");
+        }
+
+        private void ShowPathEditMode(LinkLabel breadcrumb, TextBox textBox)
+        {
+            if (breadcrumb != null)
+            {
+                breadcrumb.Visible = false;
+            }
+
+            if (textBox != null)
+            {
+                textBox.Visible = true;
+                textBox.BringToFront();
+                textBox.Focus();
+                textBox.SelectAll();
+                OviaPathEditExitFilter.Attach(breadcrumb, textBox);
+            }
+        }
+
+        private void HidePathEditMode(LinkLabel breadcrumb, TextBox textBox)
+        {
+            if (textBox != null)
+            {
+                textBox.Visible = false;
+            }
+
+            if (breadcrumb != null)
+            {
+                breadcrumb.Visible = true;
+                breadcrumb.BringToFront();
+            }
+
+            OviaPathEditExitFilter.Detach();
+        }
+
+        private void PathCopy_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Escape || e.KeyCode == Keys.Enter)
+            {
+                this.ActiveControl = null;
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+        }
+
+        private Button CreateExplorerButton(string text, string tip)
+        {
+            Button button = new Button();
+            button.Text = text;
+            button.Size = new Size(30, 30);
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderSize = 0;
+            button.FlatAppearance.MouseOverBackColor = OviaFluentTheme.NavigationHover;
+            button.FlatAppearance.MouseDownBackColor = OviaFluentTheme.NavigationSelected;
+            button.Font = new Font("Segoe MDL2 Assets", 9.5F, FontStyle.Regular);
+            button.ForeColor = Color.Black;
+            button.BackColor = SurfaceColor;
+            button.TabStop = false;
+
+            if (windowToolTip != null)
+            {
+                windowToolTip.SetToolTip(button, tip);
+            }
+
+            return button;
+        }
+
+        private void StyleExplorerButtonInactive(Button button)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.ForeColor = Color.FromArgb(175, 181, 190);
+            button.Cursor = Cursors.Default;
+            button.FlatAppearance.MouseOverBackColor = SurfaceColor;
+            button.FlatAppearance.MouseDownBackColor = SurfaceColor;
         }
 
         private LinkLabel CreateBreadcrumbLabel()
@@ -208,57 +404,55 @@ namespace OVIA.Desktop
             LinkLabel label = new LinkLabel();
             label.Text = "";
             label.AutoSize = false;
-            label.Size = new Size(520, 22);
-            label.Location = new Point((BaseClientWidth - 520) / 2, 58);
-            label.TextAlign = ContentAlignment.MiddleCenter;
-            label.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
-            label.BackColor = SurfaceColor;
-            label.ForeColor = TextSub;
-            label.LinkColor = Color.FromArgb(80, 88, 112);
+            label.Size = new Size(880, 22);
+            label.Location = new Point(10, 6);
+            label.TextAlign = ContentAlignment.MiddleLeft;
+            label.Font = new Font("맑은 고딕", 9.5F, FontStyle.Regular);
+            label.BackColor = Color.White;
+            label.ForeColor = Color.Black;
+            label.LinkColor = Color.Black;
             label.ActiveLinkColor = BrandViolet;
-            label.VisitedLinkColor = Color.FromArgb(80, 88, 112);
-            label.DisabledLinkColor = TextSub;
+            label.VisitedLinkColor = Color.Black;
+            label.DisabledLinkColor = Color.Black;
+            label.LinkBehavior = LinkBehavior.NeverUnderline;
             label.TabStop = false;
             return label;
         }
 
-        private Button CreateDefaultSizeButton()
+        private void Breadcrumb_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
         {
-            Button button = new Button();
-            button.Text = "";
-            button.Size = new Size(34, 30);
-            button.FlatStyle = FlatStyle.Flat;
-            button.FlatAppearance.BorderSize = 1;
-            button.FlatAppearance.BorderColor = Color.FromArgb(185, 192, 205);
-            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(246, 248, 252);
-            button.FlatAppearance.MouseDownBackColor = Color.FromArgb(232, 236, 244);
-            button.BackColor = Color.White;
-            button.ForeColor = Color.FromArgb(138, 146, 160);
-            button.Cursor = Cursors.Hand;
-            button.TabStop = false;
-            button.Paint += DefaultSizeButton_Paint;
+            string target = e.Link.LinkData == null ? "" : e.Link.LinkData.ToString();
 
-            if (windowToolTip != null)
+            if (target == "MAIN")
             {
-                windowToolTip.SetToolTip(button, "창 기본크기로");
+                NavigateToMain();
             }
-
-            return button;
         }
 
-        private void DefaultSizeButton_Paint(object sender, PaintEventArgs e)
+        private void NavigateToMain()
         {
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            IOviaWorkspaceNavigator workspace = OviaWorkspaceNavigation.FindNavigator(this);
 
-            using (Pen pen = new Pen(Color.FromArgb(138, 146, 160), 1.6F))
+            if (workspace != null)
             {
-                Rectangle backRect = new Rectangle(12, 8, 13, 11);
-                Rectangle frontRect = new Rectangle(8, 12, 13, 11);
-
-                e.Graphics.DrawRectangle(pen, backRect);
-                e.Graphics.DrawRectangle(pen, frontRect);
-                e.Graphics.DrawLine(pen, frontRect.Left + 3, frontRect.Top + 3, frontRect.Right - 3, frontRect.Top + 3);
+                workspace.NavigateToMain();
+                return;
             }
+
+            this.Close();
+        }
+
+        private void RequestLogout()
+        {
+            IOviaWorkspaceNavigator workspace = OviaWorkspaceNavigation.FindNavigator(this);
+
+            if (workspace != null)
+            {
+                workspace.RequestLogout();
+                return;
+            }
+
+            this.Close();
         }
 
         private Button CreateHelpIcon(string helpText)
@@ -271,7 +465,7 @@ namespace OVIA.Desktop
             button.FlatAppearance.MouseOverBackColor = SurfaceColor;
             button.FlatAppearance.MouseDownBackColor = SurfaceColor;
             button.BackColor = SurfaceColor;
-            button.ForeColor = Color.FromArgb(138, 146, 160);
+            button.ForeColor = OviaFluentTheme.TextTertiary;
             button.Cursor = Cursors.Help;
             button.TabStop = false;
             button.Paint += HelpIcon_Paint;
@@ -295,8 +489,8 @@ namespace OVIA.Desktop
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
             Rectangle rect = new Rectangle(2, 2, button.Width - 5, button.Height - 5);
-            Color lineColor = Color.FromArgb(185, 192, 205);
-            Color textColor = Color.FromArgb(138, 146, 160);
+            Color lineColor = OviaFluentTheme.ControlBorder;
+            Color textColor = OviaFluentTheme.TextTertiary;
 
             using (SolidBrush fillBrush = new SolidBrush(Color.White))
             using (Pen pen = new Pen(lineColor, 1.2F))
@@ -316,7 +510,7 @@ namespace OVIA.Desktop
         private void BuildSearchArea(Control parent)
         {
             OviaProjectCard card = new OviaProjectCard();
-            card.Location = new Point(34, 105);
+            card.Location = new Point(34, 128);
             card.Size = new Size(1108, 108);
             card.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             card.SurfaceColor = SurfaceColor;
@@ -335,6 +529,7 @@ namespace OVIA.Desktop
             txtSearch.Location = new Point(22, 44);
             txtSearch.Size = new Size(380, 23);
             txtSearch.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+            OviaFluentTheme.ApplyTextBox(txtSearch);
             txtSearch.TextChanged += Filter_Changed;
             card.Controls.Add(txtSearch);
 
@@ -348,6 +543,7 @@ namespace OVIA.Desktop
             card.Controls.Add(sortLabel);
 
             cboSort = new ComboBox();
+            OviaFluentTheme.ApplyComboBox(cboSort);
             cboSort.DropDownStyle = ComboBoxStyle.DropDownList;
             cboSort.Items.Add("최근작업순");
             cboSort.Items.Add("생성순");
@@ -365,6 +561,7 @@ namespace OVIA.Desktop
             chkIncludeDone.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
             chkIncludeDone.ForeColor = TextDark;
             chkIncludeDone.BackColor = Color.White;
+            OviaFluentTheme.ApplyCheckBox(chkIncludeDone);
             chkIncludeDone.Location = new Point(610, 46);
             chkIncludeDone.CheckedChanged += Filter_Changed;
             card.Controls.Add(chkIncludeDone);
@@ -383,8 +580,8 @@ namespace OVIA.Desktop
         private void BuildProjectGrid(Control parent)
         {
             grid = new DataGridView();
-            grid.Location = new Point(34, 235);
-            grid.Size = new Size(1108, 390);
+            grid.Location = new Point(34, 258);
+            grid.Size = new Size(1108, 334);
             grid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             grid.BackgroundColor = Color.White;
             grid.BorderStyle = BorderStyle.None;
@@ -402,7 +599,7 @@ namespace OVIA.Desktop
             grid.CellDoubleClick += Grid_CellDoubleClick;
 
             grid.EnableHeadersVisualStyles = false;
-            grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(242, 245, 252);
+            grid.ColumnHeadersDefaultCellStyle.BackColor = OviaFluentTheme.HeaderBackground;
             grid.ColumnHeadersDefaultCellStyle.ForeColor = TextDark;
             grid.ColumnHeadersDefaultCellStyle.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
             grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
@@ -410,9 +607,11 @@ namespace OVIA.Desktop
 
             grid.DefaultCellStyle.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
             grid.DefaultCellStyle.ForeColor = TextDark;
-            grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(230, 241, 255);
+            grid.DefaultCellStyle.SelectionBackColor = OviaFluentTheme.AccentLight;
             grid.DefaultCellStyle.SelectionForeColor = TextDark;
             grid.RowTemplate.Height = 30;
+
+            OviaFluentTheme.ApplyDataGrid(grid);
 
             AddColumn("공사번호", 90);
             AddColumn("공사명", 320);
@@ -484,6 +683,33 @@ namespace OVIA.Desktop
             lblStatus.Location = new Point(38, 655);
             lblStatus.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             parent.Controls.Add(lblStatus);
+        }
+
+        private void BuildCommandBar(Control parent)
+        {
+            Panel commandBar = new Panel();
+            commandBar.Location = new Point(0, 48);
+            commandBar.Size = new Size(BaseClientWidth, 50);
+            commandBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            commandBar.BackColor = Color.White;
+            commandBar.Paint += CommandBar_Paint;
+            OviaWorkspaceCommandBar.Populate(commandBar, "PROJECT");
+            parent.Controls.Add(commandBar);
+        }
+
+        private void CommandBar_Paint(object sender, PaintEventArgs e)
+        {
+            Control control = sender as Control;
+            if (control == null)
+            {
+                return;
+            }
+
+            using (Pen pen = new Pen(OviaFluentTheme.CardBorder, 1))
+            {
+                e.Graphics.DrawLine(pen, 0, 0, control.Width, 0);
+                e.Graphics.DrawLine(pen, 0, control.Height - 1, control.Width, control.Height - 1);
+            }
         }
 
         private void LoadSampleProjects()
@@ -628,6 +854,14 @@ namespace OVIA.Desktop
             string clientName = GetSelectedCellText("거래처");
             string status = GetSelectedCellText("상태");
 
+            IOviaWorkspaceNavigator workspace = OviaWorkspaceNavigation.FindNavigator(this);
+
+            if (workspace != null)
+            {
+                workspace.NavigateToProjectBarListList(projectNo, projectName, clientName, status);
+                return;
+            }
+
             FrmProjectBarListList barListList = new FrmProjectBarListList(companyId, userId, projectNo, projectName, clientName, status);
             ShowReplacementWindow(barListList);
         }
@@ -688,64 +922,6 @@ namespace OVIA.Desktop
             );
         }
 
-        private void DefaultSize_Click(object sender, EventArgs e)
-        {
-            RestoreDefaultWindowSize();
-        }
-
-        private void RestoreDefaultWindowSize()
-        {
-            if (this.WindowState != FormWindowState.Normal)
-            {
-                this.WindowState = FormWindowState.Normal;
-            }
-
-            Rectangle workArea = Screen.FromControl(this).WorkingArea;
-
-            if (scrollPanel != null && !scrollPanel.IsDisposed)
-            {
-                scrollPanel.AutoScroll = false;
-                scrollPanel.AutoScrollMinSize = Size.Empty;
-                scrollPanel.AutoScrollPosition = new Point(0, 0);
-            }
-
-            if (contentPanel != null && !contentPanel.IsDisposed)
-            {
-                contentPanel.Location = new Point(0, 0);
-            }
-
-            this.ClientSize = new Size(BaseClientWidth, BaseClientHeight);
-
-            int left = this.Left;
-            int top = this.Top;
-
-            if (left < workArea.Left)
-            {
-                left = workArea.Left;
-            }
-
-            if (top < workArea.Top)
-            {
-                top = workArea.Top;
-            }
-
-            if (left + this.Width > workArea.Right)
-            {
-                left = Math.Max(workArea.Left, workArea.Right - this.Width);
-            }
-
-            if (top + this.Height > workArea.Bottom)
-            {
-                top = Math.Max(workArea.Top, workArea.Bottom - this.Height);
-            }
-
-            this.Location = new Point(left, top);
-
-            UpdateScrollableContentSize();
-            ResetScrollToTopLeft();
-            QueueResetScrollToTopLeft();
-        }
-
         private void Close_Click(object sender, EventArgs e)
         {
             this.Close();
@@ -787,7 +963,7 @@ namespace OVIA.Desktop
 
     public class OviaProjectCard : Panel
     {
-        public Color SurfaceColor = Color.FromArgb(244, 248, 255);
+        public Color SurfaceColor = OviaFluentTheme.AppBackground;
 
         public OviaProjectCard()
         {
@@ -821,7 +997,7 @@ namespace OVIA.Desktop
                     e.Graphics.FillPath(fill, path);
                 }
 
-                using (Pen pen = new Pen(Color.FromArgb(230, 235, 246), 1))
+                using (Pen pen = new Pen(OviaFluentTheme.CardBorder, 1))
                 {
                     e.Graphics.DrawPath(pen, path);
                 }
@@ -833,8 +1009,8 @@ namespace OVIA.Desktop
 
     public class OviaProjectButton : Control
     {
-        public Color StartColor = Color.FromArgb(91, 49, 225);
-        public Color EndColor = Color.FromArgb(37, 30, 130);
+        public Color StartColor = OviaFluentTheme.Accent;
+        public Color EndColor = OviaFluentTheme.Accent;
 
         private bool hover;
 
@@ -867,14 +1043,12 @@ namespace OVIA.Desktop
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
-            Color s = hover ? Lighten(StartColor, 18) : StartColor;
-            Color en = hover ? Lighten(EndColor, 18) : EndColor;
-
+            Color fillColor = hover ? OviaFluentTheme.AccentHover : StartColor;
             Rectangle rect = new Rectangle(0, 0, this.Width - 1, this.Height - 1);
 
             using (GraphicsPath path = OviaProjectDrawHelper.RoundRect(rect, 7))
             {
-                using (LinearGradientBrush brush = new LinearGradientBrush(rect, s, en, LinearGradientMode.Horizontal))
+                using (SolidBrush brush = new SolidBrush(fillColor))
                 {
                     e.Graphics.FillPath(brush, path);
                 }

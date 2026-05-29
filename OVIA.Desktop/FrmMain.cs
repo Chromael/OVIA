@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Net;
+using System.Net.Sockets;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
@@ -10,7 +13,7 @@ using Microsoft.Win32;
 
 namespace OVIA.Desktop
 {
-    public class FrmMain : Form
+    public class FrmMain : Form, IOviaWorkspaceNavigator
     {
         private const int WM_NCLBUTTONDOWN = 0xA1;
         private const int HTCAPTION = 0x2;
@@ -30,16 +33,25 @@ namespace OVIA.Desktop
         private Label lblAutoCadRunNote;
         private OviaStatusLamp autoCadStatusLamp;
         private Timer autoCadStatusTimer;
-        private FrmProjectManager projectManagerForm;
+        private Timer workspaceStatusTimer;
+        private ToolTip windowToolTip;
+        private TableLayoutPanel mainLayout;
+        private Panel workspacePanel;
+        private Label bottomStatusLabel;
+        private Form currentScreen;
+        private Form projectManagerForm;
         private FrmBarList barListForm;
         private FrmBarListMappingManager barListMappingForm;
+        private bool logoutConfirmed;
 
-        private readonly Color BrandIndigo = Color.FromArgb(37, 30, 130);
-        private readonly Color BrandViolet = Color.FromArgb(91, 49, 225);
-        private readonly Color BrandCyan = Color.FromArgb(0, 174, 239);
-        private readonly Color SurfaceColor = Color.FromArgb(244, 248, 255);
-        private readonly Color TextDark = Color.FromArgb(28, 33, 72);
-        private readonly Color TextSub = Color.FromArgb(102, 111, 135);
+        private readonly Color BrandIndigo = OviaFluentTheme.AccentHover;
+        private readonly Color BrandViolet = OviaFluentTheme.Accent;
+        private readonly Color BrandCyan = Color.FromArgb(64, 156, 255);
+        private readonly Color SurfaceColor = OviaFluentTheme.AppBackground;
+        private readonly Color TextDark = OviaFluentTheme.TextPrimary;
+        private readonly Color TextSub = OviaFluentTheme.TextSecondary;
+
+        public bool IsLogoutRequested { get; private set; }
 
         public FrmMain(string companyId, string userId)
         {
@@ -52,94 +64,147 @@ namespace OVIA.Desktop
         private void BuildMainUI()
         {
             this.SuspendLayout();
+
+            OviaFluentTheme.ApplyForm(this);
             this.Controls.Clear();
 
             this.Text = "OVIA";
-            this.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+            this.Font = OviaFluentTheme.FontKorean(9F, FontStyle.Regular);
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.FormBorderStyle = FormBorderStyle.FixedSingle;
-            this.MaximizeBox = false;
+            this.FormBorderStyle = FormBorderStyle.Sizable;
+            this.MaximizeBox = true;
             this.MinimizeBox = true;
-            this.ClientSize = new Size(1080, 680);
+            this.ClientSize = new Size(1240, 760);
+            this.MinimumSize = new Size(1100, 750);
+            this.WindowState = FormWindowState.Maximized;
             this.BackColor = SurfaceColor;
+            this.FormClosing += FrmMain_FormClosing;
+
+            windowToolTip = new ToolTip();
+            windowToolTip.AutoPopDelay = 4000;
+            windowToolTip.InitialDelay = 350;
+            windowToolTip.ReshowDelay = 100;
+            windowToolTip.ShowAlways = true;
 
             GradientPanel bg = new GradientPanel();
             bg.Dock = DockStyle.Fill;
-            bg.StartColor = Color.FromArgb(249, 251, 255);
-            bg.EndColor = Color.FromArgb(235, 242, 253);
+            bg.StartColor = OviaFluentTheme.AppBackgroundAlt;
+            bg.EndColor = OviaFluentTheme.AppBackground;
             this.Controls.Add(bg);
             EnableDashboardDrag(bg);
 
-            BuildSidePanel(bg);
-            BuildHeader(bg);
-            BuildStatusCards(bg);
-            BuildActionCards(bg);
-            BuildFooter(bg);
+            mainLayout = new TableLayoutPanel();
+            mainLayout.Dock = DockStyle.Fill;
+            mainLayout.ColumnCount = 1;
+            mainLayout.RowCount = 2;
+            mainLayout.BackColor = SurfaceColor;
+            mainLayout.Margin = Padding.Empty;
+            mainLayout.Padding = Padding.Empty;
+            mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
+            bg.Controls.Add(mainLayout);
+
+            workspacePanel = new Panel();
+            workspacePanel.Dock = DockStyle.Fill;
+            workspacePanel.BackColor = SurfaceColor;
+            workspacePanel.Margin = Padding.Empty;
+            workspacePanel.Padding = Padding.Empty;
+            workspacePanel.Resize += WorkspacePanel_Resize;
+            mainLayout.Controls.Add(workspacePanel, 0, 0);
+
+            BuildBottomStatus(mainLayout);
+
+            ShowDashboard();
 
             this.ResumeLayout(false);
 
             StartAutoCadStatusTimer();
+            StartWorkspaceStatusTimer();
         }
 
-        private void BuildSidePanel(Control parent)
+        private void BuildTopMenu(TableLayoutPanel parent)
         {
-            Panel side = new Panel();
-            side.Location = new Point(0, 0);
-            side.Size = new Size(250, 680);
-            side.BackColor = Color.FromArgb(28, 24, 93);
-            parent.Controls.Add(side);
-            EnableDashboardDrag(side);
+            Panel top = new Panel();
+            top.Dock = DockStyle.Fill;
+            top.Margin = Padding.Empty;
+            top.Padding = new Padding(16, 8, 16, 8);
+            top.BackColor = Color.White;
+            parent.Controls.Add(top, 0, 0);
 
-            Label logo = new Label();
-            logo.Text = "OVIA";
-            logo.AutoSize = true;
-            logo.Font = new Font("Segoe UI", 28F, FontStyle.Bold);
-            logo.ForeColor = Color.White;
-            logo.Location = new Point(34, 36);
-            side.Controls.Add(logo);
-            EnableDashboardDrag(logo);
-
-            Label sub = new Label();
-            sub.Text = "Engineering Workflow";
-            sub.AutoSize = true;
-            sub.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
-            sub.ForeColor = Color.FromArgb(190, 196, 235);
-            sub.Location = new Point(38, 86);
-            side.Controls.Add(sub);
-            EnableDashboardDrag(sub);
-
-            AddMenu(side, "대시보드", 150, true);
-            OviaMenuButton projectMenu = AddMenu(side, "공사관리", 205, false);
+            OviaMenuButton dashboardMenu = AddMenu(top, "메인", 16, true);
+            dashboardMenu.Click += delegate { ShowDashboard(); };
+            OviaMenuButton projectMenu = AddMenu(top, "공사관리", 112, false);
             projectMenu.Click += OpenProjectManager_Click;
 
-            AddMenu(side, "AutoCAD 연결", 260, false);
-            AddMenu(side, "도면 추출", 315, false);
+            OviaMenuButton cadMenu = AddMenu(top, "AutoCAD 연결", 220, false);
+            cadMenu.Click += DetectAutoCad_Click;
+            OviaMenuButton extractMenu = AddMenu(top, "도면 추출", 348, false);
+            extractMenu.Click += ExtractReady_Click;
 
-            OviaMenuButton barListMenu = AddMenu(side, "BarList", 370, false);
+            OviaMenuButton barListMenu = AddMenu(top, "BarList", 456, false);
             barListMenu.Click += OpenBarList_Click;
 
-            AddMenu(side, "환경 설정", 425, false);
+            OviaMenuButton settingsMenu = AddMenu(top, "환경 설정", 548, false);
+            settingsMenu.Click += OpenBarListMapping_Click;
 
-            OviaMenuButton barListMappingMenu = AddMenu(side, "└ BarList 항목 매핑", 470, false);
+            OviaMenuButton barListMappingMenu = AddMenu(top, "BarList 항목 매핑", 668, false);
             barListMappingMenu.Click += OpenBarListMapping_Click;
 
-            Label account = new Label();
-            account.Text = "회사 ID : " + companyId + "\r\n사용자 ID : " + userId;
-            account.AutoSize = false;
-            account.Size = new Size(190, 48);
-            account.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
-            account.ForeColor = Color.FromArgb(215, 220, 248);
-            account.Location = new Point(34, 580);
-            side.Controls.Add(account);
-            EnableDashboardDrag(account);
+            OviaSmallButton logout = new OviaSmallButton();
+            logout.Text = "로그아웃";
+            logout.Size = new Size(92, 32);
+            logout.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            logout.Location = new Point(Math.Max(16, top.ClientSize.Width - 108), 10);
+            logout.Click += Logout_Click;
+            top.Controls.Add(logout);
+            top.Resize += delegate
+            {
+                logout.Location = new Point(Math.Max(16, top.ClientSize.Width - 108), 10);
+            };
         }
 
-        private OviaMenuButton AddMenu(Control parent, string text, int top, bool selected)
+        private void BuildBottomStatus(TableLayoutPanel parent)
+        {
+            Panel bottom = new Panel();
+            bottom.Dock = DockStyle.Fill;
+            bottom.Margin = Padding.Empty;
+            bottom.Padding = new Padding(0, 1, 0, 0);
+            bottom.BackColor = SurfaceColor;
+            bottom.Paint += BottomStatus_Paint;
+            parent.Controls.Add(bottom, 0, 1);
+
+            bottomStatusLabel = new Label();
+            bottomStatusLabel.AutoSize = false;
+            bottomStatusLabel.Dock = DockStyle.Fill;
+            bottomStatusLabel.Padding = new Padding(16, 0, 16, 0);
+            bottomStatusLabel.TextAlign = ContentAlignment.MiddleLeft;
+            bottomStatusLabel.Font = new Font("맑은 고딕", 8.5F, FontStyle.Regular);
+            bottomStatusLabel.ForeColor = TextSub;
+            bottomStatusLabel.BackColor = SurfaceColor;
+            bottom.Controls.Add(bottomStatusLabel);
+        }
+
+        private void BottomStatus_Paint(object sender, PaintEventArgs e)
+        {
+            Control control = sender as Control;
+            if (control == null)
+            {
+                return;
+            }
+
+            using (Pen pen = new Pen(Color.FromArgb(234, 234, 234), 1))
+            {
+                e.Graphics.DrawLine(pen, 0, 0, control.Width, 0);
+            }
+        }
+
+        private OviaMenuButton AddMenu(Control parent, string text, int left, bool selected)
         {
             OviaMenuButton menu = new OviaMenuButton();
             menu.Text = text;
-            menu.Location = new Point(25, top);
-            menu.Size = new Size(200, 40);
+            menu.Location = new Point(left, 8);
+            menu.Size = new Size(text.Length > 7 ? 134 : 94, 36);
             menu.Selected = selected;
             parent.Controls.Add(menu);
 
@@ -149,27 +214,17 @@ namespace OVIA.Desktop
         private void BuildHeader(Control parent)
         {
             Label title = new Label();
-            title.Text = "OVIA 대시보드";
+            title.Text = "OVIA 메인";
             title.AutoSize = true;
-            title.Font = new Font("맑은 고딕", 22F, FontStyle.Bold);
+            title.Font = OviaFluentTheme.FontKorean(22F, FontStyle.Bold);
             title.ForeColor = TextDark;
             title.BackColor = SurfaceColor;
-            title.Location = new Point(300, 45);
+            title.Location = new Point(34, 128);
             parent.Controls.Add(title);
             EnableDashboardDrag(title);
 
-            Label desc = new Label();
-            desc.Text = "로그인에 성공했습니다. AutoCAD 연결과 도면 추출 기능을 준비합니다.";
-            desc.AutoSize = true;
-            desc.Font = new Font("맑은 고딕", 10F, FontStyle.Regular);
-            desc.ForeColor = TextSub;
-            desc.BackColor = SurfaceColor;
-            desc.Location = new Point(304, 90);
-            parent.Controls.Add(desc);
-            EnableDashboardDrag(desc);
-
             Panel cadStatusBox = new Panel();
-            cadStatusBox.Location = new Point(735, 50);
+            cadStatusBox.Location = new Point(470, 133);
             cadStatusBox.Size = new Size(175, 40);
             cadStatusBox.BackColor = SurfaceColor;
             parent.Controls.Add(cadStatusBox);
@@ -185,7 +240,7 @@ namespace OVIA.Desktop
             lblAutoCadRunStatus.Text = "AutoCAD 비활성";
             lblAutoCadRunStatus.AutoSize = true;
             lblAutoCadRunStatus.Font = new Font("맑은 고딕", 9.5F, FontStyle.Bold);
-            lblAutoCadRunStatus.ForeColor = Color.FromArgb(210, 78, 78);
+            lblAutoCadRunStatus.ForeColor = OviaFluentTheme.Danger;
             lblAutoCadRunStatus.BackColor = SurfaceColor;
             lblAutoCadRunStatus.Location = new Point(30, 2);
             cadStatusBox.Controls.Add(lblAutoCadRunStatus);
@@ -199,12 +254,6 @@ namespace OVIA.Desktop
             lblAutoCadRunNote.Location = new Point(31, 21);
             cadStatusBox.Controls.Add(lblAutoCadRunNote);
 
-            OviaSmallButton logout = new OviaSmallButton();
-            logout.Text = "로그아웃";
-            logout.Location = new Point(930, 52);
-            logout.Size = new Size(95, 34);
-            logout.Click += Logout_Click;
-            parent.Controls.Add(logout);
         }
 
         private void BuildStatusCards(Control parent)
@@ -219,7 +268,7 @@ namespace OVIA.Desktop
                 "라이선스 상태",
                 "정상",
                 "셀먼 OVIA 관리자 인증 대기",
-                new Point(300, 140),
+                new Point(34, 223),
                 BrandViolet,
                 out dummyValue1,
                 out dummyNote1
@@ -230,7 +279,7 @@ namespace OVIA.Desktop
                 "AutoCAD 상태",
                 "비활성",
                 "AutoCAD를 실행해주세요.",
-                new Point(550, 140),
+                new Point(284, 223),
                 BrandCyan,
                 out lblAutoCadValue,
                 out lblAutoCadNote
@@ -241,7 +290,7 @@ namespace OVIA.Desktop
                 "프로그램 버전",
                 "1.0.0",
                 "초기 개발 테스트 버전",
-                new Point(800, 140),
+                new Point(534, 223),
                 BrandIndigo,
                 out dummyValue2,
                 out dummyNote2
@@ -295,7 +344,7 @@ namespace OVIA.Desktop
         private void BuildActionCards(Control parent)
         {
             OviaLargeCard cadCard = new OviaLargeCard();
-            cadCard.Location = new Point(300, 310);
+            cadCard.Location = new Point(34, 393);
             cadCard.Size = new Size(345, 235);
             cadCard.SurfaceColor = SurfaceColor;
             parent.Controls.Add(cadCard);
@@ -303,7 +352,7 @@ namespace OVIA.Desktop
             Label cadTitle = new Label();
             cadTitle.Text = "AutoCAD 연결";
             cadTitle.AutoSize = true;
-            cadTitle.Font = new Font("맑은 고딕", 16F, FontStyle.Bold);
+            cadTitle.Font = OviaFluentTheme.FontKorean(16F, FontStyle.Bold);
             cadTitle.ForeColor = TextDark;
             cadTitle.BackColor = Color.White;
             cadTitle.Location = new Point(28, 28);
@@ -329,7 +378,7 @@ namespace OVIA.Desktop
             cadCard.Controls.Add(cadButton);
 
             OviaLargeCard extractCard = new OviaLargeCard();
-            extractCard.Location = new Point(680, 310);
+            extractCard.Location = new Point(414, 393);
             extractCard.Size = new Size(345, 235);
             extractCard.SurfaceColor = SurfaceColor;
             parent.Controls.Add(extractCard);
@@ -337,7 +386,7 @@ namespace OVIA.Desktop
             Label extractTitle = new Label();
             extractTitle.Text = "도면 추출";
             extractTitle.AutoSize = true;
-            extractTitle.Font = new Font("맑은 고딕", 16F, FontStyle.Bold);
+            extractTitle.Font = OviaFluentTheme.FontKorean(16F, FontStyle.Bold);
             extractTitle.ForeColor = TextDark;
             extractTitle.BackColor = Color.White;
             extractTitle.Location = new Point(28, 28);
@@ -363,17 +412,208 @@ namespace OVIA.Desktop
             extractCard.Controls.Add(extractButton);
         }
 
-        private void BuildFooter(Control parent)
+        private void ShowDashboard()
         {
-            Label footer = new Label();
-            footer.Text = "© 2026 CELMON. All rights reserved.   |   OVIA Desktop";
-            footer.AutoSize = true;
-            footer.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
-            footer.ForeColor = TextSub;
-            footer.BackColor = SurfaceColor;
-            footer.Location = new Point(300, 635);
-            parent.Controls.Add(footer);
-            EnableDashboardDrag(footer);
+            if (!CloseCurrentScreenForNavigation())
+            {
+                return;
+            }
+
+            this.Text = "OVIA 메인";
+            workspacePanel.Controls.Clear();
+            currentScreen = null;
+
+            Panel dashboard = new Panel();
+            dashboard.Dock = DockStyle.Fill;
+            dashboard.BackColor = SurfaceColor;
+            workspacePanel.Controls.Add(dashboard);
+
+            BuildDashboardExplorerHeader(dashboard);
+            BuildDashboardCommandBar(dashboard);
+            BuildHeader(dashboard);
+            BuildStatusCards(dashboard);
+            BuildActionCards(dashboard);
+            SetBottomStatus("회사 ID : " + companyId + " / 사용자 ID : " + userId + " / 사용자명 : " + userId + " / 접속 IP : " + GetLocalIPAddress());
+            UpdateAutoCadRunStatus();
+        }
+
+        private void BuildDashboardExplorerHeader(Control parent)
+        {
+            Panel bar = new Panel();
+            bar.Location = new Point(34, 8);
+            bar.Size = new Size(Math.Max(1, parent.ClientSize.Width - 68), 32);
+            bar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            bar.BackColor = SurfaceColor;
+            parent.Controls.Add(bar);
+
+            Button back = CreateExplorerButton("\uE72B", "뒤로");
+            StyleExplorerButtonInactive(back);
+            bar.Controls.Add(back);
+
+            Button forward = CreateExplorerButton("\uE72A", "앞으로");
+            forward.Location = new Point(36, 0);
+            StyleExplorerButtonInactive(forward);
+            bar.Controls.Add(forward);
+
+            Button up = CreateExplorerButton("\uE74A", "위로");
+            up.Location = new Point(72, 0);
+            StyleExplorerButtonInactive(up);
+            bar.Controls.Add(up);
+
+            Button refresh = CreateExplorerButton("\uE72C", "새로고침");
+            refresh.Location = new Point(108, 0);
+            refresh.Click += delegate { ShowDashboard(); };
+            bar.Controls.Add(refresh);
+
+            Panel addressBar = CreateDashboardPathAddressBar();
+            addressBar.Location = new Point(152, 0);
+            addressBar.Size = new Size(Math.Max(1, bar.ClientSize.Width - 188), 32);
+            addressBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            bar.Controls.Add(addressBar);
+
+            Button logout = CreateExplorerButton("\uE7E8", "로그아웃");
+            logout.Location = new Point(Math.Max(152, bar.ClientSize.Width - 30), 0);
+            logout.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            logout.Click += delegate { RequestLogout(); };
+            bar.Controls.Add(logout);
+
+            bar.Resize += delegate
+            {
+                addressBar.Width = Math.Max(1, bar.ClientSize.Width - 188);
+                logout.Location = new Point(Math.Max(152, bar.ClientSize.Width - 30), 0);
+            };
+
+            parent.Resize += delegate
+            {
+                bar.Width = Math.Max(1, parent.ClientSize.Width - 68);
+                addressBar.Width = Math.Max(1, bar.ClientSize.Width - 188);
+                logout.Location = new Point(Math.Max(152, bar.ClientSize.Width - 30), 0);
+            };
+        }
+
+        private Panel CreateDashboardPathAddressBar()
+        {
+            Panel panel = new Panel();
+            panel.BackColor = Color.White;
+            panel.Margin = Padding.Empty;
+            panel.Padding = new Padding(10, 6, 10, 0);
+
+            TextBox textBox = new TextBox();
+            textBox.Text = "메인";
+            textBox.ReadOnly = true;
+            textBox.BorderStyle = BorderStyle.None;
+            textBox.Font = new Font("맑은 고딕", 9.5F, FontStyle.Regular);
+            textBox.ForeColor = Color.Black;
+            textBox.BackColor = Color.White;
+            textBox.Location = new Point(10, 7);
+            textBox.Size = new Size(880, 20);
+            textBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            textBox.Margin = Padding.Empty;
+            textBox.TabStop = false;
+            textBox.Click += delegate { textBox.SelectAll(); };
+            textBox.Enter += delegate { textBox.SelectAll(); };
+            panel.Controls.Add(textBox);
+
+            return panel;
+        }
+
+        private void BuildDashboardCommandBar(Control parent)
+        {
+            Panel commandBar = new Panel();
+            commandBar.Location = new Point(0, 48);
+            commandBar.Size = new Size(Math.Max(1, parent.ClientSize.Width), 50);
+            commandBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            commandBar.BackColor = Color.White;
+            commandBar.Paint += CommandBar_Paint;
+            OviaWorkspaceCommandBar.Populate(commandBar, "MAIN");
+            parent.Controls.Add(commandBar);
+        }
+
+        private void CommandBar_Paint(object sender, PaintEventArgs e)
+        {
+            Control control = sender as Control;
+            if (control == null)
+            {
+                return;
+            }
+
+            using (Pen pen = new Pen(OviaFluentTheme.CardBorder, 1))
+            {
+                e.Graphics.DrawLine(pen, 0, 0, control.Width, 0);
+                e.Graphics.DrawLine(pen, 0, control.Height - 1, control.Width, control.Height - 1);
+            }
+        }
+
+        private Button CreateExplorerButton(string text, string tip)
+        {
+            Button button = new Button();
+            button.Text = text;
+            button.Size = new Size(30, 30);
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderSize = 0;
+            button.FlatAppearance.MouseOverBackColor = OviaFluentTheme.NavigationHover;
+            button.FlatAppearance.MouseDownBackColor = OviaFluentTheme.NavigationSelected;
+            button.Font = new Font("Segoe MDL2 Assets", 9.5F, FontStyle.Regular);
+            button.ForeColor = Color.Black;
+            button.BackColor = SurfaceColor;
+            button.TabStop = false;
+            if (windowToolTip != null)
+            {
+                windowToolTip.SetToolTip(button, tip);
+            }
+            return button;
+        }
+
+        private void StyleExplorerButtonInactive(Button button)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.ForeColor = Color.FromArgb(175, 181, 190);
+            button.Cursor = Cursors.Default;
+            button.FlatAppearance.MouseOverBackColor = SurfaceColor;
+            button.FlatAppearance.MouseDownBackColor = SurfaceColor;
+        }
+
+        public void NavigateToMain()
+        {
+            ShowDashboard();
+        }
+
+        public void RequestLogout()
+        {
+            if (!ConfirmLogout())
+            {
+                return;
+            }
+
+            logoutConfirmed = true;
+            IsLogoutRequested = true;
+            this.Close();
+        }
+
+        private string GetLocalIPAddress()
+        {
+            try
+            {
+                IPHostEntry host = Dns.GetHostEntry(Dns.GetHostName());
+                int i;
+
+                for (i = 0; i < host.AddressList.Length; i++)
+                {
+                    if (host.AddressList[i].AddressFamily == AddressFamily.InterNetwork)
+                    {
+                        return host.AddressList[i].ToString();
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return "";
         }
 
         private void EnableDashboardDrag(Control control)
@@ -414,8 +654,21 @@ namespace OVIA.Desktop
                 form.WindowState = FormWindowState.Normal;
             }
 
+            form.WindowState = FormWindowState.Maximized;
             form.Show();
             form.Activate();
+        }
+
+        private void PrepareDashboardChildWindow(Form form)
+        {
+            if (form == null)
+            {
+                return;
+            }
+
+            form.StartPosition = FormStartPosition.Manual;
+            form.Location = GetChildWindowLocation(form.Size);
+            form.WindowState = FormWindowState.Maximized;
         }
 
         private Point GetChildWindowLocation(Size childSize)
@@ -486,40 +739,12 @@ namespace OVIA.Desktop
 
         private void OpenProjectManager_Click(object sender, EventArgs e)
         {
-            if (projectManagerForm != null && !projectManagerForm.IsDisposed)
-            {
-                RestoreAndActivate(projectManagerForm);
-                return;
-            }
-
-            projectManagerForm = new FrmProjectManager(companyId, userId);
-            projectManagerForm.StartPosition = FormStartPosition.Manual;
-            projectManagerForm.Location = GetChildWindowLocation(projectManagerForm.Size);
-            projectManagerForm.FormClosed += delegate
-            {
-                projectManagerForm = null;
-            };
-            projectManagerForm.Show();
-            projectManagerForm.Activate();
+            NavigateToProjectManager();
         }
 
         private void OpenBarList_Click(object sender, EventArgs e)
         {
-            if (barListForm != null && !barListForm.IsDisposed)
-            {
-                RestoreAndActivate(barListForm);
-                return;
-            }
-
-            barListForm = new FrmBarList(companyId, userId);
-            barListForm.StartPosition = FormStartPosition.Manual;
-            barListForm.Location = GetChildWindowLocation(barListForm.Size);
-            barListForm.FormClosed += delegate
-            {
-                barListForm = null;
-            };
-            barListForm.Show();
-            barListForm.Activate();
+            NavigateToBarList("", "", "", "", "");
         }
 
         private void OpenBarListMapping_Click(object sender, EventArgs e)
@@ -536,21 +761,219 @@ namespace OVIA.Desktop
                 return;
             }
 
-            if (barListMappingForm != null && !barListMappingForm.IsDisposed)
+            NavigateToBarListMapping();
+        }
+
+        public void NavigateToProjectManager()
+        {
+            ShowWorkspaceScreen(new FrmProjectManager(companyId, userId), "OVIA 공사관리", "공사관리 화면입니다.");
+        }
+
+        public void NavigateToProjectBarListList(string projectNo, string projectName, string clientName, string projectStatus)
+        {
+            ShowWorkspaceScreen(new FrmProjectBarListList(companyId, userId, projectNo, projectName, clientName, projectStatus), "OVIA 공사별 BarList", "저장된 BarList 목록을 불러왔습니다.");
+        }
+
+        public void NavigateToBarList(string projectNo, string projectName, string clientName, string projectStatus, string initialFilePath)
+        {
+            string filePath = initialFilePath == null ? "" : initialFilePath;
+            string title = filePath.Trim() == "" ? "OVIA 신규 BarList 등록" : "OVIA BarList";
+            ShowWorkspaceScreen(new FrmBarList(companyId, userId, projectNo, projectName, clientName, projectStatus, filePath), title, filePath.Trim() == "" ? "신규 BarList 등록 화면입니다." : "저장된 BarList를 열었습니다.");
+        }
+
+        public void NavigateToBarListMapping()
+        {
+            ShowWorkspaceScreen(new FrmBarListMappingManager(companyId, userId), "OVIA BarList 항목 매핑", "BarList 항목 매핑 설정을 불러왔습니다.");
+        }
+
+        private void ShowWorkspaceScreen(Form nextScreen, string title, string statusText)
+        {
+            if (nextScreen == null)
             {
-                RestoreAndActivate(barListMappingForm);
                 return;
             }
 
-            barListMappingForm = new FrmBarListMappingManager(companyId, userId);
-            barListMappingForm.StartPosition = FormStartPosition.Manual;
-            barListMappingForm.Location = GetChildWindowLocation(barListMappingForm.Size);
-            barListMappingForm.FormClosed += delegate
+            if (!CloseCurrentScreenForNavigation())
             {
-                barListMappingForm = null;
+                nextScreen.Dispose();
+                return;
+            }
+
+            workspacePanel.SuspendLayout();
+
+            try
+            {
+                workspacePanel.Controls.Clear();
+                nextScreen.TopLevel = false;
+                nextScreen.FormBorderStyle = FormBorderStyle.None;
+                nextScreen.Dock = DockStyle.Fill;
+                nextScreen.StartPosition = FormStartPosition.Manual;
+                nextScreen.WindowState = FormWindowState.Normal;
+                nextScreen.FormClosed += delegate
+                {
+                    if (currentScreen == nextScreen)
+                    {
+                        currentScreen = null;
+                        ShowDashboard();
+                    }
+                };
+
+                currentScreen = nextScreen;
+                this.Text = title;
+                workspacePanel.Controls.Add(nextScreen);
+                nextScreen.Show();
+                nextScreen.Bounds = workspacePanel.ClientRectangle;
+                ApplyWorkspaceLayout(nextScreen);
+                nextScreen.BringToFront();
+                MirrorWorkspaceStatus(nextScreen, statusText);
+
+                try
+                {
+                    this.BeginInvoke(new MethodInvoker(delegate
+                    {
+                        if (currentScreen == nextScreen && !nextScreen.IsDisposed)
+                        {
+                            nextScreen.Bounds = workspacePanel.ClientRectangle;
+                            ApplyWorkspaceLayout(nextScreen);
+                            MirrorWorkspaceStatus(nextScreen, statusText);
+                        }
+                    }));
+                }
+                catch
+                {
+                }
+            }
+            finally
+            {
+                workspacePanel.ResumeLayout(false);
+            }
+        }
+
+        private bool CloseCurrentScreenForNavigation()
+        {
+            if (currentScreen == null)
+            {
+                return true;
+            }
+
+            IOviaWorkspaceScreen workspaceScreen = currentScreen as IOviaWorkspaceScreen;
+
+            if (workspaceScreen != null && !workspaceScreen.CanLeaveWorkspaceScreen())
+            {
+                return false;
+            }
+
+            if (workspaceScreen != null)
+            {
+                workspaceScreen.BeforeLeaveWorkspaceScreen();
+            }
+
+            if (!currentScreen.IsDisposed)
+            {
+                Form closingScreen = currentScreen;
+                currentScreen = null;
+                workspacePanel.Controls.Remove(closingScreen);
+                closingScreen.Dispose();
+            }
+            else
+            {
+                currentScreen = null;
+            }
+            return true;
+        }
+
+        private void ApplyWorkspaceLayout(Form screen)
+        {
+            IOviaWorkspaceLayout workspaceLayout = screen as IOviaWorkspaceLayout;
+
+            if (workspaceLayout != null)
+            {
+                workspaceLayout.ApplyWorkspaceLayout();
+            }
+        }
+
+        private void WorkspacePanel_Resize(object sender, EventArgs e)
+        {
+            if (currentScreen == null || currentScreen.IsDisposed)
+            {
+                return;
+            }
+
+            currentScreen.Bounds = workspacePanel.ClientRectangle;
+            ApplyWorkspaceLayout(currentScreen);
+        }
+
+        private void SetBottomStatus(string text)
+        {
+            if (bottomStatusLabel != null)
+            {
+                bottomStatusLabel.Text = text == null ? "" : text;
+            }
+        }
+
+        private void StartWorkspaceStatusTimer()
+        {
+            if (workspaceStatusTimer != null)
+            {
+                workspaceStatusTimer.Stop();
+                workspaceStatusTimer.Dispose();
+                workspaceStatusTimer = null;
+            }
+
+            workspaceStatusTimer = new Timer();
+            workspaceStatusTimer.Interval = 500;
+            workspaceStatusTimer.Tick += delegate
+            {
+                if (currentScreen != null && !currentScreen.IsDisposed)
+                {
+                    MirrorWorkspaceStatus(currentScreen, "");
+                }
             };
-            barListMappingForm.Show();
-            barListMappingForm.Activate();
+            workspaceStatusTimer.Start();
+        }
+
+        private void MirrorWorkspaceStatus(Form screen, string fallbackText)
+        {
+            string text = GetScreenStatusText(screen);
+
+            if (text.Trim() == "")
+            {
+                text = fallbackText == null ? "" : fallbackText;
+            }
+
+            SetBottomStatus(text);
+        }
+
+        private string GetScreenStatusText(Form screen)
+        {
+            if (screen == null)
+            {
+                return "";
+            }
+
+            try
+            {
+                FieldInfo field = screen.GetType().GetField("lblStatus", BindingFlags.Instance | BindingFlags.NonPublic);
+
+                if (field == null)
+                {
+                    return "";
+                }
+
+                Label label = field.GetValue(screen) as Label;
+
+                if (label == null)
+                {
+                    return "";
+                }
+
+                label.Visible = false;
+                return label.Text == null ? "" : label.Text;
+            }
+            catch
+            {
+                return "";
+            }
         }
 
         private bool IsSystemAdminUser()
@@ -633,7 +1056,7 @@ namespace OVIA.Desktop
             if (lblAutoCadRunStatus != null)
             {
                 lblAutoCadRunStatus.Text = isRunning ? "AutoCAD 활성" : "AutoCAD 비활성";
-                lblAutoCadRunStatus.ForeColor = isRunning ? Color.FromArgb(18, 166, 91) : Color.FromArgb(210, 78, 78);
+                lblAutoCadRunStatus.ForeColor = isRunning ? OviaFluentTheme.Success : OviaFluentTheme.Danger;
             }
 
             if (lblAutoCadRunNote != null)
@@ -644,7 +1067,7 @@ namespace OVIA.Desktop
             if (lblAutoCadValue != null)
             {
                 lblAutoCadValue.Text = isRunning ? "활성" : "비활성";
-                lblAutoCadValue.ForeColor = isRunning ? Color.FromArgb(18, 166, 91) : Color.FromArgb(210, 78, 78);
+                lblAutoCadValue.ForeColor = isRunning ? OviaFluentTheme.Success : OviaFluentTheme.Danger;
             }
 
             if (lblAutoCadNote != null)
@@ -655,6 +1078,12 @@ namespace OVIA.Desktop
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            if (currentScreen != null && !currentScreen.IsDisposed)
+            {
+                currentScreen.Dispose();
+                currentScreen = null;
+            }
+
             if (projectManagerForm != null && !projectManagerForm.IsDisposed)
             {
                 projectManagerForm.Close();
@@ -680,12 +1109,56 @@ namespace OVIA.Desktop
                 autoCadStatusTimer = null;
             }
 
+            if (workspaceStatusTimer != null)
+            {
+                workspaceStatusTimer.Stop();
+                workspaceStatusTimer.Dispose();
+                workspaceStatusTimer = null;
+            }
+
             base.OnFormClosed(e);
         }
 
         private void Logout_Click(object sender, EventArgs e)
         {
-            this.Close();
+            RequestLogout();
+        }
+
+        private void FrmMain_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            if (!logoutConfirmed && currentScreen != null && !currentScreen.IsDisposed)
+            {
+                e.Cancel = true;
+                ShowDashboard();
+                return;
+            }
+
+            if (!logoutConfirmed && !ConfirmLogout())
+            {
+                e.Cancel = true;
+                return;
+            }
+
+            if (!CloseCurrentScreenForNavigation())
+            {
+                e.Cancel = true;
+                logoutConfirmed = false;
+                IsLogoutRequested = false;
+                return;
+            }
+
+            logoutConfirmed = true;
+            IsLogoutRequested = true;
+        }
+
+        private bool ConfirmLogout()
+        {
+            return MessageBox.Show(
+                "로그아웃을 하시겠습니까?",
+                "OVIA",
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Question
+            ) == DialogResult.OK;
         }
     }
 
@@ -1113,23 +1586,50 @@ namespace OVIA.Desktop
             {
                 using (GraphicsPath path = MainDrawHelper.RoundRect(rect, 8))
                 {
-                    using (SolidBrush brush = new SolidBrush(Color.White))
+                    using (SolidBrush brush = new SolidBrush(OviaFluentTheme.NavigationSelected))
                     {
                         e.Graphics.FillPath(brush, path);
                     }
                 }
             }
 
-            Color color = Selected ? Color.FromArgb(37, 30, 130) : Color.FromArgb(215, 220, 248);
+            Color color = Selected ? OviaFluentTheme.Accent : OviaFluentTheme.TextPrimary;
+            bool hasDropDownIcon = this.Text != null && this.Text.IndexOf("\uE70D", StringComparison.Ordinal) >= 0;
+            string displayText = hasDropDownIcon ? this.Text.Replace("\uE70D", "").TrimEnd() : this.Text;
 
             TextRenderer.DrawText(
                 e.Graphics,
-                this.Text,
+                displayText,
                 new Font("맑은 고딕", 10F, FontStyle.Bold),
                 rect,
                 color,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.LeftAndRightPadding
             );
+
+            if (hasDropDownIcon)
+            {
+                Size textSize = TextRenderer.MeasureText(
+                    e.Graphics,
+                    displayText,
+                    new Font("맑은 고딕", 10F, FontStyle.Bold),
+                    new Size(this.Width, this.Height),
+                    TextFormatFlags.NoPadding | TextFormatFlags.SingleLine
+                );
+
+                int iconX = Math.Min(this.Width - 12, 10 + textSize.Width + 8);
+                int iconY = (this.Height - 4) / 2 + 1;
+                Point[] points = new Point[]
+                {
+                    new Point(iconX, iconY),
+                    new Point(iconX + 6, iconY),
+                    new Point(iconX + 3, iconY + 4)
+                };
+
+                using (SolidBrush brush = new SolidBrush(color))
+                {
+                    e.Graphics.FillPolygon(brush, points);
+                }
+            }
 
             base.OnPaint(e);
         }
@@ -1137,8 +1637,8 @@ namespace OVIA.Desktop
 
     public class OviaDashboardCard : Panel
     {
-        public Color SurfaceColor = Color.FromArgb(244, 248, 255);
-        public Color AccentColor = Color.FromArgb(91, 49, 225);
+        public Color SurfaceColor = OviaFluentTheme.AppBackground;
+        public Color AccentColor = OviaFluentTheme.Accent;
 
         public OviaDashboardCard()
         {
@@ -1172,7 +1672,7 @@ namespace OVIA.Desktop
                     e.Graphics.FillPath(fill, path);
                 }
 
-                using (Pen pen = new Pen(Color.FromArgb(230, 235, 246), 1))
+                using (Pen pen = new Pen(OviaFluentTheme.CardBorder, 1))
                 {
                     e.Graphics.DrawPath(pen, path);
                 }
@@ -1189,7 +1689,7 @@ namespace OVIA.Desktop
 
     public class OviaLargeCard : Panel
     {
-        public Color SurfaceColor = Color.FromArgb(244, 248, 255);
+        public Color SurfaceColor = OviaFluentTheme.AppBackground;
 
         public OviaLargeCard()
         {
@@ -1223,7 +1723,7 @@ namespace OVIA.Desktop
                     e.Graphics.FillPath(fill, path);
                 }
 
-                using (Pen pen = new Pen(Color.FromArgb(230, 235, 246), 1))
+                using (Pen pen = new Pen(OviaFluentTheme.CardBorder, 1))
                 {
                     e.Graphics.DrawPath(pen, path);
                 }
@@ -1235,8 +1735,8 @@ namespace OVIA.Desktop
 
     public class OviaActionButton : Control
     {
-        public Color StartColor = Color.FromArgb(91, 49, 225);
-        public Color EndColor = Color.FromArgb(37, 30, 130);
+        public Color StartColor = OviaFluentTheme.Accent;
+        public Color EndColor = OviaFluentTheme.Accent;
 
         private bool hover;
 
@@ -1270,12 +1770,11 @@ namespace OVIA.Desktop
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
             Rectangle rect = new Rectangle(0, 0, this.Width - 1, this.Height - 1);
-            Color start = hover ? Color.FromArgb(105, 64, 236) : StartColor;
-            Color end = hover ? Color.FromArgb(50, 38, 150) : EndColor;
+            Color fillColor = hover ? OviaFluentTheme.AccentHover : StartColor;
 
             using (GraphicsPath path = MainDrawHelper.RoundRect(rect, 8))
             {
-                using (LinearGradientBrush brush = new LinearGradientBrush(rect, start, end, LinearGradientMode.Horizontal))
+                using (SolidBrush brush = new SolidBrush(fillColor))
                 {
                     e.Graphics.FillPath(brush, path);
                 }
@@ -1306,7 +1805,7 @@ namespace OVIA.Desktop
             this.SetStyle(ControlStyles.ResizeRedraw, true);
 
             this.DoubleBuffered = true;
-            this.BackColor = Color.FromArgb(248, 251, 255);
+            this.BackColor = OviaFluentTheme.AppBackground;
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -1378,8 +1877,8 @@ namespace OVIA.Desktop
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
             Rectangle rect = new Rectangle(0, 0, this.Width - 1, this.Height - 1);
-            Color border = hover ? Color.FromArgb(91, 49, 225) : Color.FromArgb(216, 223, 238);
-            Color text = hover ? Color.FromArgb(91, 49, 225) : Color.FromArgb(102, 111, 135);
+            Color border = hover ? OviaFluentTheme.Accent : OviaFluentTheme.ControlBorder;
+            Color text = hover ? OviaFluentTheme.Accent : OviaFluentTheme.TextSecondary;
 
             using (GraphicsPath path = MainDrawHelper.RoundRect(rect, 6))
             {

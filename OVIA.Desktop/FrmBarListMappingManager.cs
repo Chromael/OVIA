@@ -6,18 +6,19 @@ using System.Windows.Forms;
 
 namespace OVIA.Desktop
 {
-    public class FrmBarListMappingManager : Form
+    public class FrmBarListMappingManager : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout
     {
         private readonly string companyId;
         private readonly string userId;
 
-        private readonly Color SurfaceColor = Color.FromArgb(244, 248, 255);
-        private readonly Color TextDark = Color.FromArgb(28, 33, 72);
-        private readonly Color TextSub = Color.FromArgb(102, 111, 135);
-        private readonly Color BrandViolet = Color.FromArgb(91, 49, 225);
+        private readonly Color SurfaceColor = OviaFluentTheme.AppBackground;
+        private readonly Color TextDark = OviaFluentTheme.TextPrimary;
+        private readonly Color TextSub = OviaFluentTheme.TextSecondary;
+        private readonly Color BrandViolet = OviaFluentTheme.Accent;
 
         private DataGridView grid;
         private Label lblStatus;
+        private ToolTip windowToolTip;
         private ContextMenuStrip columnMenu;
         private ToolStripMenuItem deleteColumnMenuItem;
         private int aliasColumnSeed = 0;
@@ -39,7 +40,7 @@ namespace OVIA.Desktop
         private readonly Color ActiveCellBorderColor = Color.FromArgb(255, 204, 0);
         private readonly Color ActiveColumnBackColor = Color.FromArgb(222, 242, 255);
         private readonly Color EditCellBorderColor = Color.FromArgb(20, 20, 20);
-        private readonly Color ChangedTextColor = Color.FromArgb(220, 40, 40);
+        private readonly Color ChangedTextColor = OviaFluentTheme.Danger;
 
         public FrmBarListMappingManager(string companyId, string userId)
         {
@@ -53,6 +54,8 @@ namespace OVIA.Desktop
         private void BuildUI()
         {
             this.SuspendLayout();
+
+            OviaFluentTheme.ApplyForm(this);
             this.Controls.Clear();
 
             this.Text = "OVIA - BarList 항목 매핑";
@@ -61,9 +64,19 @@ namespace OVIA.Desktop
             this.FormBorderStyle = FormBorderStyle.Sizable;
             this.MinimizeBox = true;
             this.MaximizeBox = true;
-            this.ClientSize = new Size(1080, 680);
-            this.MinimumSize = new Size(980, 620);
+            this.ClientSize = new Size(1180, 720);
+            this.MinimumSize = new Size(1100, 750);
             this.BackColor = SurfaceColor;
+            this.FormClosing += FrmBarListMappingManager_FormClosing;
+
+            windowToolTip = new ToolTip();
+            windowToolTip.AutoPopDelay = 4000;
+            windowToolTip.InitialDelay = 350;
+            windowToolTip.ReshowDelay = 100;
+            windowToolTip.ShowAlways = true;
+
+            BuildExplorerHeader(this, "메인  ›  환경설정  ›  BarList 항목 매핑");
+            BuildCommandBar(this);
 
             Label title = new Label();
             title.Text = "BarList 항목 매핑";
@@ -71,7 +84,7 @@ namespace OVIA.Desktop
             title.Font = new Font("맑은 고딕", 20F, FontStyle.Bold);
             title.ForeColor = TextDark;
             title.BackColor = SurfaceColor;
-            title.Location = new Point(28, 24);
+            title.Location = new Point(32, 128);
             this.Controls.Add(title);
 
             Label desc = new Label();
@@ -81,12 +94,12 @@ namespace OVIA.Desktop
             desc.Font = new Font("맑은 고딕", 9.5F, FontStyle.Regular);
             desc.ForeColor = TextSub;
             desc.BackColor = SurfaceColor;
-            desc.Location = new Point(31, 68);
+            desc.Location = new Point(35, 172);
             this.Controls.Add(desc);
 
             grid = new DataGridView();
-            grid.Location = new Point(32, 122);
-            grid.Size = new Size(1016, 430);
+            grid.Location = new Point(32, 226);
+            grid.Size = new Size(1116, 302);
             grid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             grid.AllowUserToAddRows = false;
             grid.AllowUserToDeleteRows = false;
@@ -95,11 +108,11 @@ namespace OVIA.Desktop
             grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
             grid.EditMode = DataGridViewEditMode.EditProgrammatically;
             grid.RowHeadersVisible = false;
-            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             grid.BackgroundColor = Color.White;
-            grid.BorderStyle = BorderStyle.FixedSingle;
+            grid.BorderStyle = BorderStyle.None;
             grid.EnableHeadersVisualStyles = false;
-            grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(235, 240, 250);
+            grid.ColumnHeadersDefaultCellStyle.BackColor = OviaFluentTheme.HeaderBackground;
             grid.ColumnHeadersDefaultCellStyle.ForeColor = TextDark;
             grid.ColumnHeadersDefaultCellStyle.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
             grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
@@ -107,6 +120,11 @@ namespace OVIA.Desktop
             grid.DefaultCellStyle.SelectionBackColor = ActiveRowBackColor;
             grid.DefaultCellStyle.SelectionForeColor = TextDark;
             grid.RowTemplate.Height = 34;
+
+            OviaFluentTheme.ApplyDataGrid(grid);
+            grid.DefaultCellStyle.SelectionBackColor = ActiveRowBackColor;
+            grid.DefaultCellStyle.SelectionForeColor = TextDark;
+
             grid.ColumnHeaderMouseClick += Grid_ColumnHeaderMouseClick;
             grid.CellMouseDown += Grid_CellMouseDown;
             grid.CellClick += Grid_CellClick;
@@ -120,29 +138,29 @@ namespace OVIA.Desktop
 
             BuildColumnContextMenu();
 
-            Button btnAddColumn = CreateButton("매핑 열 추가", 32, 570, 130);
+            Button btnAddColumn = CreateButton("매핑 열 추가", 32, 596, 130);
             btnAddColumn.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             btnAddColumn.Click += AddAliasColumn_Click;
             this.Controls.Add(btnAddColumn);
 
-            Button btnClearCell = CreateButton("선택 셀 비우기", 172, 570, 130);
+            Button btnClearCell = CreateButton("선택 셀 비우기", 172, 596, 130);
             btnClearCell.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             btnClearCell.Click += ClearSelectedCell_Click;
             this.Controls.Add(btnClearCell);
 
-            Button btnReset = CreateButton("기본값 복원", 312, 570, 120);
+            Button btnReset = CreateButton("기본값 복원", 312, 596, 120);
             btnReset.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             btnReset.Click += ResetDefault_Click;
             this.Controls.Add(btnReset);
 
-            Button btnSave = CreateButton("저장하기", 792, 570, 120);
+            Button btnSave = CreateButton("저장하기", 902, 596, 120);
             btnSave.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
-            btnSave.BackColor = BrandViolet;
+            btnSave.BackColor = OviaFluentTheme.Accent;
             btnSave.ForeColor = Color.White;
             btnSave.Click += Save_Click;
             this.Controls.Add(btnSave);
 
-            Button btnClose = CreateButton("닫기", 928, 570, 120);
+            Button btnClose = CreateButton("닫기", 1038, 596, 110);
             btnClose.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             btnClose.Click += delegate { this.Close(); };
             this.Controls.Add(btnClose);
@@ -150,15 +168,313 @@ namespace OVIA.Desktop
             lblStatus = new Label();
             lblStatus.Text = "매핑 설정을 불러오는 중입니다.";
             lblStatus.AutoSize = false;
-            lblStatus.Size = new Size(1016, 40);
+            lblStatus.Size = new Size(1116, 40);
             lblStatus.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             lblStatus.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
             lblStatus.ForeColor = TextSub;
             lblStatus.BackColor = SurfaceColor;
-            lblStatus.Location = new Point(32, 622);
+            lblStatus.Location = new Point(32, 654);
             this.Controls.Add(lblStatus);
 
             this.ResumeLayout(false);
+        }
+
+        public void ApplyWorkspaceLayout()
+        {
+            if (grid != null)
+            {
+                grid.Width = Math.Max(1, this.ClientSize.Width - 64);
+                grid.Height = Math.Max(120, this.ClientSize.Height - 338);
+            }
+
+            if (lblStatus != null)
+            {
+                lblStatus.Width = Math.Max(1, this.ClientSize.Width - 64);
+            }
+        }
+
+        private void BuildExplorerHeader(Control parent, string pathText)
+        {
+            Panel bar = new Panel();
+            bar.Location = new Point(34, 8);
+            bar.Size = new Size(Math.Max(1, parent.ClientSize.Width - 68), 32);
+            bar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            bar.BackColor = SurfaceColor;
+            parent.Controls.Add(bar);
+
+            Button back = CreateExplorerButton("\uE72B", "메인");
+            back.Click += delegate { this.Close(); };
+            bar.Controls.Add(back);
+
+            Button forward = CreateExplorerButton("\uE72A", "앞으로");
+            forward.Location = new Point(36, 0);
+            StyleExplorerButtonInactive(forward);
+            bar.Controls.Add(forward);
+
+            Button up = CreateExplorerButton("\uE74A", "메인");
+            up.Location = new Point(72, 0);
+            up.Click += delegate { this.Close(); };
+            bar.Controls.Add(up);
+
+            Button refresh = CreateExplorerButton("\uE72C", "새로고침");
+            refresh.Location = new Point(108, 0);
+            refresh.Click += delegate
+            {
+                if (ConfirmDiscardUnsavedChanges())
+                {
+                    LoadStoreToGrid(OviaBarListMappingStore.LoadDefault());
+                }
+            };
+            bar.Controls.Add(refresh);
+
+            Panel addressBar = CreatePathAddressBar(pathText);
+            addressBar.Location = new Point(152, 0);
+            addressBar.Size = new Size(Math.Max(1, bar.ClientSize.Width - 188), 32);
+            addressBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            bar.Controls.Add(addressBar);
+
+            Button logout = CreateExplorerButton("\uE7E8", "로그아웃");
+            logout.Location = new Point(Math.Max(152, bar.ClientSize.Width - 30), 0);
+            logout.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            logout.Click += delegate { RequestLogout(); };
+            bar.Controls.Add(logout);
+
+            bar.Resize += delegate
+            {
+                addressBar.Width = Math.Max(1, bar.ClientSize.Width - 188);
+                logout.Location = new Point(Math.Max(152, bar.ClientSize.Width - 30), 0);
+            };
+
+            parent.Resize += delegate
+            {
+                bar.Width = Math.Max(1, parent.ClientSize.Width - 68);
+                addressBar.Width = Math.Max(1, bar.ClientSize.Width - 188);
+                logout.Location = new Point(Math.Max(152, bar.ClientSize.Width - 30), 0);
+            };
+        }
+
+        private void BuildCommandBar(Control parent)
+        {
+            Panel commandBar = new Panel();
+            commandBar.Location = new Point(0, 48);
+            commandBar.Size = new Size(1180, 50);
+            commandBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            commandBar.BackColor = Color.White;
+            commandBar.Paint += CommandBar_Paint;
+            OviaWorkspaceCommandBar.Populate(commandBar, "SETTINGS");
+            parent.Controls.Add(commandBar);
+        }
+
+        private void CommandBar_Paint(object sender, PaintEventArgs e)
+        {
+            Control control = sender as Control;
+            if (control == null)
+            {
+                return;
+            }
+
+            using (Pen pen = new Pen(OviaFluentTheme.CardBorder, 1))
+            {
+                e.Graphics.DrawLine(pen, 0, 0, control.Width, 0);
+                e.Graphics.DrawLine(pen, 0, control.Height - 1, control.Width, control.Height - 1);
+            }
+        }
+
+        private Panel CreatePathAddressBar(string pathText)
+        {
+            Panel panel = new Panel();
+            panel.BackColor = Color.White;
+            panel.Margin = Padding.Empty;
+            panel.Padding = new Padding(10, 6, 10, 0);
+
+            TextBox textBox = null;
+            LinkLabel breadcrumb = CreateBreadcrumbLabel();
+            breadcrumb.Text = pathText == null ? "" : pathText;
+            breadcrumb.Location = new Point(10, 6);
+            breadcrumb.Size = new Size(880, 22);
+            breadcrumb.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            breadcrumb.Links.Add(0, "메인".Length, "MAIN");
+            int settingsStart = breadcrumb.Text.IndexOf("환경설정");
+            if (settingsStart >= 0)
+            {
+                breadcrumb.Links.Add(settingsStart, "환경설정".Length, "SETTINGS");
+            }
+            breadcrumb.LinkClicked += Breadcrumb_LinkClicked;
+            breadcrumb.MouseClick += delegate(object sender, MouseEventArgs e)
+            {
+                if (IsPathBlankAreaClick(breadcrumb, e))
+                {
+                    ShowPathEditMode(breadcrumb, textBox);
+                }
+            };
+            panel.Controls.Add(breadcrumb);
+
+            textBox = new TextBox();
+            textBox.Text = pathText == null ? "" : pathText.Replace("  ›  ", "\\");
+            textBox.ReadOnly = true;
+            textBox.BorderStyle = BorderStyle.None;
+            textBox.Font = new Font("맑은 고딕", 9.5F, FontStyle.Regular);
+            textBox.ForeColor = Color.Black;
+            textBox.BackColor = Color.White;
+            textBox.Location = new Point(10, 7);
+            textBox.Size = new Size(880, 20);
+            textBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            textBox.Margin = Padding.Empty;
+            textBox.TabStop = false;
+            textBox.Visible = false;
+            textBox.Click += delegate { textBox.SelectAll(); };
+            textBox.Enter += delegate { textBox.SelectAll(); };
+            textBox.Leave += delegate { HidePathEditMode(breadcrumb, textBox); };
+            textBox.KeyDown += PathCopy_KeyDown;
+            panel.Controls.Add(textBox);
+
+            return panel;
+        }
+
+        private LinkLabel CreateBreadcrumbLabel()
+        {
+            LinkLabel label = new LinkLabel();
+            label.Text = "";
+            label.AutoSize = false;
+            label.Size = new Size(880, 22);
+            label.Location = new Point(10, 6);
+            label.TextAlign = ContentAlignment.MiddleLeft;
+            label.Font = new Font("맑은 고딕", 9.5F, FontStyle.Regular);
+            label.BackColor = Color.White;
+            label.ForeColor = Color.Black;
+            label.LinkColor = Color.Black;
+            label.ActiveLinkColor = OviaFluentTheme.Accent;
+            label.VisitedLinkColor = Color.Black;
+            label.DisabledLinkColor = Color.Black;
+            label.LinkBehavior = LinkBehavior.NeverUnderline;
+            label.TabStop = false;
+            return label;
+        }
+
+        private bool IsPathBlankAreaClick(LinkLabel breadcrumb, MouseEventArgs e)
+        {
+            if (breadcrumb == null || e == null || e.Button != MouseButtons.Left)
+            {
+                return false;
+            }
+
+            int textWidth = TextRenderer.MeasureText(
+                breadcrumb.Text,
+                breadcrumb.Font,
+                new Size(int.MaxValue, breadcrumb.Height),
+                TextFormatFlags.NoPadding | TextFormatFlags.SingleLine
+            ).Width;
+
+            return e.X > textWidth + 8;
+        }
+
+        private void ShowPathEditMode(LinkLabel breadcrumb, TextBox textBox)
+        {
+            if (breadcrumb != null)
+            {
+                breadcrumb.Visible = false;
+            }
+
+            if (textBox != null)
+            {
+                textBox.Visible = true;
+                textBox.BringToFront();
+                textBox.Focus();
+                textBox.SelectAll();
+                OviaPathEditExitFilter.Attach(breadcrumb, textBox);
+            }
+        }
+
+        private void HidePathEditMode(LinkLabel breadcrumb, TextBox textBox)
+        {
+            if (textBox != null)
+            {
+                textBox.Visible = false;
+            }
+
+            if (breadcrumb != null)
+            {
+                breadcrumb.Visible = true;
+                breadcrumb.BringToFront();
+            }
+
+            OviaPathEditExitFilter.Detach();
+        }
+
+        private void PathCopy_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Escape || e.KeyCode == Keys.Enter)
+            {
+                this.ActiveControl = null;
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+        }
+
+        private void Breadcrumb_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        {
+            string target = e.Link.LinkData == null ? "" : e.Link.LinkData.ToString();
+
+            if (target == "MAIN" || target == "SETTINGS")
+            {
+                IOviaWorkspaceNavigator workspace = OviaWorkspaceNavigation.FindNavigator(this);
+
+                if (workspace != null)
+                {
+                    workspace.NavigateToMain();
+                    return;
+                }
+
+                this.Close();
+            }
+        }
+
+        private Button CreateExplorerButton(string text, string tip)
+        {
+            Button button = new Button();
+            button.Text = text;
+            button.Size = new Size(30, 30);
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderSize = 0;
+            button.FlatAppearance.MouseOverBackColor = OviaFluentTheme.NavigationHover;
+            button.FlatAppearance.MouseDownBackColor = OviaFluentTheme.NavigationSelected;
+            button.Font = new Font("Segoe MDL2 Assets", 9.5F, FontStyle.Regular);
+            button.ForeColor = Color.Black;
+            button.BackColor = SurfaceColor;
+            button.TabStop = false;
+
+            if (windowToolTip != null)
+            {
+                windowToolTip.SetToolTip(button, tip);
+            }
+
+            return button;
+        }
+
+        private void RequestLogout()
+        {
+            IOviaWorkspaceNavigator workspace = OviaWorkspaceNavigation.FindNavigator(this);
+
+            if (workspace != null)
+            {
+                workspace.RequestLogout();
+                return;
+            }
+
+            this.Close();
+        }
+
+        private void StyleExplorerButtonInactive(Button button)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.ForeColor = Color.FromArgb(175, 181, 190);
+            button.Cursor = Cursors.Default;
+            button.FlatAppearance.MouseOverBackColor = SurfaceColor;
+            button.FlatAppearance.MouseDownBackColor = SurfaceColor;
         }
 
         private Button CreateButton(string text, int x, int y, int width)
@@ -168,7 +484,9 @@ namespace OVIA.Desktop
             button.Location = new Point(x, y);
             button.Size = new Size(width, 38);
             button.FlatStyle = FlatStyle.Flat;
-            button.FlatAppearance.BorderColor = Color.FromArgb(205, 214, 235);
+            button.FlatAppearance.BorderColor = OviaFluentTheme.ControlBorder;
+            button.FlatAppearance.MouseOverBackColor = OviaFluentTheme.NavigationHover;
+            button.FlatAppearance.MouseDownBackColor = OviaFluentTheme.NavigationSelected;
             button.BackColor = Color.White;
             button.ForeColor = TextDark;
             button.Font = new Font("맑은 고딕", 9.5F, FontStyle.Bold);
@@ -198,9 +516,11 @@ namespace OVIA.Desktop
                 noColumn.HeaderText = "순서";
                 noColumn.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
                 noColumn.Width = 58;
+                noColumn.MinimumWidth = 50;
+                noColumn.FillWeight = 55;
                 noColumn.ReadOnly = true;
                 noColumn.SortMode = DataGridViewColumnSortMode.NotSortable;
-                noColumn.Frozen = true;
+                noColumn.Frozen = false;
                 noColumn.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
                 grid.Columns.Add(noColumn);
 
@@ -209,10 +529,12 @@ namespace OVIA.Desktop
                 displayColumn.HeaderText = "OVIA 기본 헤더";
                 displayColumn.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
                 displayColumn.Width = 145;
+                displayColumn.MinimumWidth = 130;
+                displayColumn.FillWeight = 140;
                 displayColumn.ReadOnly = true;
                 displayColumn.SortMode = DataGridViewColumnSortMode.NotSortable;
-                displayColumn.Frozen = true;
-                displayColumn.DefaultCellStyle.BackColor = Color.FromArgb(248, 250, 255);
+                displayColumn.Frozen = false;
+                displayColumn.DefaultCellStyle.BackColor = OviaFluentTheme.AppBackgroundAlt;
                 displayColumn.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
                 grid.Columns.Add(displayColumn);
 
@@ -291,6 +613,8 @@ namespace OVIA.Desktop
             column.Name = "Alias_" + aliasColumnSeed.ToString();
             column.HeaderText = "매핑 " + aliasColumnSeed.ToString();
             column.Width = 118;
+            column.MinimumWidth = 85;
+            column.FillWeight = 100;
             column.SortMode = DataGridViewColumnSortMode.NotSortable;
             column.ReadOnly = false;
             column.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
@@ -343,7 +667,11 @@ namespace OVIA.Desktop
                 newStore.SaveToDefaultPath();
 
                 lblStatus.Text = "저장 완료: " + OviaBarListMappingStore.GetWritableMappingFilePath();
-                lblStatus.ForeColor = Color.FromArgb(18, 166, 91);
+                lblStatus.ForeColor = OviaFluentTheme.Success;
+                changedCells.Clear();
+                undoStack.Clear();
+                redoStack.Clear();
+                ApplyActiveRowHighlight();
 
                 MessageBox.Show(
                     "BarList 항목 매핑을 저장했습니다.\r\n\r\n이미 열린 BarList 데이터는 다시 불러오면 변경된 기준으로 매핑됩니다.",
@@ -355,7 +683,7 @@ namespace OVIA.Desktop
             catch (Exception ex)
             {
                 lblStatus.Text = "저장 오류: " + ex.Message;
-                lblStatus.ForeColor = Color.FromArgb(210, 78, 78);
+                lblStatus.ForeColor = OviaFluentTheme.Danger;
 
                 MessageBox.Show(
                     "BarList 항목 매핑 저장 중 오류가 발생했습니다.\r\n\r\n" + ex.Message,
@@ -364,6 +692,45 @@ namespace OVIA.Desktop
                     MessageBoxIcon.Error
                 );
             }
+        }
+
+        public bool CanLeaveWorkspaceScreen()
+        {
+            return ConfirmDiscardUnsavedChanges();
+        }
+
+        public void BeforeLeaveWorkspaceScreen()
+        {
+        }
+
+        private void FrmBarListMappingManager_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            if (!ConfirmDiscardUnsavedChanges())
+            {
+                e.Cancel = true;
+            }
+        }
+
+        private bool ConfirmDiscardUnsavedChanges()
+        {
+            if (!HasUnsavedChanges())
+            {
+                return true;
+            }
+
+            DialogResult result = MessageBox.Show(
+                "저장하지 않은 BarList 항목 매핑 변경 내용이 있습니다.\r\n\r\n이 화면을 닫으면 저장되지 않은 변경 내용은 사라집니다.\r\n그래도 닫으시겠습니까?",
+                "OVIA 변경 내용 확인",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning
+            );
+
+            return result == DialogResult.Yes;
+        }
+
+        private bool HasUnsavedChanges()
+        {
+            return changedCells.Count > 0 || undoStack.Count > 0;
         }
 
         private void BuildColumnContextMenu()
@@ -802,7 +1169,7 @@ namespace OVIA.Desktop
             btnCancel.Location = new Point(208, 112);
             btnCancel.DialogResult = DialogResult.Cancel;
             btnCancel.FlatStyle = FlatStyle.Flat;
-            btnCancel.FlatAppearance.BorderColor = Color.FromArgb(205, 214, 235);
+            btnCancel.FlatAppearance.BorderColor = OviaFluentTheme.ControlBorder;
             btnCancel.BackColor = Color.White;
             btnCancel.ForeColor = TextDark;
             dialog.Controls.Add(btnCancel);
@@ -814,7 +1181,7 @@ namespace OVIA.Desktop
             btnConfirm.DialogResult = DialogResult.OK;
             btnConfirm.FlatStyle = FlatStyle.Flat;
             btnConfirm.FlatAppearance.BorderColor = Color.FromArgb(180, 55, 65);
-            btnConfirm.BackColor = Color.FromArgb(210, 78, 78);
+            btnConfirm.BackColor = OviaFluentTheme.Danger;
             btnConfirm.ForeColor = Color.White;
             dialog.Controls.Add(btnConfirm);
 
@@ -863,7 +1230,7 @@ namespace OVIA.Desktop
                     }
                     else if (grid.Columns[c].Name != null && String.Equals(grid.Columns[c].Name, "DisplayName", StringComparison.OrdinalIgnoreCase))
                     {
-                        cell.Style.BackColor = Color.FromArgb(248, 250, 255);
+                        cell.Style.BackColor = OviaFluentTheme.AppBackgroundAlt;
                     }
                     else
                     {
@@ -1064,7 +1431,7 @@ namespace OVIA.Desktop
                     }
                     else if (String.Equals(columnSnapshot.Name, "DisplayName", StringComparison.OrdinalIgnoreCase))
                     {
-                        column.DefaultCellStyle.BackColor = Color.FromArgb(248, 250, 255);
+                        column.DefaultCellStyle.BackColor = OviaFluentTheme.AppBackgroundAlt;
                         column.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
                     }
                     else
