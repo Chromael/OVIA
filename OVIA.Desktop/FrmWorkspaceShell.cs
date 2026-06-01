@@ -11,6 +11,8 @@ namespace OVIA.Desktop
         void NavigateToProjectBarListList(string projectNo, string projectName, string clientName, string projectStatus);
         void NavigateToBarList(string projectNo, string projectName, string clientName, string projectStatus, string initialFilePath);
         void NavigateToBarListMapping();
+        void ShowAutoCadEnvironmentCheck();
+        void ShowAutoCadExtractGuide();
         void RequestLogout();
     }
 
@@ -90,8 +92,23 @@ namespace OVIA.Desktop
                 }
             });
 
-            AddMenu(commandBar, "AutoCAD 연결", 238, selectedMenu == "CAD", null);
-            AddMenu(commandBar, "도면 추출", 366, selectedMenu == "EXTRACT", null);
+            AddMenu(commandBar, "AutoCAD 연결", 238, selectedMenu == "CAD", delegate(Control source)
+            {
+                IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(source);
+                if (navigator != null)
+                {
+                    navigator.ShowAutoCadEnvironmentCheck();
+                }
+            });
+
+            AddMenu(commandBar, "도면 추출", 366, selectedMenu == "EXTRACT", delegate(Control source)
+            {
+                IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(source);
+                if (navigator != null)
+                {
+                    navigator.ShowAutoCadExtractGuide();
+                }
+            });
 
             AddMenu(commandBar, "BarList", 474, selectedMenu == "BARLIST", delegate(Control source)
             {
@@ -127,6 +144,122 @@ namespace OVIA.Desktop
             {
                 menu.Show(settings, new Point(0, settings.Height));
             };
+
+            AddAutoCadStatusIndicator(commandBar);
+        }
+
+        private static void AddAutoCadStatusIndicator(Control commandBar)
+        {
+            Panel statusPanel = new Panel();
+            statusPanel.Size = new Size(165, 30);
+            statusPanel.BackColor = Color.White;
+            statusPanel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            commandBar.Controls.Add(statusPanel);
+
+            OviaStatusLamp lamp = new OviaStatusLamp();
+            lamp.Location = new Point(0, 3);
+            lamp.Size = new Size(24, 24);
+            lamp.BackColor = Color.White;
+            statusPanel.Controls.Add(lamp);
+
+            Label label = new Label();
+            label.AutoSize = false;
+            label.Location = new Point(28, 0);
+            label.Size = new Size(132, 30);
+            label.TextAlign = ContentAlignment.MiddleLeft;
+            label.Font = new Font("맑은 고딕", 9.5F, FontStyle.Bold);
+            label.BackColor = Color.White;
+            statusPanel.Controls.Add(label);
+
+            ToolTip statusToolTip = new ToolTip();
+            statusToolTip.AutoPopDelay = 5000;
+            statusToolTip.InitialDelay = 350;
+            statusToolTip.ReshowDelay = 100;
+            statusToolTip.ShowAlways = true;
+
+            PositionAutoCadStatusIndicator(commandBar, statusPanel);
+            UpdateAutoCadStatusIndicator(lamp, label, statusPanel, statusToolTip);
+
+            bool statusTimerDisposed = false;
+            Timer statusTimer = new Timer();
+            statusTimer.Interval = 2000;
+            statusTimer.Tick += delegate
+            {
+                if (statusPanel.IsDisposed || commandBar.IsDisposed || commandBar.FindForm() == null)
+                {
+                    if (!statusTimerDisposed)
+                    {
+                        statusTimer.Stop();
+                        statusTimer.Dispose();
+                        statusTimerDisposed = true;
+                    }
+                    return;
+                }
+
+                UpdateAutoCadStatusIndicator(lamp, label, statusPanel, statusToolTip);
+            };
+            statusTimer.Start();
+
+            commandBar.Resize += delegate
+            {
+                PositionAutoCadStatusIndicator(commandBar, statusPanel);
+            };
+
+            commandBar.Disposed += delegate
+            {
+                if (!statusTimerDisposed)
+                {
+                    statusTimer.Stop();
+                    statusTimer.Dispose();
+                    statusTimerDisposed = true;
+                }
+            };
+        }
+
+        private static void PositionAutoCadStatusIndicator(Control commandBar, Control statusPanel)
+        {
+            if (commandBar == null || statusPanel == null)
+            {
+                return;
+            }
+
+            int x = Math.Max(760, commandBar.ClientSize.Width - statusPanel.Width - 34);
+            statusPanel.Location = new Point(x, 10);
+        }
+
+        private static void UpdateAutoCadStatusIndicator(OviaStatusLamp lamp, Label label, Control statusPanel, ToolTip statusToolTip)
+        {
+            OviaEnvironmentReport report = OviaEnvironmentChecker.CheckForUi();
+            bool isReady = report != null && report.IsCurrentDevelopmentAutoCadReady();
+
+            if (lamp != null)
+            {
+                lamp.IsActive = isReady;
+                lamp.Invalidate();
+            }
+
+            if (label != null)
+            {
+                label.Text = report == null ? "환경 점검 필요" : report.GetDesktopAutoCadStatusText();
+
+                if (isReady)
+                {
+                    label.ForeColor = OviaFluentTheme.Success;
+                }
+                else if (report != null && report.OverallStatus == OviaEnvironmentStatus.Warning && report.RecommendedAutoCad != null && report.RecommendedAutoCad.Year != 2027)
+                {
+                    label.ForeColor = Color.FromArgb(176, 111, 0);
+                }
+                else
+                {
+                    label.ForeColor = OviaFluentTheme.Danger;
+                }
+            }
+
+            if (statusToolTip != null && statusPanel != null && report != null)
+            {
+                statusToolTip.SetToolTip(statusPanel, report.GetDesktopAutoCadDetailText());
+            }
         }
 
         private static OviaMenuButton AddMenu(Control parent, string text, int left, bool selected, Action<Control> action)
@@ -310,6 +443,52 @@ namespace OVIA.Desktop
         {
             this.Text = "OVIA BarList 항목 매핑";
             ShowScreen(new FrmBarListMappingManager(companyId, userId));
+        }
+
+        public void ShowAutoCadEnvironmentCheck()
+        {
+            OviaEnvironmentReport report = OviaEnvironmentChecker.Check();
+            MessageBoxIcon icon = MessageBoxIcon.Information;
+
+            if (report.OverallStatus == OviaEnvironmentStatus.Blocked)
+            {
+                icon = MessageBoxIcon.Error;
+            }
+            else if (report.OverallStatus == OviaEnvironmentStatus.Warning)
+            {
+                icon = MessageBoxIcon.Warning;
+            }
+
+            MessageBox.Show(
+                report.GetDisplayText(),
+                "OVIA 설치 전 환경 점검 결과",
+                MessageBoxButtons.OK,
+                icon
+            );
+        }
+
+        public void ShowAutoCadExtractGuide()
+        {
+            OviaEnvironmentReport report = OviaEnvironmentChecker.CheckForUi();
+
+            if (!report.IsCurrentDevelopmentAutoCadReady())
+            {
+                MessageBox.Show(
+                    report.GetAutoCadExtractionBlockMessage() + "\r\n\r\n" + report.GetDisplayText(),
+                    "OVIA AutoCAD 추출 준비",
+                    MessageBoxButtons.OK,
+                    report.OverallStatus == OviaEnvironmentStatus.Blocked ? MessageBoxIcon.Error : MessageBoxIcon.Warning
+                );
+
+                return;
+            }
+
+            MessageBox.Show(
+                report.GetAutoCadExtractionReadyMessage(),
+                "OVIA AutoCAD 활성",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information
+            );
         }
 
         public void RequestLogout()

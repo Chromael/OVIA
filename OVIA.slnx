@@ -9,4 +9,7 @@
   <Project Path="OVIA.Desktop/OVIA.Desktop.csproj" Id="51f5f2fa-ea8c-48ea-97c7-764566c3ca0a">
     <Platform Solution="*|x64" Project="x64" />
   </Project>
+  <Project Path="OVIA.PreflightCheck/OVIA.PreflightCheck.csproj" Id="8e2e0c57-6871-4b8e-b1c2-df28f0c7a231">
+    <Platform Solution="*|x64" Project="x64" />
+  </Project>
 </Solution>

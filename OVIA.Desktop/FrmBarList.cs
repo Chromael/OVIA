@@ -1100,13 +1100,15 @@ namespace OVIA.Desktop
 
         private void AutoCadImport_Click(object sender, EventArgs e)
         {
-            if (!IsAutoCadRunning())
+            OviaEnvironmentReport report = OviaEnvironmentChecker.CheckForUi();
+
+            if (!report.IsCurrentDevelopmentAutoCadReady())
             {
                 MessageBox.Show(
-                    "현재 AutoCAD가 실행중이지 않습니다.\r\n\r\nAutoCAD를 먼저 실행하고 DWG 도면을 연 뒤 다시 시도해주세요.",
+                    report.GetAutoCadExtractionBlockMessage() + "\r\n\r\n" + report.GetDisplayText(),
                     "OVIA AutoCAD 확인",
                     MessageBoxButtons.OK,
-                    MessageBoxIcon.Information
+                    report.OverallStatus == OviaEnvironmentStatus.Blocked ? MessageBoxIcon.Error : MessageBoxIcon.Warning
                 );
 
                 return;

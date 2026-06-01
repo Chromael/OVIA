@@ -71,6 +71,7 @@
     <Compile Include="Services\RebarShapeRepository.cs" />
     <Compile Include="Services\RebarShapeRenderer.cs" />
     <Compile Include="Services\CadShapeRenderer.cs" />
+    <Compile Include="Services\OviaEnvironmentChecker.cs" />
     <Compile Include="Controls\RebarShapePreviewControl.cs">
       <SubType>UserControl</SubType>
     </Compile>

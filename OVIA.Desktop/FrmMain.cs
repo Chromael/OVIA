@@ -29,9 +29,6 @@ namespace OVIA.Desktop
 
         private Label lblAutoCadValue;
         private Label lblAutoCadNote;
-        private Label lblAutoCadRunStatus;
-        private Label lblAutoCadRunNote;
-        private OviaStatusLamp autoCadStatusLamp;
         private Timer autoCadStatusTimer;
         private Timer workspaceStatusTimer;
         private ToolTip windowToolTip;
@@ -222,38 +219,6 @@ namespace OVIA.Desktop
             title.Location = new Point(34, 128);
             parent.Controls.Add(title);
             EnableDashboardDrag(title);
-
-            Panel cadStatusBox = new Panel();
-            cadStatusBox.Location = new Point(470, 133);
-            cadStatusBox.Size = new Size(175, 40);
-            cadStatusBox.BackColor = SurfaceColor;
-            parent.Controls.Add(cadStatusBox);
-            EnableDashboardDrag(cadStatusBox);
-
-            autoCadStatusLamp = new OviaStatusLamp();
-            autoCadStatusLamp.Location = new Point(0, 8);
-            autoCadStatusLamp.Size = new Size(24, 24);
-            autoCadStatusLamp.IsActive = false;
-            cadStatusBox.Controls.Add(autoCadStatusLamp);
-
-            lblAutoCadRunStatus = new Label();
-            lblAutoCadRunStatus.Text = "AutoCAD 비활성";
-            lblAutoCadRunStatus.AutoSize = true;
-            lblAutoCadRunStatus.Font = new Font("맑은 고딕", 9.5F, FontStyle.Bold);
-            lblAutoCadRunStatus.ForeColor = OviaFluentTheme.Danger;
-            lblAutoCadRunStatus.BackColor = SurfaceColor;
-            lblAutoCadRunStatus.Location = new Point(30, 2);
-            cadStatusBox.Controls.Add(lblAutoCadRunStatus);
-
-            lblAutoCadRunNote = new Label();
-            lblAutoCadRunNote.Text = "실행 필요";
-            lblAutoCadRunNote.AutoSize = true;
-            lblAutoCadRunNote.Font = new Font("맑은 고딕", 8F, FontStyle.Regular);
-            lblAutoCadRunNote.ForeColor = TextSub;
-            lblAutoCadRunNote.BackColor = SurfaceColor;
-            lblAutoCadRunNote.Location = new Point(31, 21);
-            cadStatusBox.Controls.Add(lblAutoCadRunNote);
-
         }
 
         private void BuildStatusCards(Control parent)
@@ -703,38 +668,32 @@ namespace OVIA.Desktop
 
         private void DetectAutoCad_Click(object sender, EventArgs e)
         {
-            List<AutoCadInstallInfo> installs = AutoCadDetector.FindInstalledAutoCad();
+            ShowAutoCadEnvironmentCheck();
+        }
 
-            if (installs.Count == 0)
+        public void ShowAutoCadEnvironmentCheck()
+        {
+            OviaEnvironmentReport report = OviaEnvironmentChecker.Check();
+
+            ApplyEnvironmentReportToDashboard(report);
+
+            MessageBoxIcon icon = MessageBoxIcon.Information;
+
+            if (report.OverallStatus == OviaEnvironmentStatus.Blocked)
             {
-                lblAutoCadValue.Text = "미감지";
-                lblAutoCadNote.Text = "AutoCAD 일반 버전을 찾지 못했습니다.";
-
-                MessageBox.Show(
-                    "설치된 AutoCAD 일반 버전을 찾지 못했습니다.\r\n\r\nAutoCAD LT만 설치되어 있거나, AutoCAD가 설치되어 있지 않을 수 있습니다.",
-                    "OVIA",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information
-                );
-
-                UpdateAutoCadRunStatus();
-
-                return;
+                icon = MessageBoxIcon.Error;
+            }
+            else if (report.OverallStatus == OviaEnvironmentStatus.Warning)
+            {
+                icon = MessageBoxIcon.Warning;
             }
 
-            AutoCadInstallInfo selected = installs[0];
-
-            lblAutoCadValue.Text = selected.YearText;
-            lblAutoCadNote.Text = selected.PluginGroup;
-
             MessageBox.Show(
-                selected.GetDisplayText(),
-                "OVIA AutoCAD 감지 결과",
+                report.GetDisplayText(),
+                "OVIA 설치 전 환경 점검 결과",
                 MessageBoxButtons.OK,
-                MessageBoxIcon.Information
+                icon
             );
-
-            UpdateAutoCadRunStatus();
         }
 
         private void OpenProjectManager_Click(object sender, EventArgs e)
@@ -999,22 +958,28 @@ namespace OVIA.Desktop
 
         private void ExtractReady_Click(object sender, EventArgs e)
         {
-            UpdateAutoCadRunStatus();
+            ShowAutoCadExtractGuide();
+        }
 
-            if (!AutoCadRuntimeChecker.IsAutoCadRunning())
+        public void ShowAutoCadExtractGuide()
+        {
+            OviaEnvironmentReport report = OviaEnvironmentChecker.CheckForUi();
+            ApplyEnvironmentReportToDashboard(report);
+
+            if (!report.IsCurrentDevelopmentAutoCadReady())
             {
                 MessageBox.Show(
-                    "AutoCAD 비활성 상태입니다.\r\n\r\n도면 추출 기능을 사용하려면 먼저 AutoCAD를 실행하고 DWG 도면을 열어주세요.",
-                    "OVIA AutoCAD 비활성",
+                    report.GetAutoCadExtractionBlockMessage() + "\r\n\r\n" + report.GetDisplayText(),
+                    "OVIA AutoCAD 추출 준비",
                     MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning
+                    report.OverallStatus == OviaEnvironmentStatus.Blocked ? MessageBoxIcon.Error : MessageBoxIcon.Warning
                 );
 
                 return;
             }
 
             MessageBox.Show(
-                "AutoCAD 활성 상태입니다.\r\n\r\nAutoCAD에서 OVIA 플러그인 DLL을 NETLOAD로 로드한 뒤 OVIABOX / OVIABOXTABLE 명령어를 사용할 수 있습니다.",
+                report.GetAutoCadExtractionReadyMessage(),
                 "OVIA AutoCAD 활성",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information
@@ -1031,7 +996,7 @@ namespace OVIA.Desktop
             }
 
             autoCadStatusTimer = new Timer();
-            autoCadStatusTimer.Interval = 2000;
+            autoCadStatusTimer.Interval = 5000;
             autoCadStatusTimer.Tick += AutoCadStatusTimer_Tick;
             autoCadStatusTimer.Start();
 
@@ -1045,34 +1010,38 @@ namespace OVIA.Desktop
 
         private void UpdateAutoCadRunStatus()
         {
-            bool isRunning = AutoCadRuntimeChecker.IsAutoCadRunning();
+            OviaEnvironmentReport report = OviaEnvironmentChecker.CheckForUi();
+            ApplyEnvironmentReportToDashboard(report);
+        }
 
-            if (autoCadStatusLamp != null)
+        private void ApplyEnvironmentReportToDashboard(OviaEnvironmentReport report)
+        {
+            if (report == null)
             {
-                autoCadStatusLamp.IsActive = isRunning;
-                autoCadStatusLamp.Invalidate();
-            }
-
-            if (lblAutoCadRunStatus != null)
-            {
-                lblAutoCadRunStatus.Text = isRunning ? "AutoCAD 활성" : "AutoCAD 비활성";
-                lblAutoCadRunStatus.ForeColor = isRunning ? OviaFluentTheme.Success : OviaFluentTheme.Danger;
-            }
-
-            if (lblAutoCadRunNote != null)
-            {
-                lblAutoCadRunNote.Text = isRunning ? "acad.exe 실행 중" : "AutoCAD 실행 필요";
+                return;
             }
 
             if (lblAutoCadValue != null)
             {
-                lblAutoCadValue.Text = isRunning ? "활성" : "비활성";
-                lblAutoCadValue.ForeColor = isRunning ? OviaFluentTheme.Success : OviaFluentTheme.Danger;
+                lblAutoCadValue.Text = report.GetDesktopAutoCadStatusText();
+
+                if (report.IsCurrentDevelopmentAutoCadReady())
+                {
+                    lblAutoCadValue.ForeColor = OviaFluentTheme.Success;
+                }
+                else if (report.OverallStatus == OviaEnvironmentStatus.Warning && report.RecommendedAutoCad != null && report.RecommendedAutoCad.Year != 2027)
+                {
+                    lblAutoCadValue.ForeColor = Color.FromArgb(176, 111, 0);
+                }
+                else
+                {
+                    lblAutoCadValue.ForeColor = OviaFluentTheme.Danger;
+                }
             }
 
             if (lblAutoCadNote != null)
             {
-                lblAutoCadNote.Text = isRunning ? "AutoCAD가 실행 중입니다." : "AutoCAD를 실행해주세요.";
+                lblAutoCadNote.Text = report.GetShortAutoCadText();
             }
         }
 
@@ -1357,7 +1326,7 @@ namespace OVIA.Desktop
                 return;
             }
 
-            if (productName.IndexOf("AutoCAD", StringComparison.OrdinalIgnoreCase) < 0)
+            if (!IsDisplayableAutoCadProductName(productName))
             {
                 return;
             }
@@ -1398,7 +1367,7 @@ namespace OVIA.Desktop
 
                     string displayName = ReadRegistryString(sub, "DisplayName");
 
-                    if (displayName.IndexOf("AutoCAD", StringComparison.OrdinalIgnoreCase) >= 0)
+                    if (IsDisplayableAutoCadProductName(displayName))
                     {
                         AutoCadInstallInfo info = new AutoCadInstallInfo();
                         info.ProductName = displayName;
@@ -1495,16 +1464,108 @@ namespace OVIA.Desktop
             {
                 for (j = 0; j < i; j++)
                 {
-                    if (
-                        string.Equals(list[i].ProductName, list[j].ProductName, StringComparison.OrdinalIgnoreCase) &&
-                        list[i].Year == list[j].Year
-                    )
+                    if (IsSameAutoCadInstall(list[i], list[j]))
                     {
                         list.RemoveAt(i);
                         break;
                     }
                 }
             }
+        }
+
+        private static bool IsSameAutoCadInstall(AutoCadInstallInfo a, AutoCadInstallInfo b)
+        {
+            if (a == null || b == null)
+            {
+                return false;
+            }
+
+            if (a.Year != b.Year)
+            {
+                return false;
+            }
+
+            if (a.IsLT != b.IsLT)
+            {
+                return false;
+            }
+
+            if (string.Equals(a.ProductName, b.ProductName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (NormalizePath(a.InstallPath) != "" && string.Equals(NormalizePath(a.InstallPath), NormalizePath(b.InstallPath), StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (NormalizeAutoCadProductName(a.ProductName) != "" && string.Equals(NormalizeAutoCadProductName(a.ProductName), NormalizeAutoCadProductName(b.ProductName), StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static string NormalizePath(string path)
+        {
+            if (path == null)
+            {
+                return "";
+            }
+
+            return path.Trim().TrimEnd('\\', '/');
+        }
+
+        private static string NormalizeAutoCadProductName(string productName)
+        {
+            if (productName == null)
+            {
+                return "";
+            }
+
+            return productName
+                .Replace("Autodesk", "")
+                .Replace("autodesk", "")
+                .Trim();
+        }
+
+        private static bool IsDisplayableAutoCadProductName(string productName)
+        {
+            if (productName == null)
+            {
+                return false;
+            }
+
+            string name = productName.Trim();
+
+            if (name.IndexOf("AutoCAD", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+
+            if (name.IndexOf("MCP Server", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return false;
+            }
+
+            if (name.IndexOf("Open in Desktop", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return false;
+            }
+
+            if (name.IndexOf("Open Desktop", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return false;
+            }
+
+            if (name.IndexOf("Desktop Connector", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return false;
+            }
+
+            return true;
         }
 
         private static void SortByYearDesc(List<AutoCadInstallInfo> list)
