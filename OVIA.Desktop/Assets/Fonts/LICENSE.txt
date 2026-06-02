@@ -1,0 +1,10 @@
+OVIA Font License Notice
+========================
+
+OVIA는 포인트 UI 폰트로 Pretendard 사용을 전제로 합니다.
+Pretendard는 SIL Open Font License 1.1 기반 오픈소스 폰트입니다.
+
+정식 배포 시 이 폴더에 Pretendard 원본 패키지에 포함된 라이선스 문서를 함께 보관하세요.
+
+이 패치 파일에는 폰트 원본 파일을 포함하지 않습니다.
+Pretendard 폰트 파일은 공식 배포처에서 받은 파일을 OVIA.Desktop/Assets/Fonts 폴더에 넣어 사용하세요.

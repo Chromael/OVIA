@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.IO;
 using System.Windows.Forms;
 
 namespace OVIA.Desktop
@@ -65,6 +67,8 @@ namespace OVIA.Desktop
 
     internal static class OviaWorkspaceCommandBar
     {
+        private static OviaAnimatedDropDownMenu currentSettingsDropDown;
+
         public static void Populate(Control commandBar, string selectedMenu)
         {
             if (commandBar == null)
@@ -74,7 +78,7 @@ namespace OVIA.Desktop
 
             commandBar.Controls.Clear();
 
-            AddMenu(commandBar, "메인", 34, selectedMenu == "MAIN", delegate(Control source)
+            AddMenu(commandBar, "메인", "\uE7F4", 34, 104, selectedMenu == "MAIN", delegate(Control source)
             {
                 IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(source);
                 if (navigator != null)
@@ -83,7 +87,7 @@ namespace OVIA.Desktop
                 }
             });
 
-            AddMenu(commandBar, "공사관리", 130, selectedMenu == "PROJECT", delegate(Control source)
+            AddMenu(commandBar, "공사관리", "\uE90F", 150, 128, selectedMenu == "PROJECT", delegate(Control source)
             {
                 IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(source);
                 if (navigator != null)
@@ -92,7 +96,7 @@ namespace OVIA.Desktop
                 }
             });
 
-            AddMenu(commandBar, "AutoCAD 연결", 238, selectedMenu == "CAD", delegate(Control source)
+            AddMenu(commandBar, "AutoCAD 연결", "\uE71B", 294, 154, selectedMenu == "CAD", delegate(Control source)
             {
                 IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(source);
                 if (navigator != null)
@@ -101,7 +105,7 @@ namespace OVIA.Desktop
                 }
             });
 
-            AddMenu(commandBar, "도면 추출", 366, selectedMenu == "EXTRACT", delegate(Control source)
+            AddMenu(commandBar, "도면 추출", "\uE896", 464, 132, selectedMenu == "EXTRACT", delegate(Control source)
             {
                 IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(source);
                 if (navigator != null)
@@ -110,7 +114,7 @@ namespace OVIA.Desktop
                 }
             });
 
-            AddMenu(commandBar, "BarList", 474, selectedMenu == "BARLIST", delegate(Control source)
+            AddMenu(commandBar, "BarList", "\uE8A5", 612, 112, selectedMenu == "BARLIST", delegate(Control source)
             {
                 IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(source);
                 if (navigator != null)
@@ -119,33 +123,104 @@ namespace OVIA.Desktop
                 }
             });
 
-            OviaMenuButton settings = AddMenu(commandBar, "환경 설정 \uE70D", 570, selectedMenu == "SETTINGS", null);
-            ContextMenuStrip menu = new ContextMenuStrip();
-            menu.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
-            menu.BackColor = Color.White;
-            menu.ShowImageMargin = true;
-            menu.ShowCheckMargin = false;
-            menu.Padding = new Padding(4, 6, 4, 6);
-            menu.Renderer = new OviaExplorerDropDownRenderer();
-
-            ToolStripMenuItem mapping = new ToolStripMenuItem("BarList 항목 매핑");
-            mapping.Padding = new Padding(8, 6, 18, 6);
-            mapping.Click += delegate
+            OviaMenuButton settings = AddMenu(commandBar, "환경 설정 \uE70D", "\uE713", 740, 142, selectedMenu == "SETTINGS", null);
+            settings.Click += delegate
             {
-                IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(settings);
+                ToggleSettingsDropDown(settings);
+            };
+
+            AddAutoCadStatusIndicator(commandBar);
+        }
+
+        private static void ToggleSettingsDropDown(Control settingsButton)
+        {
+            if (settingsButton == null || settingsButton.IsDisposed)
+            {
+                return;
+            }
+
+            if (currentSettingsDropDown != null && !currentSettingsDropDown.IsDisposed && currentSettingsDropDown.Visible)
+            {
+                currentSettingsDropDown.CloseAnimated();
+                currentSettingsDropDown = null;
+                return;
+            }
+
+            OviaAnimatedDropDownMenu menu = new OviaAnimatedDropDownMenu();
+            currentSettingsDropDown = menu;
+
+            menu.AddItem("BarList 항목 매핑", "\uE8A5", delegate
+            {
+                IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(settingsButton);
+                menu.CloseImmediate();
+                currentSettingsDropDown = null;
+
                 if (navigator != null)
                 {
                     navigator.NavigateToBarListMapping();
                 }
-            };
+            });
 
-            menu.Items.Add(mapping);
-            settings.Click += delegate
+            menu.AddItem("백업하기", "\uE74E", delegate
             {
-                menu.Show(settings, new Point(0, settings.Height));
+                menu.CloseImmediate();
+                currentSettingsDropDown = null;
+                ShowBackupGuide(settingsButton);
+            });
+
+            menu.AddItem("버전정보", "\uE946", delegate
+            {
+                menu.CloseImmediate();
+                currentSettingsDropDown = null;
+                ShowVersionInfo(settingsButton);
+            });
+
+            menu.Closed += delegate
+            {
+                if (currentSettingsDropDown == menu)
+                {
+                    currentSettingsDropDown = null;
+                }
             };
 
-            AddAutoCadStatusIndicator(commandBar);
+            menu.ShowBelow(settingsButton);
+        }
+
+        private static void ShowBackupGuide(Control source)
+        {
+            string oviaFolder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "OVIA"
+            );
+
+            MessageBox.Show(
+                "백업하기 메뉴가 준비되었습니다.\r\n\r\n" +
+                "현재 백업 대상 기본 폴더:\r\n" + oviaFolder + "\r\n\r\n" +
+                "다음 단계에서 이 메뉴를 실제 ZIP 백업 생성 기능으로 연결하겠습니다.",
+                "OVIA 백업하기",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information
+            );
+        }
+
+        private static void ShowVersionInfo(Control source)
+        {
+            string version = Application.ProductVersion;
+            if (string.IsNullOrWhiteSpace(version))
+            {
+                version = "개발 버전";
+            }
+
+            MessageBox.Show(
+                "OVIA / 오비아\r\n" +
+                "Operation + Value + Intelligence + Automation\r\n\r\n" +
+                "버전: " + version + "\r\n" +
+                "모드: 개발/테스트 버전\r\n\r\n" +
+                "AutoCAD BarList 추출 및 공사별 철근 데이터 관리 솔루션입니다.",
+                "OVIA 버전정보",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information
+            );
         }
 
         private static void AddAutoCadStatusIndicator(Control commandBar)
@@ -167,7 +242,7 @@ namespace OVIA.Desktop
             label.Location = new Point(28, 0);
             label.Size = new Size(132, 30);
             label.TextAlign = ContentAlignment.MiddleLeft;
-            label.Font = new Font("맑은 고딕", 9.5F, FontStyle.Bold);
+            label.Font = OviaFluentTheme.FontKorean(9.5F, FontStyle.Bold);
             label.BackColor = Color.White;
             statusPanel.Controls.Add(label);
 
@@ -223,7 +298,7 @@ namespace OVIA.Desktop
                 return;
             }
 
-            int x = Math.Max(760, commandBar.ClientSize.Width - statusPanel.Width - 34);
+            int x = Math.Max(900, commandBar.ClientSize.Width - statusPanel.Width - 34);
             statusPanel.Location = new Point(x, 10);
         }
 
@@ -262,12 +337,13 @@ namespace OVIA.Desktop
             }
         }
 
-        private static OviaMenuButton AddMenu(Control parent, string text, int left, bool selected, Action<Control> action)
+        private static OviaMenuButton AddMenu(Control parent, string text, string iconText, int left, int width, bool selected, Action<Control> action)
         {
             OviaMenuButton menu = new OviaMenuButton();
             menu.Text = text;
-            menu.Location = new Point(left, 10);
-            menu.Size = new Size(text.Length > 7 ? 122 : 92, 30);
+            menu.IconText = iconText;
+            menu.Location = new Point(left, 6);
+            menu.Size = new Size(width, 38);
             menu.Selected = selected;
             menu.Click += delegate
             {
@@ -278,6 +354,343 @@ namespace OVIA.Desktop
             };
             parent.Controls.Add(menu);
             return menu;
+        }
+    }
+
+    internal class OviaAnimatedDropDownMenu : Panel, IMessageFilter
+    {
+        private readonly Timer animationTimer;
+        private readonly int itemHeight = 38;
+        private readonly int verticalPadding = 8;
+        private readonly int menuWidth = 226;
+        private int targetHeight;
+        private bool opening;
+        private Control anchorControl;
+        private bool filterAttached;
+
+        public event EventHandler Closed;
+
+        public OviaAnimatedDropDownMenu()
+        {
+            this.SetStyle(ControlStyles.UserPaint, true);
+            this.SetStyle(ControlStyles.AllPaintingInWmPaint, true);
+            this.SetStyle(ControlStyles.OptimizedDoubleBuffer, true);
+            this.SetStyle(ControlStyles.ResizeRedraw, true);
+            this.DoubleBuffered = true;
+            this.BackColor = Color.White;
+            this.Visible = false;
+            this.Size = new Size(menuWidth, 0);
+            this.Padding = new Padding(6, verticalPadding, 6, verticalPadding);
+
+            animationTimer = new Timer();
+            animationTimer.Interval = 12;
+            animationTimer.Tick += AnimationTimer_Tick;
+        }
+
+        public void AddItem(string text, string iconText, Action action)
+        {
+            OviaDropDownMenuItem item = new OviaDropDownMenuItem();
+            item.Text = text;
+            item.IconText = iconText;
+            item.Action = action;
+            item.Size = new Size(menuWidth - 12, itemHeight);
+            item.Location = new Point(6, verticalPadding + this.Controls.Count * itemHeight);
+            this.Controls.Add(item);
+
+            targetHeight = verticalPadding * 2 + this.Controls.Count * itemHeight;
+        }
+
+        public void ShowBelow(Control anchor)
+        {
+            if (anchor == null || anchor.FindForm() == null)
+            {
+                return;
+            }
+
+            anchorControl = anchor;
+            Form form = anchor.FindForm();
+
+            if (this.Parent != form)
+            {
+                if (this.Parent != null)
+                {
+                    this.Parent.Controls.Remove(this);
+                }
+
+                form.Controls.Add(this);
+            }
+
+            Point screenPoint = anchor.PointToScreen(new Point(0, anchor.Height + 4));
+            Point formPoint = form.PointToClient(screenPoint);
+            int left = formPoint.X;
+
+            if (left + menuWidth > form.ClientSize.Width - 12)
+            {
+                left = Math.Max(12, form.ClientSize.Width - menuWidth - 12);
+            }
+
+            this.Location = new Point(left, formPoint.Y);
+            this.Width = menuWidth;
+            this.Height = 0;
+            this.Visible = true;
+            this.BringToFront();
+
+            ApplyRoundedRegion();
+            AttachFilter();
+
+            opening = true;
+            animationTimer.Start();
+        }
+
+        public void CloseAnimated()
+        {
+            if (this.IsDisposed)
+            {
+                return;
+            }
+
+            opening = false;
+            animationTimer.Start();
+        }
+
+        public void CloseImmediate()
+        {
+            animationTimer.Stop();
+            DetachFilter();
+            this.Visible = false;
+            OnClosed();
+        }
+
+        private void AnimationTimer_Tick(object sender, EventArgs e)
+        {
+            int step = 22;
+
+            if (opening)
+            {
+                this.Height = Math.Min(targetHeight, this.Height + step);
+                ApplyRoundedRegion();
+
+                if (this.Height >= targetHeight)
+                {
+                    animationTimer.Stop();
+                    this.Height = targetHeight;
+                    ApplyRoundedRegion();
+                }
+            }
+            else
+            {
+                this.Height = Math.Max(0, this.Height - step);
+                ApplyRoundedRegion();
+
+                if (this.Height <= 0)
+                {
+                    animationTimer.Stop();
+                    DetachFilter();
+                    this.Visible = false;
+                    OnClosed();
+                }
+            }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            Rectangle rect = new Rectangle(0, 0, Math.Max(1, this.Width - 1), Math.Max(1, this.Height - 1));
+
+            using (GraphicsPath path = MainDrawHelper.RoundRect(rect, 7))
+            {
+                using (SolidBrush fill = new SolidBrush(Color.White))
+                {
+                    e.Graphics.FillPath(fill, path);
+                }
+
+                using (Pen border = new Pen(Color.FromArgb(218, 223, 230), 1))
+                {
+                    e.Graphics.DrawPath(border, path);
+                }
+            }
+
+            base.OnPaint(e);
+        }
+
+        protected override void OnResize(EventArgs eventargs)
+        {
+            base.OnResize(eventargs);
+            ApplyRoundedRegion();
+        }
+
+        private void ApplyRoundedRegion()
+        {
+            if (this.Width <= 0 || this.Height <= 0)
+            {
+                return;
+            }
+
+            Rectangle rect = new Rectangle(0, 0, this.Width, this.Height);
+            using (GraphicsPath path = MainDrawHelper.RoundRect(rect, 7))
+            {
+                this.Region = new Region(path);
+            }
+        }
+
+        private void AttachFilter()
+        {
+            if (!filterAttached)
+            {
+                Application.AddMessageFilter(this);
+                filterAttached = true;
+            }
+        }
+
+        private void DetachFilter()
+        {
+            if (filterAttached)
+            {
+                Application.RemoveMessageFilter(this);
+                filterAttached = false;
+            }
+        }
+
+        public bool PreFilterMessage(ref Message m)
+        {
+            const int WmLButtonDown = 0x0201;
+            const int WmRButtonDown = 0x0204;
+            const int WmMButtonDown = 0x0207;
+
+            if (m.Msg != WmLButtonDown && m.Msg != WmRButtonDown && m.Msg != WmMButtonDown)
+            {
+                return false;
+            }
+
+            if (!this.Visible)
+            {
+                return false;
+            }
+
+            Point mouse = Control.MousePosition;
+            Rectangle menuRect = this.RectangleToScreen(this.ClientRectangle);
+            Rectangle anchorRect = anchorControl == null
+                ? Rectangle.Empty
+                : anchorControl.RectangleToScreen(anchorControl.ClientRectangle);
+
+            if (!menuRect.Contains(mouse) && !anchorRect.Contains(mouse))
+            {
+                CloseAnimated();
+            }
+
+            return false;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                DetachFilter();
+
+                if (animationTimer != null)
+                {
+                    animationTimer.Dispose();
+                }
+            }
+
+            base.Dispose(disposing);
+        }
+
+        private void OnClosed()
+        {
+            EventHandler handler = Closed;
+            if (handler != null)
+            {
+                handler(this, EventArgs.Empty);
+            }
+        }
+    }
+
+    internal class OviaDropDownMenuItem : Control
+    {
+        public string IconText = "";
+        public Action Action;
+        private bool hover;
+
+        public OviaDropDownMenuItem()
+        {
+            this.SetStyle(ControlStyles.UserPaint, true);
+            this.SetStyle(ControlStyles.AllPaintingInWmPaint, true);
+            this.SetStyle(ControlStyles.OptimizedDoubleBuffer, true);
+            this.SetStyle(ControlStyles.ResizeRedraw, true);
+            this.DoubleBuffered = true;
+            this.BackColor = Color.White;
+            this.Cursor = Cursors.Hand;
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            hover = true;
+            this.Invalidate();
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            hover = false;
+            this.Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnClick(EventArgs e)
+        {
+            if (Action != null)
+            {
+                Action();
+            }
+
+            base.OnClick(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            Rectangle hoverRect = new Rectangle(4, 3, this.Width - 8, this.Height - 6);
+
+            if (hover)
+            {
+                using (GraphicsPath path = MainDrawHelper.RoundRect(hoverRect, 5))
+                using (SolidBrush fill = new SolidBrush(Color.FromArgb(243, 244, 246)))
+                {
+                    e.Graphics.FillPath(fill, path);
+                }
+            }
+
+            Color iconColor = Color.FromArgb(96, 104, 116);
+            Color textColor = OviaFluentTheme.TextPrimary;
+
+            using (Font iconFont = new Font("Segoe MDL2 Assets", 12.5F, FontStyle.Regular))
+            using (Font textFont = OviaFluentTheme.FontButton(9.2F, FontStyle.Regular))
+            {
+                Rectangle iconRect = new Rectangle(15, 0, 22, this.Height);
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    IconText,
+                    iconFont,
+                    iconRect,
+                    iconColor,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine
+                );
+
+                Rectangle textRect = new Rectangle(47, 0, this.Width - 56, this.Height);
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    this.Text,
+                    textFont,
+                    textRect,
+                    textColor,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis
+                );
+            }
+
+            base.OnPaint(e);
         }
     }
 
@@ -399,7 +812,7 @@ namespace OVIA.Desktop
             OviaFluentTheme.ApplyForm(this);
 
             this.Text = "OVIA 공사관리";
-            this.Font = OviaFluentTheme.FontKorean(9F, FontStyle.Regular);
+            this.Font = OviaFluentTheme.FontKorean(10F, FontStyle.Regular);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.Sizable;
             this.MaximizeBox = true;

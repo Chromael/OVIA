@@ -316,7 +316,7 @@ namespace OVIA.Desktop
                 float offsetY = inner.Top + (inner.Height - drawHeight) / 2F;
 
                 using (Pen linePen = new Pen(Color.FromArgb(38, 48, 64), 1.8F))
-                using (Font font = new Font("맑은 고딕", Math.Max(7F, 8.5F * scale), FontStyle.Regular, GraphicsUnit.Point))
+                using (Font font = OviaFluentTheme.FontKorean(Math.Max(7F, 8.5F * scale), FontStyle.Regular, GraphicsUnit.Point))
                 using (SolidBrush textBrush = new SolidBrush(Color.FromArgb(42, 83, 130)))
                 using (SolidBrush redBrush = new SolidBrush(Color.FromArgb(190, 55, 65)))
                 {
@@ -528,7 +528,7 @@ namespace OVIA.Desktop
                 float offsetX = inner.Left + (inner.Width - drawWidth) / 2F;
                 float offsetY = inner.Top + (inner.Height - drawHeight) / 2F;
 
-                using (Font font = new Font("맑은 고딕", Math.Max(7F, 8.5F * scale), FontStyle.Bold, GraphicsUnit.Point))
+                using (Font font = OviaFluentTheme.FontKorean(Math.Max(7F, 8.5F * scale), FontStyle.Bold, GraphicsUnit.Point))
                 using (SolidBrush textBrush = new SolidBrush(Color.FromArgb(20, 20, 20)))
                 {
                     int i;
@@ -588,7 +588,7 @@ namespace OVIA.Desktop
 
             using (SolidBrush back = new SolidBrush(Color.FromArgb(235, 255, 255, 255)))
             using (Pen border = new Pen(Color.FromArgb(220, 220, 220)))
-            using (Font font = new Font("맑은 고딕", 7F, FontStyle.Regular))
+            using (Font font = OviaFluentTheme.FontKorean(7F, FontStyle.Regular))
             {
                 g.FillRectangle(back, box);
                 g.DrawRectangle(border, box.Left, box.Top, box.Width - 1, box.Height - 1);
@@ -705,7 +705,7 @@ namespace OVIA.Desktop
                 message = "미등록: " + rawText.Trim();
             }
 
-            using (Font font = new Font("맑은 고딕", 8.5F, FontStyle.Regular))
+            using (Font font = OviaFluentTheme.FontKorean(8.5F, FontStyle.Regular))
             {
                 TextRenderer.DrawText(g, message, font, bounds, Color.FromArgb(135, 142, 158), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
             }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -405,7 +405,7 @@ namespace OVIA.Desktop
             MinimizeBox = false;
             ClientSize = new Size(1040, 760);
             BackColor = Color.FromArgb(246, 248, 252);
-            Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+            Font = OviaFluentTheme.FontKorean(9F, FontStyle.Regular);
 
             BuildLeftPanel();
             BuildCenterPanel();
@@ -423,13 +423,13 @@ namespace OVIA.Desktop
 
             Label codeLabel = new Label();
             codeLabel.Text = "형상코드";
-            codeLabel.Font = new Font("맑은 고딕", 14F, FontStyle.Bold);
+            codeLabel.Font = OviaFluentTheme.FontKorean(14F, FontStyle.Bold);
             codeLabel.Location = new Point(14, 14);
             codeLabel.Size = new Size(112, 30);
             left.Controls.Add(codeLabel);
 
             lblShapeCodeValue = new Label();
-            lblShapeCodeValue.Font = new Font("맑은 고딕", 14F, FontStyle.Bold);
+            lblShapeCodeValue.Font = OviaFluentTheme.FontKorean(14F, FontStyle.Bold);
             lblShapeCodeValue.TextAlign = ContentAlignment.MiddleLeft;
             lblShapeCodeValue.Location = new Point(142, 14);
             lblShapeCodeValue.Size = new Size(92, 30);
@@ -454,7 +454,7 @@ namespace OVIA.Desktop
             Label totalTitle = new Label();
             totalTitle.Text = "합계 길이";
             totalTitle.ForeColor = Color.Firebrick;
-            totalTitle.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
+            totalTitle.Font = OviaFluentTheme.FontKorean(9F, FontStyle.Bold);
             totalTitle.Location = new Point(18, 190);
             totalTitle.Size = new Size(70, 22);
             left.Controls.Add(totalTitle);
@@ -464,7 +464,7 @@ namespace OVIA.Desktop
             lblTotalLength.TextAlign = ContentAlignment.MiddleRight;
             lblTotalLength.BackColor = Color.White;
             lblTotalLength.BorderStyle = BorderStyle.FixedSingle;
-            lblTotalLength.Font = new Font("맑은 고딕", 12F, FontStyle.Bold);
+            lblTotalLength.Font = OviaFluentTheme.FontKorean(12F, FontStyle.Bold);
             lblTotalLength.Location = new Point(92, 186);
             lblTotalLength.Size = new Size(150, 30);
             left.Controls.Add(lblTotalLength);

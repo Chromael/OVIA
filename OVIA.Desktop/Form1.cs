@@ -39,7 +39,7 @@ namespace OVIA.Desktop
             this.Controls.Clear();
 
             this.Text				= "OVIA";
-            this.Font				= OviaFluentTheme.FontKorean(9F, FontStyle.Regular);
+            this.Font				= OviaFluentTheme.FontBrand(9F, FontStyle.Regular);
             this.StartPosition		= FormStartPosition.CenterScreen;
             this.FormBorderStyle	= FormBorderStyle.FixedSingle;
             this.MaximizeBox		= false;
@@ -77,7 +77,7 @@ namespace OVIA.Desktop
             Label slogan			= new Label();
             slogan.Text				= "Operation · Value · Intelligence · Automation";
             slogan.AutoSize			= true;
-            slogan.Font				= OviaFluentTheme.FontUI(11F, FontStyle.Regular);
+            slogan.Font				= OviaFluentTheme.FontBrand(11F, FontStyle.Regular);
             slogan.ForeColor		= TextDark;
             slogan.BackColor		= SurfaceColor;
             slogan.Location			= new Point(78, 260);
@@ -87,7 +87,7 @@ namespace OVIA.Desktop
             desc.Text				= "엔지니어링과 데이터를 연결하여\r\n더 스마트한 의사결정과 효율적인 협업을 실현합니다.";
             desc.AutoSize			= false;
             desc.Size				= new Size(390, 60);
-            desc.Font				= new Font("맑은 고딕", 10F, FontStyle.Regular);
+            desc.Font				= OviaFluentTheme.FontBrand(10F, FontStyle.Regular);
             desc.ForeColor			= TextSub;
             desc.BackColor			= SurfaceColor;
             desc.Location			= new Point(78, 305);
@@ -114,7 +114,7 @@ namespace OVIA.Desktop
             Label title			= new Label();
             title.Text				= "LOGIN";
             title.AutoSize			= true;
-            title.Font				= OviaFluentTheme.FontKorean(19F, FontStyle.Bold);
+            title.Font				= OviaFluentTheme.FontTitle(19F, FontStyle.Bold);
             title.ForeColor			= TextDark;
             title.BackColor			= Color.White;
             title.Location			= new Point(55, 42);
@@ -123,7 +123,7 @@ namespace OVIA.Desktop
             Label sub				= new Label();
             sub.Text				= "계정정보를 입력하고 로그인하세요.";
             sub.AutoSize			= true;
-            sub.Font				= new Font("맑은 고딕", 10F, FontStyle.Regular);
+            sub.Font				= OviaFluentTheme.FontBrand(10F, FontStyle.Regular);
             sub.ForeColor			= TextSub;
             sub.BackColor			= Color.White;
             sub.Location			= new Point(57, 86);
@@ -136,7 +136,7 @@ namespace OVIA.Desktop
             chkSaveId				= new CheckBox();
             chkSaveId.Text			= "아이디 저장";
             chkSaveId.AutoSize		= true;
-            chkSaveId.Font			= new Font("맑은 고딕", 10F, FontStyle.Regular);
+            chkSaveId.Font			= OviaFluentTheme.FontInput(10F, FontStyle.Regular);
             chkSaveId.ForeColor		= TextDark;
             chkSaveId.BackColor		= Color.White;
             OviaFluentTheme.ApplyCheckBox(chkSaveId);
@@ -153,7 +153,7 @@ namespace OVIA.Desktop
             btnClose.TextColor		= OviaFluentTheme.TextPrimary;
             btnClose.SurfaceColor	= Color.White;
             btnClose.Radius			= 6;
-            btnClose.Font			= new Font("맑은 고딕", 11F, FontStyle.Bold);
+            btnClose.Font			= OviaFluentTheme.FontButton(11F, FontStyle.Bold);
             btnClose.Click			+= delegate { this.Close(); };
             card.Controls.Add(btnClose);
 
@@ -167,7 +167,7 @@ namespace OVIA.Desktop
             btnLogin.TextColor		= Color.White;
             btnLogin.SurfaceColor	= Color.White;
             btnLogin.Radius			= 6;
-            btnLogin.Font			= new Font("맑은 고딕", 12F, FontStyle.Bold);
+            btnLogin.Font			= OviaFluentTheme.FontButton(12F, FontStyle.Bold);
             btnLogin.Click			+= BtnLogin_Click;
             card.Controls.Add(btnLogin);
 
@@ -180,7 +180,7 @@ namespace OVIA.Desktop
             Label info				= new Label();
             info.Text				= "ⓘ  승인된 사용자만 로그인할 수 있습니다.";
             info.AutoSize			= true;
-            info.Font				= new Font("맑은 고딕", 9F, FontStyle.Regular);
+            info.Font				= OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
             info.ForeColor			= TextSub;
             info.BackColor			= Color.White;
             info.Location			= new Point(58, 526);
@@ -192,7 +192,7 @@ namespace OVIA.Desktop
             Label label				= new Label();
             label.Text				= labelText;
             label.AutoSize			= true;
-            label.Font				= new Font("맑은 고딕", 10F, FontStyle.Bold);
+            label.Font				= OviaFluentTheme.FontBrand(10F, FontStyle.Bold);
             label.ForeColor			= TextDark;
             label.BackColor			= Color.White;
             label.Location			= new Point(x, y);
@@ -320,7 +320,7 @@ namespace OVIA.Desktop
             LinkLabel copyright		= new LinkLabel();
             copyright.Text			= "© 2026 CELMON. All rights reserved.";
             copyright.AutoSize		= true;
-            copyright.Font			= OviaFluentTheme.FontUI(9F, FontStyle.Regular);
+            copyright.Font			= OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
             copyright.LinkColor		= TextSub;
             copyright.ActiveLinkColor	= OviaFluentTheme.Accent;
             copyright.VisitedLinkColor	= TextSub;
@@ -335,7 +335,7 @@ namespace OVIA.Desktop
             Label version			= new Label();
             version.Text			= "Version 1.0.0";
             version.AutoSize		= true;
-            version.Font			= OviaFluentTheme.FontUI(9F, FontStyle.Regular);
+            version.Font			= OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
             version.ForeColor		= TextSub;
             version.BackColor		= SurfaceColor;
             version.Location		= new Point(900, 642);
@@ -498,7 +498,7 @@ namespace OVIA.Desktop
 
             innerTextBox = new TextBox();
             innerTextBox.BorderStyle = BorderStyle.None;
-            innerTextBox.Font = new Font("맑은 고딕", 10.5F, FontStyle.Regular);
+            innerTextBox.Font = OviaFluentTheme.FontInput(10.5F, FontStyle.Regular);
             innerTextBox.Location = new Point(18, 14);
             innerTextBox.Width = 350;
             innerTextBox.BackColor = Color.White;
@@ -872,7 +872,7 @@ namespace OVIA.Desktop
             RectangleF symbolRect = new RectangleF(0, 15, 82, 82);
             OviaSymbolMark.Draw(g, symbolRect);
 
-            using (Font wordFont = new Font("Segoe UI", 40F, FontStyle.Bold))
+            using (Font wordFont = OviaFluentTheme.FontBrand(40F, FontStyle.Bold))
             {
                 using (SolidBrush textBrush = new SolidBrush(OviaFluentTheme.Accent))
                 {

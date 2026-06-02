@@ -537,7 +537,7 @@ namespace OVIA.Desktop
             TextRenderer.DrawText(
                 e.Graphics,
                 this.Text,
-                new Font("맑은 고딕", 9F, FontStyle.Bold),
+                OviaFluentTheme.FontKorean(9F, FontStyle.Bold),
                 rect,
                 Color.White,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter

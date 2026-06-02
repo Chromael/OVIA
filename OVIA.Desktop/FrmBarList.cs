@@ -140,7 +140,7 @@ namespace OVIA.Desktop
             OviaFluentTheme.ApplyForm(this);
 
             this.Text = "OVIA " + GetScreenTitleText();
-            this.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+            this.Font = OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.Sizable;
             this.MaximizeBox = true;
@@ -702,7 +702,7 @@ namespace OVIA.Desktop
             lblProjectTitle = new Label();
             lblProjectTitle.Text = GetProjectTitleText();
             lblProjectTitle.AutoSize = true;
-            lblProjectTitle.Font = OviaFluentTheme.FontKorean(14F, FontStyle.Bold);
+            lblProjectTitle.Font = OviaFluentTheme.FontTitle(14F, FontStyle.Bold);
             lblProjectTitle.ForeColor = TextDark;
             lblProjectTitle.BackColor = Color.White;
             lblProjectTitle.Location = new Point(22, 13);
@@ -871,7 +871,7 @@ namespace OVIA.Desktop
             Label titleLabel = new Label();
             titleLabel.Text = title;
             titleLabel.AutoSize = true;
-            titleLabel.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
+            titleLabel.Font = OviaFluentTheme.FontTitle(9F, FontStyle.Bold);
             titleLabel.ForeColor = TextSub;
             titleLabel.BackColor = Color.White;
             titleLabel.Location = new Point(18, 14);
@@ -880,7 +880,7 @@ namespace OVIA.Desktop
             valueLabel = new Label();
             valueLabel.Text = value;
             valueLabel.AutoSize = true;
-            valueLabel.Font = new Font("맑은 고딕", 18F, FontStyle.Bold);
+            valueLabel.Font = OviaFluentTheme.FontTitle(18F, FontStyle.Bold);
             valueLabel.ForeColor = TextDark;
             valueLabel.BackColor = Color.White;
             valueLabel.Location = new Point(16, 36);
@@ -909,7 +909,7 @@ namespace OVIA.Desktop
             grid.RowHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             grid.RowHeadersDefaultCellStyle.BackColor = OviaFluentTheme.HeaderBackground;
             grid.RowHeadersDefaultCellStyle.ForeColor = TextSub;
-            grid.RowHeadersDefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(8.5F), FontStyle.Regular);
+            grid.RowHeadersDefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(8.2F), FontStyle.Regular);
             grid.EditMode = DataGridViewEditMode.EditProgrammatically;
             grid.CellBeginEdit += Grid_CellBeginEdit;
             grid.CellEndEdit += Grid_CellEndEdit;
@@ -930,11 +930,11 @@ namespace OVIA.Desktop
             grid.EnableHeadersVisualStyles = false;
             grid.ColumnHeadersDefaultCellStyle.BackColor = OviaFluentTheme.HeaderBackground;
             grid.ColumnHeadersDefaultCellStyle.ForeColor = TextDark;
-            grid.ColumnHeadersDefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(9F), FontStyle.Bold);
+            grid.ColumnHeadersDefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(8.7F), FontStyle.Bold);
             grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             grid.ColumnHeadersHeight = ScaleGridSize(GridBaseHeaderHeight);
 
-            grid.DefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(9F), FontStyle.Regular);
+            grid.DefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(8.7F), FontStyle.Regular);
             grid.DefaultCellStyle.ForeColor = TextDark;
             grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(255, 248, 205);
             grid.DefaultCellStyle.SelectionForeColor = TextDark;
@@ -1063,7 +1063,7 @@ namespace OVIA.Desktop
             Label footer = new Label();
             footer.Text = "※ 불러온 내용은 반드시 검토 후 저장해야 공사별 BarList에 반영됩니다.";
             footer.AutoSize = true;
-            footer.Font = new Font("맑은 고딕", 8.5F, FontStyle.Bold);
+            footer.Font = OviaFluentTheme.FontStatus(8.0F, FontStyle.Bold);
             footer.ForeColor = OviaFluentTheme.Danger;
             footer.BackColor = SurfaceColor;
             footer.Location = new Point(590, 700);
@@ -1926,9 +1926,9 @@ namespace OVIA.Desktop
             {
                 grid.RowHeadersWidth = ScaleGridSize(GridBaseRowHeaderWidth);
                 grid.ColumnHeadersHeight = ScaleGridSize(GridBaseHeaderHeight);
-                grid.ColumnHeadersDefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(9F), FontStyle.Bold);
-                grid.DefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(9F), FontStyle.Regular);
-                grid.RowHeadersDefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(8.5F), FontStyle.Regular);
+                grid.ColumnHeadersDefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(8.7F), FontStyle.Bold);
+                grid.DefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(8.7F), FontStyle.Regular);
+                grid.RowHeadersDefaultCellStyle.Font = new Font("맑은 고딕", ScaleGridFont(8.2F), FontStyle.Regular);
                 ApplyGridColumnStyle();
             }
             finally
@@ -5137,7 +5137,7 @@ namespace OVIA.Desktop
         private OviaTextReplaceDialog(string title, string guide, string defaultValue)
         {
             this.Text = title;
-            this.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+            this.Font = OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
@@ -5975,7 +5975,7 @@ namespace OVIA.Desktop
             TextRenderer.DrawText(
                 e.Graphics,
                 this.Text,
-                new Font("맑은 고딕", 9F, FontStyle.Bold),
+                OviaFluentTheme.FontButton(9F, FontStyle.Bold),
                 rect,
                 Color.White,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter

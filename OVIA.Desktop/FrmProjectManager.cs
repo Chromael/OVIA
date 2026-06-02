@@ -52,7 +52,7 @@ namespace OVIA.Desktop
             OviaFluentTheme.ApplyForm(this);
 
             this.Text = "OVIA 공사관리";
-            this.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+            this.Font = OviaFluentTheme.FontKorean(10F, FontStyle.Regular);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.Sizable;
             this.MaximizeBox = true;
@@ -281,7 +281,7 @@ namespace OVIA.Desktop
             textBox.Text = NormalizeCopyPath(pathText);
             textBox.ReadOnly = true;
             textBox.BorderStyle = BorderStyle.None;
-            textBox.Font = new Font("맑은 고딕", 9.5F, FontStyle.Regular);
+            textBox.Font = OviaFluentTheme.FontKorean(10F, FontStyle.Regular);
             textBox.ForeColor = Color.Black;
             textBox.BackColor = Color.White;
             textBox.Location = new Point(10, 7);
@@ -407,7 +407,7 @@ namespace OVIA.Desktop
             label.Size = new Size(880, 22);
             label.Location = new Point(10, 6);
             label.TextAlign = ContentAlignment.MiddleLeft;
-            label.Font = new Font("맑은 고딕", 9.5F, FontStyle.Regular);
+            label.Font = OviaFluentTheme.FontKorean(10F, FontStyle.Regular);
             label.BackColor = Color.White;
             label.ForeColor = Color.Black;
             label.LinkColor = Color.Black;
@@ -495,7 +495,7 @@ namespace OVIA.Desktop
             using (SolidBrush fillBrush = new SolidBrush(Color.White))
             using (Pen pen = new Pen(lineColor, 1.2F))
             using (SolidBrush textBrush = new SolidBrush(textColor))
-            using (Font font = new Font("맑은 고딕", 9F, FontStyle.Bold))
+            using (Font font = OviaFluentTheme.FontKorean(10F, FontStyle.Bold))
             using (StringFormat format = new StringFormat())
             {
                 format.Alignment = StringAlignment.Center;
@@ -519,7 +519,7 @@ namespace OVIA.Desktop
             Label searchLabel = new Label();
             searchLabel.Text = "공사 검색";
             searchLabel.AutoSize = true;
-            searchLabel.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
+            searchLabel.Font = OviaFluentTheme.FontKorean(10F, FontStyle.Bold);
             searchLabel.ForeColor = TextSub;
             searchLabel.BackColor = Color.White;
             searchLabel.Location = new Point(22, 17);
@@ -528,7 +528,7 @@ namespace OVIA.Desktop
             txtSearch = new TextBox();
             txtSearch.Location = new Point(22, 44);
             txtSearch.Size = new Size(380, 23);
-            txtSearch.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+            txtSearch.Font = OviaFluentTheme.FontKorean(10F, FontStyle.Regular);
             OviaFluentTheme.ApplyTextBox(txtSearch);
             txtSearch.TextChanged += Filter_Changed;
             card.Controls.Add(txtSearch);
@@ -536,7 +536,7 @@ namespace OVIA.Desktop
             Label sortLabel = new Label();
             sortLabel.Text = "정렬";
             sortLabel.AutoSize = true;
-            sortLabel.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
+            sortLabel.Font = OviaFluentTheme.FontKorean(10F, FontStyle.Bold);
             sortLabel.ForeColor = TextSub;
             sortLabel.BackColor = Color.White;
             sortLabel.Location = new Point(430, 17);
@@ -558,7 +558,7 @@ namespace OVIA.Desktop
             chkIncludeDone = new CheckBox();
             chkIncludeDone.Text = "완료공사 포함";
             chkIncludeDone.AutoSize = true;
-            chkIncludeDone.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+            chkIncludeDone.Font = OviaFluentTheme.FontKorean(10F, FontStyle.Regular);
             chkIncludeDone.ForeColor = TextDark;
             chkIncludeDone.BackColor = Color.White;
             OviaFluentTheme.ApplyCheckBox(chkIncludeDone);
@@ -601,11 +601,11 @@ namespace OVIA.Desktop
             grid.EnableHeadersVisualStyles = false;
             grid.ColumnHeadersDefaultCellStyle.BackColor = OviaFluentTheme.HeaderBackground;
             grid.ColumnHeadersDefaultCellStyle.ForeColor = TextDark;
-            grid.ColumnHeadersDefaultCellStyle.Font = new Font("맑은 고딕", 9F, FontStyle.Bold);
+            grid.ColumnHeadersDefaultCellStyle.Font = OviaFluentTheme.FontData(8.7F, FontStyle.Bold);
             grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
             grid.ColumnHeadersHeight = 34;
 
-            grid.DefaultCellStyle.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
+            grid.DefaultCellStyle.Font = OviaFluentTheme.FontData(8.5F, FontStyle.Regular);
             grid.DefaultCellStyle.ForeColor = TextDark;
             grid.DefaultCellStyle.SelectionBackColor = OviaFluentTheme.AccentLight;
             grid.DefaultCellStyle.SelectionForeColor = TextDark;
@@ -677,7 +677,7 @@ namespace OVIA.Desktop
             lblStatus = new Label();
             lblStatus.Text = "※ 현재 공사 목록은 임시 샘플입니다. 추후 셀먼 ERP/API에서 거래처와 공사 정보를 불러옵니다.";
             lblStatus.AutoSize = true;
-            lblStatus.Font = new Font("맑은 고딕", 8.5F, FontStyle.Regular);
+            lblStatus.Font = OviaFluentTheme.FontStatus(8.7F, FontStyle.Regular);
             lblStatus.ForeColor = TextSub;
             lblStatus.BackColor = SurfaceColor;
             lblStatus.Location = new Point(38, 655);
@@ -1057,7 +1057,7 @@ namespace OVIA.Desktop
             TextRenderer.DrawText(
                 e.Graphics,
                 this.Text,
-                new Font("맑은 고딕", 9F, FontStyle.Bold),
+                OviaFluentTheme.FontButton(10F, FontStyle.Bold),
                 rect,
                 Color.White,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter

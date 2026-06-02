@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -174,7 +174,7 @@ namespace OVIA.Desktop
                             {
                                 float textFontPx = GetElementFontPixelSize(element, scale, defaultFontPx);
 
-                                using (Font font = new Font("맑은 고딕", textFontPx, FontStyle.Regular, GraphicsUnit.Pixel))
+                                using (Font font = OviaFluentTheme.FontKorean(textFontPx, FontStyle.Regular, GraphicsUnit.Pixel))
                                 {
                                     DrawReadableText(g, text, font, textBrush, element, data.Elements, drawArea, offsetX, offsetY, scale);
                                 }
@@ -612,7 +612,7 @@ namespace OVIA.Desktop
         private void DrawEmpty(Graphics g, Rectangle inner, string text)
         {
             using (SolidBrush brush = new SolidBrush(Color.FromArgb(130, 135, 145)))
-            using (Font font = new Font("맑은 고딕", 8F, FontStyle.Regular, GraphicsUnit.Point))
+            using (Font font = OviaFluentTheme.FontKorean(8F, FontStyle.Regular, GraphicsUnit.Point))
             {
                 SizeF size = g.MeasureString(text, font);
                 g.DrawString(text, font, brush, inner.Left + (inner.Width - size.Width) / 2F, inner.Top + (inner.Height - size.Height) / 2F);

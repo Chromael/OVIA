@@ -72,6 +72,7 @@
     <Compile Include="Services\RebarShapeRenderer.cs" />
     <Compile Include="Services\CadShapeRenderer.cs" />
     <Compile Include="Services\OviaEnvironmentChecker.cs" />
+    <Compile Include="Services\OviaFontManager.cs" />
     <Compile Include="Controls\RebarShapePreviewControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
@@ -103,6 +104,7 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="OviaFluentTheme.cs" />
+    <Compile Include="OviaShared_Store_UI.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="Properties\Resources.resx">
@@ -126,6 +128,18 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
+    <Content Include="Assets\Fonts\README.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Assets\Fonts\LICENSE.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Assets\Fonts\*.otf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Assets\Fonts\*.ttf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Include="Data\Mapping\barlist_mapping.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
