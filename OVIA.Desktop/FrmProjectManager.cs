@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
+using OVIA.Desktop.Controls;
 
 namespace OVIA.Desktop
 {
@@ -198,60 +199,18 @@ namespace OVIA.Desktop
 
         private void BuildExplorerHeader(Control parent, string pathText)
         {
-            Panel bar = new Panel();
-            bar.Location = new Point(34, 8);
-            bar.Size = new Size(Math.Max(1, parent.ClientSize.Width - 68), 32);
-            bar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            bar.BackColor = SurfaceColor;
-            parent.Controls.Add(bar);
-
-            Button back = CreateExplorerButton("\uE72B", "메인(으)로 이동");
-            back.Click += delegate { NavigateToMain(); };
-            bar.Controls.Add(back);
-
-            Button forward = CreateExplorerButton("\uE72A", "앞으로");
-            forward.Location = new Point(36, 0);
-            StyleExplorerButtonInactive(forward);
-            bar.Controls.Add(forward);
-
-            Button up = CreateExplorerButton("\uE74A", "메인(으)로 이동");
-            up.Location = new Point(72, 0);
-            up.Click += delegate { NavigateToMain(); };
-            bar.Controls.Add(up);
-
-            Button refresh = CreateExplorerButton("\uE72C", "새로고침");
-            refresh.Location = new Point(108, 0);
-            refresh.Click += delegate
-            {
-                BindProjects();
-            };
-            bar.Controls.Add(refresh);
-
-            Panel addressBar = CreatePathAddressBar(pathText);
-            addressBar.Location = new Point(152, 0);
-            addressBar.Size = new Size(Math.Max(1, bar.ClientSize.Width - 188), 32);
-            addressBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            bar.Controls.Add(addressBar);
-
-            Button logout = CreateExplorerButton("\uE7E8", "로그아웃");
-            logout.Location = new Point(Math.Max(152, bar.ClientSize.Width - 30), 0);
-            logout.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            logout.Click += delegate { RequestLogout(); };
-            bar.Controls.Add(logout);
-
-            bar.Resize += delegate
-            {
-                addressBar.Width = Math.Max(1, bar.ClientSize.Width - 188);
-                logout.Location = new Point(Math.Max(152, bar.ClientSize.Width - 30), 0);
-            };
-
-            parent.Resize += delegate
-            {
-                bar.Width = Math.Max(1, parent.ClientSize.Width - 68);
-                addressBar.Width = Math.Max(1, bar.ClientSize.Width - 188);
-                logout.Location = new Point(Math.Max(152, bar.ClientSize.Width - 30), 0);
-            };
+            OviaWorkspaceHeader.AddTo(
+                parent,
+                pathText,
+                delegate { NavigateToMain(); },
+                delegate { NavigateToMain(); },
+                delegate { BindProjects(); },
+                delegate { RequestLogout(); },
+                true,
+                true
+            );
         }
+
 
         private Panel CreatePathAddressBar(string pathText)
         {
@@ -384,6 +343,66 @@ namespace OVIA.Desktop
             }
 
             return button;
+        }
+
+        private void StyleExplorerLogoutButton(Button button)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.UseVisualStyleBackColor = false;
+            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(220, 53, 69);
+            button.FlatAppearance.MouseDownBackColor = Color.FromArgb(185, 28, 28);
+            button.BackColor = SurfaceColor;
+            button.ForeColor = Color.Black;
+
+            button.MouseEnter += delegate
+            {
+                button.BackColor = Color.FromArgb(220, 53, 69);
+                button.ForeColor = Color.White;
+            };
+
+            button.MouseLeave += delegate
+            {
+                button.BackColor = SurfaceColor;
+                button.ForeColor = Color.Black;
+            };
+
+            button.SizeChanged += delegate
+            {
+                ApplyExplorerButtonRadius(button, 2);
+            };
+
+            ApplyExplorerButtonRadius(button, 2);
+        }
+
+        private void ApplyExplorerButtonRadius(Button button, int radius)
+        {
+            if (button == null || button.Width <= 0 || button.Height <= 0)
+            {
+                return;
+            }
+
+            int diameter = Math.Max(1, radius * 2);
+            Rectangle rect = new Rectangle(0, 0, button.Width, button.Height);
+            GraphicsPath path = new GraphicsPath();
+
+            path.AddArc(rect.Left, rect.Top, diameter, diameter, 180, 90);
+            path.AddArc(rect.Right - diameter - 1, rect.Top, diameter, diameter, 270, 90);
+            path.AddArc(rect.Right - diameter - 1, rect.Bottom - diameter - 1, diameter, diameter, 0, 90);
+            path.AddArc(rect.Left, rect.Bottom - diameter - 1, diameter, diameter, 90, 90);
+            path.CloseFigure();
+
+            Region oldRegion = button.Region;
+            button.Region = new Region(path);
+            path.Dispose();
+
+            if (oldRegion != null)
+            {
+                oldRegion.Dispose();
+            }
         }
 
         private void StyleExplorerButtonInactive(Button button)
@@ -674,16 +693,14 @@ namespace OVIA.Desktop
 
         private void BuildFooter(Control parent)
         {
-            lblStatus = new Label();
-            lblStatus.Text = "※ 현재 공사 목록은 임시 샘플입니다. 추후 셀먼 ERP/API에서 거래처와 공사 정보를 불러옵니다.";
-            lblStatus.AutoSize = true;
-            lblStatus.Font = OviaFluentTheme.FontStatus(8.7F, FontStyle.Regular);
-            lblStatus.ForeColor = TextSub;
-            lblStatus.BackColor = SurfaceColor;
-            lblStatus.Location = new Point(38, 655);
-            lblStatus.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
-            parent.Controls.Add(lblStatus);
+            lblStatus = OviaWorkspaceStatusLabel.Create(
+                parent,
+                "※ 현재 공사 목록은 임시 샘플입니다. 추후 셀먼 ERP/API에서 거래처와 공사 정보를 불러옵니다.",
+                38,
+                655
+            );
         }
+
 
         private void BuildCommandBar(Control parent)
         {

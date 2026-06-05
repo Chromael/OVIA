@@ -9,6 +9,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
+using OVIA.Desktop.Controls;
 using Microsoft.Win32;
 
 namespace OVIA.Desktop
@@ -1088,57 +1089,18 @@ namespace OVIA.Desktop
 
         private void BuildDashboardExplorerHeader(Control parent)
         {
-            Panel bar = new Panel();
-            bar.Location = new Point(34, 8);
-            bar.Size = new Size(Math.Max(1, parent.ClientSize.Width - 68), 32);
-            bar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            bar.BackColor = SurfaceColor;
-            parent.Controls.Add(bar);
-
-            Button back = CreateExplorerButton("\uE72B", "뒤로");
-            StyleExplorerButtonInactive(back);
-            bar.Controls.Add(back);
-
-            Button forward = CreateExplorerButton("\uE72A", "앞으로");
-            forward.Location = new Point(36, 0);
-            StyleExplorerButtonInactive(forward);
-            bar.Controls.Add(forward);
-
-            Button up = CreateExplorerButton("\uE74A", "위로");
-            up.Location = new Point(72, 0);
-            StyleExplorerButtonInactive(up);
-            bar.Controls.Add(up);
-
-            Button refresh = CreateExplorerButton("\uE72C", "새로고침");
-            refresh.Location = new Point(108, 0);
-            refresh.Click += delegate { ShowDashboard(); };
-            bar.Controls.Add(refresh);
-
-            Panel addressBar = CreateDashboardPathAddressBar();
-            addressBar.Location = new Point(152, 0);
-            addressBar.Size = new Size(Math.Max(1, bar.ClientSize.Width - 188), 32);
-            addressBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            bar.Controls.Add(addressBar);
-
-            Button logout = CreateExplorerButton("\uE7E8", "로그아웃");
-            logout.Location = new Point(Math.Max(152, bar.ClientSize.Width - 30), 0);
-            logout.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            logout.Click += delegate { RequestLogout(); };
-            bar.Controls.Add(logout);
-
-            bar.Resize += delegate
-            {
-                addressBar.Width = Math.Max(1, bar.ClientSize.Width - 188);
-                logout.Location = new Point(Math.Max(152, bar.ClientSize.Width - 30), 0);
-            };
-
-            parent.Resize += delegate
-            {
-                bar.Width = Math.Max(1, parent.ClientSize.Width - 68);
-                addressBar.Width = Math.Max(1, bar.ClientSize.Width - 188);
-                logout.Location = new Point(Math.Max(152, bar.ClientSize.Width - 30), 0);
-            };
+            OviaWorkspaceHeader.AddTo(
+                parent,
+                "메인",
+                null,
+                null,
+                delegate { ShowDashboard(); },
+                delegate { RequestLogout(); },
+                false,
+                false
+            );
         }
+
 
         private Panel CreateDashboardPathAddressBar()
         {
@@ -1211,6 +1173,66 @@ namespace OVIA.Desktop
                 windowToolTip.SetToolTip(button, tip);
             }
             return button;
+        }
+
+        private void StyleExplorerLogoutButton(Button button)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.UseVisualStyleBackColor = false;
+            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(220, 53, 69);
+            button.FlatAppearance.MouseDownBackColor = Color.FromArgb(185, 28, 28);
+            button.BackColor = SurfaceColor;
+            button.ForeColor = Color.Black;
+
+            button.MouseEnter += delegate
+            {
+                button.BackColor = Color.FromArgb(220, 53, 69);
+                button.ForeColor = Color.White;
+            };
+
+            button.MouseLeave += delegate
+            {
+                button.BackColor = SurfaceColor;
+                button.ForeColor = Color.Black;
+            };
+
+            button.SizeChanged += delegate
+            {
+                ApplyExplorerButtonRadius(button, 2);
+            };
+
+            ApplyExplorerButtonRadius(button, 2);
+        }
+
+        private void ApplyExplorerButtonRadius(Button button, int radius)
+        {
+            if (button == null || button.Width <= 0 || button.Height <= 0)
+            {
+                return;
+            }
+
+            int diameter = Math.Max(1, radius * 2);
+            Rectangle rect = new Rectangle(0, 0, button.Width, button.Height);
+            GraphicsPath path = new GraphicsPath();
+
+            path.AddArc(rect.Left, rect.Top, diameter, diameter, 180, 90);
+            path.AddArc(rect.Right - diameter - 1, rect.Top, diameter, diameter, 270, 90);
+            path.AddArc(rect.Right - diameter - 1, rect.Bottom - diameter - 1, diameter, diameter, 0, 90);
+            path.AddArc(rect.Left, rect.Bottom - diameter - 1, diameter, diameter, 90, 90);
+            path.CloseFigure();
+
+            Region oldRegion = button.Region;
+            button.Region = new Region(path);
+            path.Dispose();
+
+            if (oldRegion != null)
+            {
+                oldRegion.Dispose();
+            }
         }
 
         private void StyleExplorerButtonInactive(Button button)
