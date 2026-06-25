@@ -27,6 +27,13 @@ namespace OVIA.Desktop
         private const int HeaderDragRow = 1;
         private const int HeaderDragColumn = 2;
 
+        private enum BarListImportMode
+        {
+            Cancel,
+            Replace,
+            Append
+        }
+
         private readonly string companyId;
         private readonly string userId;
         private readonly string projectNo;
@@ -68,6 +75,9 @@ namespace OVIA.Desktop
         private int lastMappingMatchCount = 0;
         private int lastMappingTotalHeaderCount = 0;
         private string lastMappingVersion = "";
+        private Dictionary<string, RebarCalculationMismatchInfo> rebarCalculationMismatches = new Dictionary<string, RebarCalculationMismatchInfo>();
+        private bool isApplyingRebarCalculation = false;
+        private bool rebarMismatchWarningShown = false;
 
         private const int GridZoomMinPercent = 100;
         private const int GridZoomMaxPercent = 220;
@@ -81,6 +91,7 @@ namespace OVIA.Desktop
         private DateTime autoImportStartTime;
         private string lastLoadedFilePath = "";
         private bool waitingAutoCadImport = false;
+        private bool autoCadContinuousAppendMode = false;
         private bool isSaved = true;
         private bool isClosingByButton = false;
         private bool suppressUnsavedClosePrompt = false;
@@ -853,7 +864,7 @@ namespace OVIA.Desktop
             card.Controls.Add(saveProjectButton);
 
             Label guide = new Label();
-            guide.Text = "※ AutoCAD에서 OVIABOX → OVIABOXTABLE을 실행하면 새 추출 CSV를 감지해 자동 입력합니다. 반드시 확인 후 저장하세요.";
+            guide.Text = "※ AutoCAD에서 OVIABOX로 영역을 선택하면 자동 추출 CSV를 감지해 입력합니다. 다음 영역을 계속 선택하면 기존 데이터 뒤에 추가할 수 있습니다.";
             guide.AutoSize = true;
             guide.Font = new Font("맑은 고딕", 8.5F, FontStyle.Regular);
             guide.ForeColor = OviaFluentTheme.Danger;
@@ -1134,10 +1145,15 @@ namespace OVIA.Desktop
                 return;
             }
 
+            if (!CanImportIntoCurrentBarList())
+            {
+                return;
+            }
+
             StartAutoCadWatcher();
             ActivateAutoCad();
 
-            lblStatus.Text = "AutoCAD 추출 대기 중 - OVIABOX → OVIABOXTABLE 실행 후 자동 입력됩니다.";
+            lblStatus.Text = "AutoCAD 추출 대기 중 - OVIABOX로 영역을 계속 선택하면 자동 입력됩니다.";
             lblStatus.ForeColor = TextSub;
         }
 
@@ -1154,6 +1170,7 @@ namespace OVIA.Desktop
 
             autoImportStartTime = DateTime.Now.AddSeconds(-3);
             waitingAutoCadImport = true;
+            autoCadContinuousAppendMode = false;
 
             autoCadWatcher = new FileSystemWatcher();
             autoCadWatcher.Path = desktop;
@@ -1163,7 +1180,7 @@ namespace OVIA.Desktop
             autoCadWatcher.Changed += AutoCadWatcher_Changed;
             autoCadWatcher.EnableRaisingEvents = true;
 
-            lblStatus.Text = "AutoCAD 추출 대기 중 - OVIABOXTABLE 실행을 기다립니다.";
+            lblStatus.Text = "AutoCAD 추출 대기 중 - OVIABOX 영역 선택과 자동 추출 CSV를 기다립니다.";
         }
 
         private void StopAutoCadWatcher()
@@ -1176,6 +1193,8 @@ namespace OVIA.Desktop
                 autoCadWatcher.Dispose();
                 autoCadWatcher = null;
             }
+
+            autoCadContinuousAppendMode = false;
         }
 
         private void AutoCadWatcher_Changed(object sender, FileSystemEventArgs e)
@@ -1221,11 +1240,20 @@ namespace OVIA.Desktop
                 return;
             }
 
-            LoadCsv(filePath, false);
-            waitingAutoCadImport = false;
-            StopAutoCadWatcher();
+            bool loaded = LoadCsvWithImportPolicy(filePath, false);
 
-            lblStatus.Text = "AutoCAD 추출 데이터 자동 입력 완료 - 확인 후 저장하세요.";
+            if (!loaded)
+            {
+                waitingAutoCadImport = false;
+                StopAutoCadWatcher();
+                return;
+            }
+
+            autoImportStartTime = DateTime.Now;
+            waitingAutoCadImport = true;
+            autoCadContinuousAppendMode = true;
+
+            lblStatus.Text = "AutoCAD 추출 데이터 입력 완료 - 다음 영역도 OVIABOX로 계속 선택해 자동 추가할 수 있습니다.";
             lblStatus.ForeColor = TextSub;
 
             if (this.WindowState == FormWindowState.Minimized)
@@ -1320,7 +1348,7 @@ namespace OVIA.Desktop
                 return;
             }
 
-            LoadCsv(filePath, false);
+            LoadCsvWithImportPolicy(filePath, false);
         }
 
         private void OpenCsv_Click(object sender, EventArgs e)
@@ -1335,7 +1363,7 @@ namespace OVIA.Desktop
                 return;
             }
 
-            LoadCsv(dialog.FileName, false);
+            LoadCsvWithImportPolicy(dialog.FileName, false);
         }
 
         private void SaveProjectBarList_Click(object sender, EventArgs e)
@@ -1522,6 +1550,7 @@ namespace OVIA.Desktop
                 }
             }
 
+            ApplyRebarCalculationAndValidation(false);
             MarkUnsaved();
             RecalculateSummary();
             grid.Invalidate();
@@ -1540,6 +1569,12 @@ namespace OVIA.Desktop
                 return;
             }
 
+            if (IsCalculatedResultColumn(e.ColumnIndex) && !IsRebarCalculationMismatchCell(e.RowIndex, e.ColumnIndex))
+            {
+                e.Cancel = true;
+                return;
+            }
+
             cellEditBeforeSnapshot = CaptureGridState();
         }
 
@@ -1552,6 +1587,8 @@ namespace OVIA.Desktop
             }
 
             RefreshModifiedCellVisual(e.RowIndex, e.ColumnIndex);
+            UpdateImportedTotalMetaFromUserEdit(e.RowIndex, e.ColumnIndex);
+            ApplyRebarCalculationAndValidation(false);
             MarkUnsaved();
             RecalculateSummary();
         }
@@ -1576,6 +1613,17 @@ namespace OVIA.Desktop
             if (IsRebarShapeColumn(e.ColumnIndex))
             {
                 OpenShapePickerForCell(e.RowIndex, e.ColumnIndex);
+                return;
+            }
+
+            if (IsCalculatedResultColumn(e.ColumnIndex) && !IsRebarCalculationMismatchCell(e.RowIndex, e.ColumnIndex))
+            {
+                MessageBox.Show(
+                    "총길이와 총중량은 OVIA 이형철근 단위중량표 기준으로 자동 계산됩니다.\r\n\r\nCAD 원본값과 OVIA 계산값이 다른 옅은 빨강색 셀만 직접 수정할 수 있습니다.",
+                    "OVIA 자동 계산",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
                 return;
             }
 
@@ -2081,6 +2129,12 @@ namespace OVIA.Desktop
             if (IsRebarShapeColumn(e.ColumnIndex))
             {
                 PaintRebarShapeGridCell(e);
+                return;
+            }
+
+            if (IsRebarCalculationMismatchCell(e.RowIndex, e.ColumnIndex))
+            {
+                PaintRebarCalculationMismatchCell(e);
                 return;
             }
 
@@ -3508,7 +3562,335 @@ namespace OVIA.Desktop
                 || fileName.StartsWith("OVIA_GridTable_Fallback_", StringComparison.OrdinalIgnoreCase);
         }
 
-        private void LoadCsv(string filePath, bool loadAsSaved)
+        private bool LoadCsvWithImportPolicy(string filePath, bool loadAsSaved)
+        {
+            if (loadAsSaved)
+            {
+                return LoadCsv(filePath, true);
+            }
+
+            if (!CanImportIntoCurrentBarList())
+            {
+                return false;
+            }
+
+            BarListImportMode mode;
+
+            if (waitingAutoCadImport && autoCadContinuousAppendMode && HasGridData())
+            {
+                mode = BarListImportMode.Append;
+            }
+            else
+            {
+                mode = DecideImportModeForCurrentGrid();
+            }
+
+            if (mode == BarListImportMode.Cancel)
+            {
+                return false;
+            }
+
+            if (mode == BarListImportMode.Append)
+            {
+                return AppendCsv(filePath);
+            }
+
+            return LoadCsv(filePath, false);
+        }
+
+        private BarListImportMode DecideImportModeForCurrentGrid()
+        {
+            if (!HasGridData())
+            {
+                return BarListImportMode.Replace;
+            }
+
+            DialogResult result = MessageBox.Show(
+                "기존 BarList 데이터가 있습니다.\r\n\r\n" +
+                "새롭게 불러오면 현재 화면의 기존 데이터는 삭제되고 새 추출 데이터로 교체됩니다.\r\n" +
+                "기존 데이터 뒤에 이어서 추가하면 현재 행 아래로 새 추출 데이터가 계속 추가됩니다.\r\n\r\n" +
+                "[예] 새롭게 불러오기\r\n" +
+                "[아니오] 기존 데이터에 이어서 추가\r\n" +
+                "[취소] 가져오기 취소",
+                "OVIA BarList 데이터 추가 방식",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question
+            );
+
+            if (result == DialogResult.Yes)
+            {
+                return BarListImportMode.Replace;
+            }
+
+            if (result == DialogResult.No)
+            {
+                return BarListImportMode.Append;
+            }
+
+            return BarListImportMode.Cancel;
+        }
+
+        private bool CanImportIntoCurrentBarList()
+        {
+            if (HasGridData() && IsCurrentBarListImportLocked())
+            {
+                MessageBox.Show(
+                    "이미 출하가 완료되었거나 태그가 발행되었습니다.",
+                    "OVIA BarList",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+
+                lblStatus.Text = "이미 출하가 완료되었거나 태그가 발행되어 데이터를 추가할 수 없습니다.";
+                lblStatus.ForeColor = OviaFluentTheme.Danger;
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool HasGridData()
+        {
+            if (grid == null || grid.Columns.Count == 0)
+            {
+                return false;
+            }
+
+            int r;
+
+            for (r = 0; r < grid.Rows.Count; r++)
+            {
+                if (!grid.Rows[r].IsNewRow)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsCurrentBarListImportLocked()
+        {
+            if (IsBarListFileLocked(savedProjectFilePath))
+            {
+                return true;
+            }
+
+            if (txtFilePath != null && IsBarListFileLocked(txtFilePath.Text))
+            {
+                return true;
+            }
+
+            return GridContainsLockedStatus();
+        }
+
+        private bool IsBarListFileLocked(string filePath)
+        {
+            if (filePath == null || filePath.Trim() == "")
+            {
+                return false;
+            }
+
+            filePath = filePath.Trim();
+
+            if (File.Exists(filePath) && FileNameLooksLocked(filePath))
+            {
+                return true;
+            }
+
+            if (File.Exists(filePath) && CsvContainsLockedStatus(filePath))
+            {
+                return true;
+            }
+
+            string metaPath = filePath + ".ovia-meta";
+
+            if (File.Exists(metaPath) && MetaFileContainsLockedStatus(metaPath))
+            {
+                return true;
+            }
+
+            try
+            {
+                string changedMetaPath = Path.ChangeExtension(filePath, ".ovia-meta");
+
+                if (!String.Equals(metaPath, changedMetaPath, StringComparison.OrdinalIgnoreCase)
+                    && File.Exists(changedMetaPath)
+                    && MetaFileContainsLockedStatus(changedMetaPath))
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private bool FileNameLooksLocked(string filePath)
+        {
+            string name = "";
+
+            try
+            {
+                name = Path.GetFileNameWithoutExtension(filePath);
+            }
+            catch
+            {
+                name = filePath;
+            }
+
+            return ContainsLockedKeyword(name);
+        }
+
+        private bool CsvContainsLockedStatus(string filePath)
+        {
+            try
+            {
+                List<List<string>> rows = ReadCsv(filePath);
+
+                if (rows == null || rows.Count <= 1 || rows[0] == null)
+                {
+                    return false;
+                }
+
+                List<int> statusColumns = new List<int>();
+                int i;
+                int r;
+
+                for (i = 0; i < rows[0].Count; i++)
+                {
+                    string header = rows[0][i] == null ? "" : rows[0][i];
+
+                    if (ContainsAny(header, "출하", "출고", "태그", "TAG", "상태", "Status", "shipping", "shipped", "tag"))
+                    {
+                        statusColumns.Add(i);
+                    }
+                }
+
+                for (r = 1; r < rows.Count; r++)
+                {
+                    if (rows[r] == null)
+                    {
+                        continue;
+                    }
+
+                    if (statusColumns.Count > 0)
+                    {
+                        for (i = 0; i < statusColumns.Count; i++)
+                        {
+                            int columnIndex = statusColumns[i];
+
+                            if (columnIndex >= 0 && columnIndex < rows[r].Count && ContainsLockedKeyword(rows[r][columnIndex]))
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        int c;
+
+                        for (c = 0; c < rows[r].Count; c++)
+                        {
+                            if (ContainsLockedKeyword(rows[r][c]))
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private bool MetaFileContainsLockedStatus(string metaPath)
+        {
+            try
+            {
+                string text = File.ReadAllText(metaPath, Encoding.UTF8);
+                return ContainsLockedKeyword(text)
+                    || Regex.IsMatch(text, "tag\\s*issued\\s*[:=]\\s*true", RegexOptions.IgnoreCase)
+                    || Regex.IsMatch(text, "shipping\\s*done\\s*[:=]\\s*true", RegexOptions.IgnoreCase)
+                    || Regex.IsMatch(text, "shipped\\s*[:=]\\s*true", RegexOptions.IgnoreCase);
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private bool GridContainsLockedStatus()
+        {
+            if (grid == null || grid.Columns.Count == 0)
+            {
+                return false;
+            }
+
+            int r;
+            int c;
+
+            for (r = 0; r < grid.Rows.Count; r++)
+            {
+                if (grid.Rows[r].IsNewRow)
+                {
+                    continue;
+                }
+
+                for (c = 0; c < grid.Columns.Count; c++)
+                {
+                    string header = grid.Columns[c].HeaderText == null ? "" : grid.Columns[c].HeaderText;
+                    string name = grid.Columns[c].Name == null ? "" : grid.Columns[c].Name;
+
+                    if (!ContainsAny(header, "출하", "태그", "TAG", "상태", "Status")
+                        && !ContainsAny(name, "shipping", "shipped", "tag", "status"))
+                    {
+                        continue;
+                    }
+
+                    if (ContainsLockedKeyword(GetCellText(r, c)))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private bool ContainsLockedKeyword(string value)
+        {
+            if (value == null)
+            {
+                return false;
+            }
+
+            string text = value.Trim();
+
+            if (text == "")
+            {
+                return false;
+            }
+
+            string normalized = text.Replace(" ", "").Replace("_", "").Replace("-", "").ToUpperInvariant();
+
+            return normalized.IndexOf("출하완료", StringComparison.OrdinalIgnoreCase) >= 0
+                || normalized.IndexOf("출고완료", StringComparison.OrdinalIgnoreCase) >= 0
+                || normalized.IndexOf("TAG발행", StringComparison.OrdinalIgnoreCase) >= 0
+                || normalized.IndexOf("태그발행", StringComparison.OrdinalIgnoreCase) >= 0
+                || normalized.IndexOf("태그발급", StringComparison.OrdinalIgnoreCase) >= 0
+                || normalized.IndexOf("TAGISSUED", StringComparison.OrdinalIgnoreCase) >= 0
+                || normalized.IndexOf("SHIPPED", StringComparison.OrdinalIgnoreCase) >= 0
+                || normalized.IndexOf("SHIPPINGDONE", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private bool LoadCsv(string filePath, bool loadAsSaved)
         {
             try
             {
@@ -3519,10 +3901,12 @@ namespace OVIA.Desktop
                     lblStatus.Text = "CSV 파일에 읽을 데이터가 없습니다.";
                     lblStatus.ForeColor = OviaFluentTheme.Danger;
 
-                    return;
+                    return false;
                 }
 
                 BindCsvRows(rows);
+                rebarMismatchWarningShown = false;
+                ApplyRebarCalculationAndValidation(true);
                 allowExtractEditMenu = true;
                 ClearUndoRedoStates();
                 txtFilePath.Text = filePath;
@@ -3543,11 +3927,202 @@ namespace OVIA.Desktop
                     lblStatus.Text = "BarList 후보 데이터 입력 완료 - " + GetMappingSummaryText();
                     lblStatus.ForeColor = OviaFluentTheme.Danger;
                 }
+
+                return true;
             }
             catch (Exception ex)
             {
                 lblStatus.Text = "CSV 불러오기 오류 - " + ex.Message;
                 lblStatus.ForeColor = OviaFluentTheme.Danger;
+                return false;
+            }
+        }
+
+        private bool AppendCsv(string filePath)
+        {
+            try
+            {
+                List<List<string>> rows = ReadCsv(filePath);
+
+                if (rows.Count == 0)
+                {
+                    lblStatus.Text = "CSV 파일에 추가할 데이터가 없습니다.";
+                    lblStatus.ForeColor = OviaFluentTheme.Danger;
+                    return false;
+                }
+
+                if (!HasGridData())
+                {
+                    return LoadCsv(filePath, false);
+                }
+
+                AppendCsvRows(rows);
+                rebarMismatchWarningShown = false;
+                ApplyRebarCalculationAndValidation(true);
+                allowExtractEditMenu = true;
+                ClearUndoRedoStates();
+                txtFilePath.Text = filePath;
+                lastLoadedFilePath = filePath;
+                RecalculateSummary();
+                MarkUnsaved();
+                lblStatus.Text = "BarList 데이터가 기존 행 뒤에 추가되었습니다 - " + GetMappingSummaryText();
+                lblStatus.ForeColor = OviaFluentTheme.Danger;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                lblStatus.Text = "CSV 추가 입력 오류 - " + ex.Message;
+                lblStatus.ForeColor = OviaFluentTheme.Danger;
+                return false;
+            }
+        }
+
+        private void AppendCsvRows(List<List<string>> rows)
+        {
+            rows = RemoveRuntimeCsvColumnsForDisplay(rows);
+
+            if (rows == null || rows.Count == 0)
+            {
+                return;
+            }
+
+            BeginGridSelectionUpdate();
+            grid.SuspendLayout();
+
+            try
+            {
+                List<string> sourceHeaders = rows[0];
+                OviaBarListMappingStore store = GetMappingStore();
+                OviaBarListMappedTable mappedTable = store.BuildMappedTable(sourceHeaders);
+
+                lastMappingMatchCount = mappedTable.MatchedCount;
+                lastMappingTotalHeaderCount = sourceHeaders.Count;
+                lastMappingVersion = store.Version;
+
+                Dictionary<int, int> destinationColumns = EnsureMappedColumnsForAppend(mappedTable);
+                int startRowIndex = grid.Rows.Count;
+                int r;
+                int i;
+
+                for (r = 1; r < rows.Count; r++)
+                {
+                    List<string> values = rows[r];
+                    object[] cells = new object[grid.Columns.Count];
+
+                    for (i = 0; i < cells.Length; i++)
+                    {
+                        cells[i] = "";
+                    }
+
+                    for (i = 0; i < mappedTable.Columns.Count; i++)
+                    {
+                        if (!destinationColumns.ContainsKey(i))
+                        {
+                            continue;
+                        }
+
+                        int destinationIndex = destinationColumns[i];
+                        int sourceIndex = mappedTable.Columns[i].SourceIndex;
+
+                        if (sourceIndex >= 0 && sourceIndex < values.Count)
+                        {
+                            cells[destinationIndex] = values[sourceIndex];
+                        }
+                    }
+
+                    int newRowIndex = grid.Rows.Add(cells);
+                    SetRowOriginalValues(newRowIndex, cells);
+                }
+
+                ConvertAppendedWeightColumnsIfNeeded(mappedTable, destinationColumns, startRowIndex, grid.Rows.Count - 1);
+                ApplyGridColumnStyle();
+
+                for (r = startRowIndex; r < grid.Rows.Count; r++)
+                {
+                    if (!grid.Rows[r].IsNewRow)
+                    {
+                        SetRowOriginalValues(r, CloneRowValues(grid.Rows[r]));
+                    }
+                }
+            }
+            finally
+            {
+                grid.ResumeLayout();
+                EndGridSelectionUpdate();
+            }
+        }
+
+        private Dictionary<int, int> EnsureMappedColumnsForAppend(OviaBarListMappedTable mappedTable)
+        {
+            Dictionary<int, int> destinationColumns = new Dictionary<int, int>();
+
+            if (mappedTable == null)
+            {
+                return destinationColumns;
+            }
+
+            int i;
+
+            for (i = 0; i < mappedTable.Columns.Count; i++)
+            {
+                string header = mappedTable.Columns[i].DisplayName;
+
+                if (header == null || header.Trim() == "")
+                {
+                    header = "Column" + (i + 1).ToString();
+                }
+
+                int destinationIndex = FindExactColumnIndexByHeaders(new string[] { header });
+
+                if (destinationIndex < 0)
+                {
+                    DataGridViewTextBoxColumn column = new DataGridViewTextBoxColumn();
+                    column.Name = GetSafeColumnName(header, grid.Columns.Count);
+                    column.HeaderText = header;
+                    column.Tag = mappedTable.Columns[i];
+                    column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+                    column.MinimumWidth = 45;
+                    column.SortMode = DataGridViewColumnSortMode.NotSortable;
+                    column.Resizable = DataGridViewTriState.True;
+                    grid.Columns.Add(column);
+                    destinationIndex = grid.Columns.Count - 1;
+                }
+
+                destinationColumns[i] = destinationIndex;
+            }
+
+            return destinationColumns;
+        }
+
+        private void ConvertAppendedWeightColumnsIfNeeded(OviaBarListMappedTable mappedTable, Dictionary<int, int> destinationColumns, int startRowIndex, int endRowIndex)
+        {
+            if (mappedTable == null || destinationColumns == null)
+            {
+                return;
+            }
+
+            int i;
+
+            for (i = 0; i < mappedTable.Columns.Count; i++)
+            {
+                OviaBarListMappedColumn mapped = mappedTable.Columns[i];
+
+                if (mapped == null || !String.Equals(mapped.StandardKey, "weight_ton", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!HeaderLooksKg(mapped.SourceHeader))
+                {
+                    continue;
+                }
+
+                if (!destinationColumns.ContainsKey(i))
+                {
+                    continue;
+                }
+
+                ConvertColumnKgToTon(destinationColumns[i], startRowIndex, endRowIndex);
             }
         }
 
@@ -4299,6 +4874,16 @@ namespace OVIA.Desktop
 
         private void ApplyUnitConversionAfterMapping(OviaBarListMappedTable mappedTable)
         {
+            if (grid == null)
+            {
+                return;
+            }
+
+            ApplyUnitConversionAfterMapping(mappedTable, 0, grid.Rows.Count - 1);
+        }
+
+        private void ApplyUnitConversionAfterMapping(OviaBarListMappedTable mappedTable, int startRowIndex, int endRowIndex)
+        {
             if (grid == null || mappedTable == null)
             {
                 return;
@@ -4320,7 +4905,7 @@ namespace OVIA.Desktop
                     continue;
                 }
 
-                ConvertColumnKgToTon(i);
+                ConvertColumnKgToTon(i, startRowIndex, endRowIndex);
             }
         }
 
@@ -4341,11 +4926,36 @@ namespace OVIA.Desktop
 
         private void ConvertColumnKgToTon(int columnIndex)
         {
+            if (grid == null)
+            {
+                return;
+            }
+
+            ConvertColumnKgToTon(columnIndex, 0, grid.Rows.Count - 1);
+        }
+
+        private void ConvertColumnKgToTon(int columnIndex, int startRowIndex, int endRowIndex)
+        {
+            if (grid == null || columnIndex < 0 || columnIndex >= grid.Columns.Count)
+            {
+                return;
+            }
+
+            if (startRowIndex < 0)
+            {
+                startRowIndex = 0;
+            }
+
+            if (endRowIndex >= grid.Rows.Count)
+            {
+                endRowIndex = grid.Rows.Count - 1;
+            }
+
             int r;
 
-            for (r = 0; r < grid.Rows.Count; r++)
+            for (r = startRowIndex; r <= endRowIndex; r++)
             {
-                if (grid.Rows[r].IsNewRow)
+                if (r < 0 || r >= grid.Rows.Count || grid.Rows[r].IsNewRow)
                 {
                     continue;
                 }
@@ -5116,6 +5726,480 @@ namespace OVIA.Desktop
             value = value.Replace("\"", "\"\"");
 
             return "\"" + value + "\"";
+        }
+
+        private void UpdateImportedTotalMetaFromUserEdit(int rowIndex, int columnIndex)
+        {
+            if (!IsCalculatedResultColumn(columnIndex) || rowIndex < 0 || grid == null || rowIndex >= grid.Rows.Count || columnIndex >= grid.Columns.Count)
+            {
+                return;
+            }
+
+            DataGridViewCell cell = grid.Rows[rowIndex].Cells[columnIndex];
+            RebarCalculationCellMeta meta = cell.Tag as RebarCalculationCellMeta;
+
+            if (meta == null)
+            {
+                meta = new RebarCalculationCellMeta();
+                cell.Tag = meta;
+            }
+
+            object value = cell.Value;
+            meta.OriginalImportedText = value == null ? "" : value.ToString();
+        }
+
+        private void ApplyRebarCalculationAndValidation(bool showMismatchMessage)
+        {
+            if (grid == null || grid.Columns.Count == 0 || grid.Rows.Count == 0 || isApplyingRebarCalculation)
+            {
+                return;
+            }
+
+            int specCol = FindRebarSpecColumnIndex();
+            int lengthCol = FindSingleLengthColumnIndex();
+            int qtyCol = FindQuantityColumnIndex();
+            int totalLengthCol = FindTotalLengthColumnIndex();
+            int totalWeightCol = FindTotalWeightColumnIndex();
+
+            if (specCol < 0 || lengthCol < 0 || qtyCol < 0)
+            {
+                ClearRebarCalculationMismatchState();
+                return;
+            }
+
+            bool hasResultColumn = totalLengthCol >= 0 || totalWeightCol >= 0;
+
+            if (!hasResultColumn)
+            {
+                ClearRebarCalculationMismatchState();
+                return;
+            }
+
+            Dictionary<string, RebarCalculationMismatchInfo> next = new Dictionary<string, RebarCalculationMismatchInfo>();
+            bool mismatchFound = false;
+            bool anyCalculated = false;
+
+            isApplyingRebarCalculation = true;
+
+            try
+            {
+                Dictionary<string, double> unitWeights = OviaRebarUnitWeightStore.LoadEnabledUnitWeights();
+                int r;
+
+                for (r = 0; r < grid.Rows.Count; r++)
+                {
+                    if (grid.Rows[r].IsNewRow)
+                    {
+                        continue;
+                    }
+
+                    string rawSpec = GetCellText(r, specCol);
+                    string baseSpec = ExtractBaseRebarSpec(rawSpec);
+
+                    if (baseSpec == "" || !unitWeights.ContainsKey(baseSpec))
+                    {
+                        ClearRebarCalculationCellState(r, totalLengthCol);
+                        ClearRebarCalculationCellState(r, totalWeightCol);
+                        continue;
+                    }
+
+                    double lengthMm;
+                    double qty;
+
+                    if (!TryParseNumber(GetCellText(r, lengthCol), out lengthMm) || !TryParseNumber(GetCellText(r, qtyCol), out qty))
+                    {
+                        ClearRebarCalculationCellState(r, totalLengthCol);
+                        ClearRebarCalculationCellState(r, totalWeightCol);
+                        continue;
+                    }
+
+                    if (lengthMm <= 0 || qty <= 0)
+                    {
+                        ClearRebarCalculationCellState(r, totalLengthCol);
+                        ClearRebarCalculationCellState(r, totalWeightCol);
+                        continue;
+                    }
+
+                    double unitWeightKgM = unitWeights[baseSpec];
+                    double calculatedTotalLengthM = Math.Round((lengthMm / 1000.0) * qty, 3, MidpointRounding.AwayFromZero);
+                    double calculatedTotalWeightTon = Math.Round((calculatedTotalLengthM * unitWeightKgM) / 1000.0, 3, MidpointRounding.AwayFromZero);
+
+                    if (totalLengthCol >= 0)
+                    {
+                        string originalText = GetOriginalImportedTotalText(r, totalLengthCol);
+                        bool mismatch = IsImportedValueDifferent(originalText, calculatedTotalLengthM);
+                        SetCalculatedCellValue(r, totalLengthCol, calculatedTotalLengthM, "총길이(M)", originalText, baseSpec, unitWeightKgM, mismatch, next);
+                        mismatchFound = mismatchFound || mismatch;
+                        anyCalculated = true;
+                    }
+
+                    if (totalWeightCol >= 0)
+                    {
+                        string originalText = GetOriginalImportedTotalText(r, totalWeightCol);
+                        bool mismatch = IsImportedValueDifferent(originalText, calculatedTotalWeightTon);
+                        SetCalculatedCellValue(r, totalWeightCol, calculatedTotalWeightTon, "총중량(Ton)", originalText, baseSpec, unitWeightKgM, mismatch, next);
+                        mismatchFound = mismatchFound || mismatch;
+                        anyCalculated = true;
+                    }
+                }
+            }
+            finally
+            {
+                isApplyingRebarCalculation = false;
+            }
+
+            rebarCalculationMismatches = next;
+            ApplyCalculatedColumnReadOnlyState();
+            grid.Invalidate();
+
+            if (anyCalculated)
+            {
+                lblStatus.Text = "총길이/총중량은 OVIA 이형철근 단위중량표 기준으로 계산되었습니다.";
+                lblStatus.ForeColor = mismatchFound ? OviaFluentTheme.Danger : TextSub;
+            }
+
+            if (showMismatchMessage && mismatchFound && !rebarMismatchWarningShown)
+            {
+                rebarMismatchWarningShown = true;
+                MessageBox.Show(
+                    "총중량 값이 다른 곳이 있습니다. 직접 확인해볼 필요가 있습니다.",
+                    "OVIA 계산 검증",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+            }
+        }
+
+        private void ClearRebarCalculationMismatchState()
+        {
+            rebarCalculationMismatches.Clear();
+            if (grid != null)
+            {
+                grid.Invalidate();
+            }
+        }
+
+        private void ClearRebarCalculationCellState(int rowIndex, int columnIndex)
+        {
+            if (columnIndex < 0 || rowIndex < 0 || grid == null || rowIndex >= grid.Rows.Count || columnIndex >= grid.Columns.Count)
+            {
+                return;
+            }
+
+            DataGridViewCell cell = grid.Rows[rowIndex].Cells[columnIndex];
+            RebarCalculationCellMeta meta = cell.Tag as RebarCalculationCellMeta;
+
+            if (meta != null)
+            {
+                meta.HasMismatch = false;
+            }
+
+            cell.ToolTipText = "";
+        }
+
+        private void SetCalculatedCellValue(int rowIndex, int columnIndex, double calculatedValue, string valueName, string originalText, string baseSpec, double unitWeightKgM, bool mismatch, Dictionary<string, RebarCalculationMismatchInfo> next)
+        {
+            if (columnIndex < 0 || rowIndex < 0 || rowIndex >= grid.Rows.Count || columnIndex >= grid.Columns.Count)
+            {
+                return;
+            }
+
+            DataGridViewCell cell = grid.Rows[rowIndex].Cells[columnIndex];
+            RebarCalculationCellMeta meta = cell.Tag as RebarCalculationCellMeta;
+
+            if (meta == null)
+            {
+                meta = new RebarCalculationCellMeta();
+                meta.OriginalImportedText = originalText == null ? "" : originalText.Trim();
+                cell.Tag = meta;
+            }
+            else if (meta.OriginalImportedText == null || meta.OriginalImportedText.Trim() == "")
+            {
+                meta.OriginalImportedText = originalText == null ? "" : originalText.Trim();
+            }
+
+            meta.CalculatedValue = calculatedValue;
+            meta.HasMismatch = mismatch;
+            meta.ValueName = valueName;
+            meta.BaseSpec = baseSpec;
+            meta.UnitWeightKgM = unitWeightKgM;
+
+            cell.Value = calculatedValue.ToString("0.000", CultureInfo.InvariantCulture);
+            SetOriginalValueForCell(rowIndex, columnIndex, cell.Value);
+
+            if (mismatch)
+            {
+                string key = GetRebarCalculationCellKey(rowIndex, columnIndex);
+                RebarCalculationMismatchInfo info = new RebarCalculationMismatchInfo();
+                info.RowIndex = rowIndex;
+                info.ColumnIndex = columnIndex;
+                info.ValueName = valueName;
+                info.OriginalText = meta.OriginalImportedText;
+                info.CalculatedText = calculatedValue.ToString("0.000", CultureInfo.InvariantCulture);
+                info.BaseSpec = baseSpec;
+                info.UnitWeightKgM = unitWeightKgM;
+                next[key] = info;
+
+                cell.ToolTipText = "CAD 원본값: " + info.OriginalText + " / OVIA 계산값: " + info.CalculatedText + "\r\n" + baseSpec + " 단위중량: " + unitWeightKgM.ToString("0.000", CultureInfo.InvariantCulture) + " kg/m";
+            }
+            else
+            {
+                cell.ToolTipText = "OVIA 계산값: " + calculatedValue.ToString("0.000", CultureInfo.InvariantCulture) + " / " + baseSpec + " 단위중량 " + unitWeightKgM.ToString("0.000", CultureInfo.InvariantCulture) + " kg/m";
+            }
+        }
+
+        private string GetOriginalImportedTotalText(int rowIndex, int columnIndex)
+        {
+            if (rowIndex < 0 || columnIndex < 0 || rowIndex >= grid.Rows.Count || columnIndex >= grid.Columns.Count)
+            {
+                return "";
+            }
+
+            DataGridViewCell cell = grid.Rows[rowIndex].Cells[columnIndex];
+            RebarCalculationCellMeta meta = cell.Tag as RebarCalculationCellMeta;
+
+            if (meta != null && meta.OriginalImportedText != null && meta.OriginalImportedText.Trim() != "")
+            {
+                return meta.OriginalImportedText;
+            }
+
+            object value = cell.Value;
+            return value == null ? "" : value.ToString();
+        }
+
+        private bool IsImportedValueDifferent(string originalText, double calculatedValue)
+        {
+            double originalValue;
+
+            if (!TryParseNumber(originalText, out originalValue))
+            {
+                return false;
+            }
+
+            return Math.Abs(Math.Round(originalValue, 3, MidpointRounding.AwayFromZero) - Math.Round(calculatedValue, 3, MidpointRounding.AwayFromZero)) >= 0.001;
+        }
+
+        private void ApplyCalculatedColumnReadOnlyState()
+        {
+            if (grid == null)
+            {
+                return;
+            }
+
+            int totalLengthCol = FindTotalLengthColumnIndex();
+            int totalWeightCol = FindTotalWeightColumnIndex();
+
+            if (totalLengthCol >= 0)
+            {
+                grid.Columns[totalLengthCol].ReadOnly = false;
+            }
+
+            if (totalWeightCol >= 0)
+            {
+                grid.Columns[totalWeightCol].ReadOnly = false;
+            }
+        }
+
+        private bool IsCalculatedResultColumn(int columnIndex)
+        {
+            if (columnIndex < 0)
+            {
+                return false;
+            }
+
+            return columnIndex == FindTotalLengthColumnIndex() || columnIndex == FindTotalWeightColumnIndex();
+        }
+
+        private bool IsRebarCalculationMismatchCell(int rowIndex, int columnIndex)
+        {
+            if (rowIndex < 0 || columnIndex < 0)
+            {
+                return false;
+            }
+
+            return rebarCalculationMismatches.ContainsKey(GetRebarCalculationCellKey(rowIndex, columnIndex));
+        }
+
+        private string GetRebarCalculationCellKey(int rowIndex, int columnIndex)
+        {
+            return rowIndex.ToString(CultureInfo.InvariantCulture) + ":" + columnIndex.ToString(CultureInfo.InvariantCulture);
+        }
+
+        private void SetOriginalValueForCell(int rowIndex, int columnIndex, object value)
+        {
+            if (grid == null || rowIndex < 0 || columnIndex < 0 || rowIndex >= grid.Rows.Count || columnIndex >= grid.Columns.Count)
+            {
+                return;
+            }
+
+            object[] originals = grid.Rows[rowIndex].Tag as object[];
+
+            if (originals == null || originals.Length != grid.Columns.Count)
+            {
+                originals = CloneRowValues(grid.Rows[rowIndex]);
+                grid.Rows[rowIndex].Tag = originals;
+            }
+
+            originals[columnIndex] = value == null ? "" : value.ToString();
+        }
+
+        private void PaintRebarCalculationMismatchCell(DataGridViewCellPaintingEventArgs e)
+        {
+            bool selected = grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Selected;
+            Color backColor = selected ? Color.FromArgb(255, 226, 226) : Color.FromArgb(255, 241, 241);
+            Color borderColor = OviaFluentTheme.ControlBorder;
+
+            e.Handled = true;
+            e.CellStyle.ForeColor = OviaFluentTheme.Danger;
+            e.CellStyle.SelectionForeColor = OviaFluentTheme.Danger;
+            e.CellStyle.BackColor = backColor;
+            e.CellStyle.SelectionBackColor = backColor;
+
+            using (SolidBrush brush = new SolidBrush(backColor))
+            {
+                e.Graphics.FillRectangle(brush, e.CellBounds);
+            }
+
+            e.PaintContent(e.CellBounds);
+
+            Rectangle rect = new Rectangle(e.CellBounds.Left, e.CellBounds.Top, e.CellBounds.Width - 1, e.CellBounds.Height - 1);
+            using (Pen pen = new Pen(borderColor, 1F))
+            {
+                e.Graphics.DrawRectangle(pen, rect);
+            }
+        }
+
+        private int FindRebarSpecColumnIndex()
+        {
+            int exact = FindExactColumnIndexByHeaders(new string[] { "철근규격", "철근 규격", "규격" });
+            if (exact >= 0)
+            {
+                return exact;
+            }
+
+            return FindColumnIndex("규격");
+        }
+
+        private int FindSingleLengthColumnIndex()
+        {
+            int exact = FindExactColumnIndexByHeaders(new string[] { "길이(mm)", "길이", "Length", "LENGTH" });
+            if (exact >= 0)
+            {
+                return exact;
+            }
+
+            int i;
+            for (i = 0; i < grid.Columns.Count; i++)
+            {
+                string header = NormalizeHeaderText(grid.Columns[i].HeaderText);
+                if (header.IndexOf("길이", StringComparison.OrdinalIgnoreCase) >= 0 && header.IndexOf("총길이", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private int FindQuantityColumnIndex()
+        {
+            int exact = FindExactColumnIndexByHeaders(new string[] { "수량(EA)", "수량", "조립(EA)", "EA", "Qty", "Quantity" });
+            if (exact >= 0)
+            {
+                return exact;
+            }
+
+            return FindColumnIndex("수량");
+        }
+
+        private int FindTotalLengthColumnIndex()
+        {
+            int exact = FindExactColumnIndexByHeaders(new string[] { "총길이(M)", "총길이", "총 길이", "TotalLength", "TOTAL_LENGTH" });
+            if (exact >= 0)
+            {
+                return exact;
+            }
+
+            int i;
+            for (i = 0; i < grid.Columns.Count; i++)
+            {
+                string header = NormalizeHeaderText(grid.Columns[i].HeaderText);
+                if (header.IndexOf("총길이", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private int FindTotalWeightColumnIndex()
+        {
+            int exact = FindExactColumnIndexByHeaders(new string[] { "총중량(Ton)", "중량(Ton)", "중량", "총중량", "TotalWeight", "TOTAL_WEIGHT" });
+            if (exact >= 0)
+            {
+                return exact;
+            }
+
+            int i;
+            for (i = 0; i < grid.Columns.Count; i++)
+            {
+                string header = NormalizeHeaderText(grid.Columns[i].HeaderText);
+                if ((header.IndexOf("중량", StringComparison.OrdinalIgnoreCase) >= 0 || header.IndexOf("WEIGHT", StringComparison.OrdinalIgnoreCase) >= 0) && header.IndexOf("단위중량", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private string NormalizeHeaderText(string header)
+        {
+            if (header == null)
+            {
+                return "";
+            }
+
+            return header.Trim().Replace(" ", "").Replace("_", "").Replace("-", "").ToUpperInvariant();
+        }
+
+        private string ExtractBaseRebarSpec(string rawSpec)
+        {
+            if (rawSpec == null)
+            {
+                return "";
+            }
+
+            Match match = Regex.Match(rawSpec.ToUpperInvariant(), @"D\s*(\d+)");
+
+            if (!match.Success)
+            {
+                return "";
+            }
+
+            return "D" + match.Groups[1].Value;
+        }
+
+        private class RebarCalculationCellMeta
+        {
+            public string OriginalImportedText = "";
+            public double CalculatedValue = 0;
+            public bool HasMismatch = false;
+            public string ValueName = "";
+            public string BaseSpec = "";
+            public double UnitWeightKgM = 0;
+        }
+
+        private class RebarCalculationMismatchInfo
+        {
+            public int RowIndex = -1;
+            public int ColumnIndex = -1;
+            public string ValueName = "";
+            public string OriginalText = "";
+            public string CalculatedText = "";
+            public string BaseSpec = "";
+            public double UnitWeightKgM = 0;
         }
 
         private bool ContainsAny(string value, params string[] keywords)

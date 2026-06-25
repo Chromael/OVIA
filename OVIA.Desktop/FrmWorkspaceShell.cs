@@ -13,6 +13,7 @@ namespace OVIA.Desktop
         void NavigateToProjectBarListList(string projectNo, string projectName, string clientName, string projectStatus);
         void NavigateToBarList(string projectNo, string projectName, string clientName, string projectStatus, string initialFilePath);
         void NavigateToBarListMapping();
+        void NavigateToRebarUnitWeightTable();
         void ShowAutoCadEnvironmentCheck();
         void ShowAutoCadExtractGuide();
         void RequestLogout();
@@ -158,6 +159,18 @@ namespace OVIA.Desktop
                 if (navigator != null)
                 {
                     navigator.NavigateToBarListMapping();
+                }
+            });
+
+            menu.AddItem("이형철근 단위중량표", "\uE9D9", delegate
+            {
+                IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(settingsButton);
+                menu.CloseImmediate();
+                currentSettingsDropDown = null;
+
+                if (navigator != null)
+                {
+                    navigator.NavigateToRebarUnitWeightTable();
                 }
             });
 
@@ -856,6 +869,12 @@ namespace OVIA.Desktop
         {
             this.Text = "OVIA BarList 항목 매핑";
             ShowScreen(new FrmBarListMappingManager(companyId, userId));
+        }
+
+        public void NavigateToRebarUnitWeightTable()
+        {
+            this.Text = "OVIA 이형철근 단위중량표";
+            ShowScreen(new FrmRebarUnitWeightTable(companyId, userId));
         }
 
         public void ShowAutoCadEnvironmentCheck()

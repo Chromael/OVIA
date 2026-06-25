@@ -97,6 +97,9 @@
     <Compile Include="FrmBarListMappingManager.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="FrmRebarUnitWeightTable.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="FrmMain.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -147,6 +150,9 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Data\Mapping\barlist_mapping.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Data\Rebar\rebar_unit_weight.csv">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Data\Shapes\shape_index.csv">

@@ -205,74 +205,92 @@ namespace OVIA.AutoCAD_2027
 
             try
             {
-                PromptPointOptions firstPointOptions = new PromptPointOptions(
-                    "\nOVIA 선택박스 시작점: 표 왼쪽 경계선과 시작 행의 위쪽 가로선이 만나는 교차점에 맞춰 클릭하세요: "
-                );
+                int createdCount = 0;
 
-                firstPointOptions.AllowNone = false;
-
-                PromptPointResult firstPointResult = ed.GetPoint(firstPointOptions);
-
-                if (firstPointResult.Status != PromptStatus.OK)
+                while (true)
                 {
-                    ed.WriteMessage("\nOVIA: 선택박스 생성이 취소되었습니다.\n");
-                    return;
+                    PromptPointOptions firstPointOptions = new PromptPointOptions(
+                        "\nOVIA 선택박스 시작점: 표 왼쪽 경계선과 시작 행의 위쪽 가로선 교차점을 클릭하세요. 종료하려면 Enter: "
+                    );
+
+                    firstPointOptions.AllowNone = true;
+
+                    PromptPointResult firstPointResult = ed.GetPoint(firstPointOptions);
+
+                    if (firstPointResult.Status == PromptStatus.None)
+                    {
+                        if (createdCount == 0)
+                        {
+                            ed.WriteMessage("\nOVIA: 선택박스 생성이 취소되었습니다.\n");
+                        }
+                        else
+                        {
+                            ed.WriteMessage("\nOVIA: 연속 선택박스 추출을 종료했습니다. 총 " + createdCount.ToString() + "개 영역을 처리했습니다.\n");
+                        }
+
+                        return;
+                    }
+
+                    if (firstPointResult.Status != PromptStatus.OK)
+                    {
+                        ed.WriteMessage("\nOVIA: 선택박스 생성이 취소되었습니다.\n");
+                        return;
+                    }
+
+                    PromptCornerOptions secondPointOptions = new PromptCornerOptions(
+                        "\nOVIA 선택박스 끝점: 표 오른쪽 경계선과 끝 행의 아래쪽 가로선 교차점을 클릭하세요: ",
+                        firstPointResult.Value
+                    );
+
+                    PromptPointResult secondPointResult = ed.GetCorner(secondPointOptions);
+
+                    if (secondPointResult.Status != PromptStatus.OK)
+                    {
+                        ed.WriteMessage("\nOVIA: 선택박스 생성이 취소되었습니다.\n");
+                        return;
+                    }
+
+                    /*
+                     * OVIA 2026-06-25 보정:
+                     * OVIABOX를 1회만 선택하고 끝내는 방식이 아니라,
+                     * 한 영역 선택 즉시 OVIABOXTABLE 추출을 자동 수행한 뒤 다시 다음 영역을 선택할 수 있게 합니다.
+                     * 사용자는 필요한 영역을 계속 지정하고, 마지막에 Enter로 종료합니다.
+                     *
+                     * OVIA 2026-06-25 추가 보정:
+                     * BarList에 불러온 CAD 영역은 도면 내 작업 이력으로 남아야 하므로,
+                     * 새 영역을 선택할 때 기존 OVIA_SELECT_BOX를 삭제하지 않습니다.
+                     * 단, 추출 대상은 방금 선택한 박스 1개 영역으로 한정하여
+                     * 이전 박스와 새 박스가 합쳐진 큰 영역으로 추출되지 않게 합니다.
+                     */
+                    Point3d boxPoint1 = firstPointResult.Value;
+                    Point3d boxPoint2 = secondPointResult.Value;
+
+                    using (Transaction tr = db.TransactionManager.StartTransaction())
+                    {
+                        ObjectId dashedLineTypeId = EnsureDashedLineType(db, tr);
+                        EnsureOviaBoxLayer(db, tr, dashedLineTypeId, false);
+
+                        CreateOviaBoxEntity(db, tr, boxPoint1, boxPoint2, dashedLineTypeId);
+
+                        EnsureOviaBoxLayer(db, tr, dashedLineTypeId, true);
+                        tr.Commit();
+                    }
+
+                    createdCount++;
+
+                    ed.WriteMessage("\n");
+                    ed.WriteMessage("====================================\n");
+                    ed.WriteMessage("OVIA 선택박스 생성 완료 및 자동 추출 시작\n");
+                    ed.WriteMessage("------------------------------------\n");
+                    ed.WriteMessage("처리 번호 : " + createdCount.ToString() + "\n");
+                    ed.WriteMessage("표시 형태 : 밝은 노란색 / 매우 두꺼운 실선\n");
+                    ed.WriteMessage("박스 표시 : 선택한 모든 영역의 노란 박스를 도면에 유지\n");
+                    ed.WriteMessage("추출 기준 : 방금 선택한 영역만 자동 추출\n");
+                    ed.WriteMessage("연속 작업 : 다음 영역을 계속 선택하거나 Enter로 종료하세요.\n");
+                    ed.WriteMessage("====================================\n");
+
+                    RunSmartBoxTableExtraction("OVIABOX", boxPoint1, boxPoint2);
                 }
-
-                PromptCornerOptions secondPointOptions = new PromptCornerOptions(
-                    "\nOVIA 선택박스 끝점: 표 오른쪽 경계선과 끝 행의 아래쪽 가로선이 만나는 교차점에 맞춰 클릭하세요: ",
-                    firstPointResult.Value
-                );
-
-                PromptPointResult secondPointResult = ed.GetCorner(secondPointOptions);
-
-                if (secondPointResult.Status != PromptStatus.OK)
-                {
-                    ed.WriteMessage("\nOVIA: 선택박스 생성이 취소되었습니다.\n");
-                    return;
-                }
-
-                /*
-                 * OVIA 2026-05-27 보정:
-                 * 대표님이 클릭한 X/Y 위치와 노란 선택박스가 달라지면 안 됩니다.
-                 * 이전 자동 라인 스냅/좌측 확장 로직은 번호 컬럼 보정에는 도움이 되었지만,
-                 * 사용자가 정확히 선택한 범위보다 왼쪽 다른 라인까지 박스가 늘어나는 문제가 있었습니다.
-                 * AutoCAD 객체스냅으로 반환된 클릭 좌표 자체를 신뢰하고, OVIA가 추가로 선택박스를 확장하지 않습니다.
-                 */
-                Point3d boxPoint1 = firstPointResult.Value;
-                Point3d boxPoint2 = secondPointResult.Value;
-                bool isSnapped = false;
-
-                using (Transaction tr = db.TransactionManager.StartTransaction())
-                {
-                    ObjectId dashedLineTypeId = EnsureDashedLineType(db, tr);
-                    EnsureOviaBoxLayer(db, tr, dashedLineTypeId, false);
-                    DeleteExistingOviaBoxes(db, tr);
-
-                    CreateOviaBoxEntity(db, tr, boxPoint1, boxPoint2, dashedLineTypeId);
-
-                    EnsureOviaBoxLayer(db, tr, dashedLineTypeId, true);
-                    tr.Commit();
-                }
-
-                ed.WriteMessage("\n");
-                ed.WriteMessage("====================================\n");
-                ed.WriteMessage("OVIA 선택박스 생성 완료\n");
-                ed.WriteMessage("------------------------------------\n");
-                ed.WriteMessage("표시 형태 : 밝은 노란색 / 매우 두꺼운 실선\n");
-                ed.WriteMessage("박스 개수 : 기존 박스 삭제 후 1개만 유지\n");
-                ed.WriteMessage("정확 선택 : AutoCAD 끝점/교차점 객체스냅을 임시 적용하여 테이블 교차점에서 시작/종료 가능\n");
-                ed.WriteMessage("선택 좌표 : AutoCAD가 끝점/교차점으로 스냅한 좌표를 기준으로 노란 선택박스를 생성함\n");
-                ed.WriteMessage("자동 확장 : OVIA가 사용자가 선택한 범위를 임의로 좌/우/상/하 확장하지 않음\n");
-                ed.WriteMessage("주의      : 철근형상 내부의 작은 치수선이 아니라 표 외곽/행 경계선 교차점을 클릭하세요.\n");
-                ed.WriteMessage("편집 방식 : 잠금 없음, 필요 시 OVIA 전용 조정 명령으로 직사각형 유지\n");
-                ed.WriteMessage("상단 조정 : OVIABOXTOP\n");
-                ed.WriteMessage("하단 조정 : OVIABOXBOTTOM\n");
-                ed.WriteMessage("좌측 조정 : OVIABOXLEFT\n");
-                ed.WriteMessage("우측 조정 : OVIABOXRIGHT\n");
-                ed.WriteMessage("이동      : OVIABOXMOVE\n");
-                ed.WriteMessage("추출      : OVIABOXTABLE\n");
-                ed.WriteMessage("====================================\n");
             }
             finally
             {
@@ -905,22 +923,12 @@ namespace OVIA.AutoCAD_2027
             Point3d maxPoint;
             int boxCount = 0;
 
-            bool hasBox = GetOviaBoxExtents(db, out minPoint, out maxPoint, out boxCount);
+            bool hasBox = GetLatestOviaBoxExtents(db, out minPoint, out maxPoint, out boxCount);
 
             if (!hasBox)
             {
                 ed.WriteMessage("\nOVIA: 도면에서 OVIA 선택박스를 찾지 못했습니다.\n");
                 ed.WriteMessage("먼저 OVIABOX 명령어로 선택박스를 생성해주세요.\n");
-                return;
-            }
-
-            FixOviaBoxRectangle(db);
-
-            hasBox = GetOviaBoxExtents(db, out minPoint, out maxPoint, out boxCount);
-
-            if (!hasBox)
-            {
-                ed.WriteMessage("\nOVIA: 선택박스 보정 중 오류가 발생했습니다.\n");
                 return;
             }
 
@@ -1000,7 +1008,7 @@ namespace OVIA.AutoCAD_2027
             Point3d selectedMaxPoint;
             int boxCount = 0;
 
-            bool hasBox = GetOviaBoxExtents(db, out selectedMinPoint, out selectedMaxPoint, out boxCount);
+            bool hasBox = GetLatestOviaBoxExtents(db, out selectedMinPoint, out selectedMaxPoint, out boxCount);
 
             if (!hasBox)
             {
@@ -1009,15 +1017,37 @@ namespace OVIA.AutoCAD_2027
                 return;
             }
 
-            FixOviaBoxRectangle(db);
+            RunSmartBoxTableExtractionFromWindow(commandName, selectedMinPoint, selectedMaxPoint, boxCount);
+        }
 
-            hasBox = GetOviaBoxExtents(db, out selectedMinPoint, out selectedMaxPoint, out boxCount);
+        private void RunSmartBoxTableExtraction(string commandName, Point3d point1, Point3d point2)
+        {
+            Point3d selectedMinPoint = new Point3d(
+                Math.Min(point1.X, point2.X),
+                Math.Min(point1.Y, point2.Y),
+                Math.Min(point1.Z, point2.Z)
+            );
 
-            if (!hasBox)
+            Point3d selectedMaxPoint = new Point3d(
+                Math.Max(point1.X, point2.X),
+                Math.Max(point1.Y, point2.Y),
+                Math.Max(point1.Z, point2.Z)
+            );
+
+            RunSmartBoxTableExtractionFromWindow(commandName, selectedMinPoint, selectedMaxPoint, 1);
+        }
+
+        private void RunSmartBoxTableExtractionFromWindow(string commandName, Point3d selectedMinPoint, Point3d selectedMaxPoint, int boxCount)
+        {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+
+            if (doc == null)
             {
-                ed.WriteMessage("\nOVIA: 선택박스 보정 중 오류가 발생했습니다.\n");
                 return;
             }
+
+            Database db = doc.Database;
+            Editor ed = doc.Editor;
 
             Point3d analysisMinPoint;
             Point3d analysisMaxPoint;
@@ -4560,6 +4590,70 @@ namespace OVIA.AutoCAD_2027
                     }
 
                     boxCount++;
+                }
+
+                tr.Commit();
+            }
+
+            return boxCount > 0;
+        }
+
+        private bool GetLatestOviaBoxExtents(Database db, out Point3d minPoint, out Point3d maxPoint, out int boxCount)
+        {
+            minPoint = new Point3d();
+            maxPoint = new Point3d();
+            boxCount = 0;
+
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                BlockTable blockTable = tr.GetObject(db.BlockTableId, OpenMode.ForRead) as BlockTable;
+
+                if (blockTable == null)
+                {
+                    return false;
+                }
+
+                BlockTableRecord modelSpace = tr.GetObject(blockTable[BlockTableRecord.ModelSpace], OpenMode.ForRead) as BlockTableRecord;
+
+                if (modelSpace == null)
+                {
+                    return false;
+                }
+
+                foreach (ObjectId objectId in modelSpace)
+                {
+                    Entity entity = null;
+
+                    try
+                    {
+                        entity = tr.GetObject(objectId, OpenMode.ForRead, false) as Entity;
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    if (entity == null)
+                    {
+                        continue;
+                    }
+
+                    if (!string.Equals(entity.Layer, OviaBoxLayerName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        Extents3d extents = entity.GeometricExtents;
+                        minPoint = extents.MinPoint;
+                        maxPoint = extents.MaxPoint;
+                        boxCount++;
+                    }
+                    catch
+                    {
+                        continue;
+                    }
                 }
 
                 tr.Commit();
@@ -9071,7 +9165,7 @@ namespace OVIA.AutoCAD_2027
 
             drawingName = MakeSafeFileName(drawingName);
 
-            string fileName = prefix + "_" + drawingName + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".csv";
+            string fileName = prefix + "_" + drawingName + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".csv";
 
             return Path.Combine(baseFolder, fileName);
         }

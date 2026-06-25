@@ -1429,6 +1429,11 @@ namespace OVIA.Desktop
             NavigateToBarListMapping();
         }
 
+        private void OpenRebarUnitWeightTable_Click(object sender, EventArgs e)
+        {
+            NavigateToRebarUnitWeightTable();
+        }
+
         public void NavigateToProjectManager()
         {
             ShowWorkspaceScreen(new FrmProjectManager(companyId, userId), "OVIA 공사관리", "공사관리 화면입니다.");
@@ -1449,6 +1454,11 @@ namespace OVIA.Desktop
         public void NavigateToBarListMapping()
         {
             ShowWorkspaceScreen(new FrmBarListMappingManager(companyId, userId), "OVIA BarList 항목 매핑", "BarList 항목 매핑 설정을 불러왔습니다.");
+        }
+
+        public void NavigateToRebarUnitWeightTable()
+        {
+            ShowWorkspaceScreen(new FrmRebarUnitWeightTable(companyId, userId), "OVIA 이형철근 단위중량표", "이형철근 단위중량표를 불러왔습니다.");
         }
 
         private void ShowWorkspaceScreen(Form nextScreen, string title, string statusText)
