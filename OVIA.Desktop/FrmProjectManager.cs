@@ -207,8 +207,20 @@ namespace OVIA.Desktop
                 delegate { BindProjects(); },
                 delegate { RequestLogout(); },
                 true,
-                true
+                true,
+                delegate(string target)
+                {
+                    NavigateByWorkspacePath(target);
+                }
             );
+        }
+
+        private void NavigateByWorkspacePath(string target)
+        {
+            if (target == "MAIN")
+            {
+                NavigateToMain();
+            }
         }
 
 
@@ -441,11 +453,7 @@ namespace OVIA.Desktop
         private void Breadcrumb_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
         {
             string target = e.Link.LinkData == null ? "" : e.Link.LinkData.ToString();
-
-            if (target == "MAIN")
-            {
-                NavigateToMain();
-            }
+            NavigateByWorkspacePath(target);
         }
 
         private void NavigateToMain()

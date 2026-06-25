@@ -1,10 +1,21 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Windows.Forms;
 
 namespace OVIA.Desktop.Controls
 {
-    public sealed class OviaWorkspaceHeader : UserControl
+    public sealed class OviaWorkspacePathClickedEventArgs : EventArgs
+    {
+        public OviaWorkspacePathClickedEventArgs(string target)
+        {
+            Target = target == null ? string.Empty : target;
+        }
+
+        public string Target { get; private set; }
+        public bool Handled { get; set; }
+    }
+
+    public sealed class OviaWorkspaceHeader : UserControl, IMessageFilter
     {
         private const int HeaderLeft = 34;
         private const int HeaderTop = 8;
@@ -13,6 +24,10 @@ namespace OVIA.Desktop.Controls
         private const int LogoutWidth = 30;
         private const int LogoutRightGap = 20;
         private const int BreadcrumbSafeGap = 40;
+        private const int WmLButtonDown = 0x0201;
+        private const int WmRButtonDown = 0x0204;
+        private const int WmMButtonDown = 0x0207;
+        private const int WmNcLButtonDown = 0x00A1;
 
         private readonly Color surfaceColor;
         private readonly Color textColor;
@@ -29,12 +44,14 @@ namespace OVIA.Desktop.Controls
         private LinkLabel breadcrumbLabel;
         private TextBox pathTextBox;
         private ToolTip toolTip;
+        private bool pathEditMessageFilterInstalled;
 
         public event EventHandler BackClicked;
         public event EventHandler UpClicked;
         public event EventHandler RefreshClicked;
         public event EventHandler LogoutClicked;
         public event EventHandler MainPathClicked;
+        public event EventHandler<OviaWorkspacePathClickedEventArgs> PathSegmentClicked;
 
         public OviaWorkspaceHeader()
         {
@@ -58,7 +75,7 @@ namespace OVIA.Desktop.Controls
             LayoutControls();
         }
 
-        public static OviaWorkspaceHeader AddTo(Control parent, string pathText, Action backAction, Action upAction, Action refreshAction, Action logoutAction, bool backEnabled, bool upEnabled)
+        public static OviaWorkspaceHeader AddTo(Control parent, string pathText, Action backAction, Action upAction, Action refreshAction, Action logoutAction, bool backEnabled, bool upEnabled, Action<string> pathSegmentAction = null)
         {
             OviaWorkspaceHeader header = new OviaWorkspaceHeader();
             header.PathText = pathText;
@@ -71,6 +88,18 @@ namespace OVIA.Desktop.Controls
             if (backAction != null)
             {
                 header.BackClicked += delegate { backAction(); };
+            }
+
+            if (pathSegmentAction != null)
+            {
+                header.PathSegmentClicked += delegate(object sender, OviaWorkspacePathClickedEventArgs e)
+                {
+                    pathSegmentAction(e.Target);
+                    e.Handled = true;
+                };
+            }
+            else if (backAction != null)
+            {
                 header.MainPathClicked += delegate { backAction(); };
             }
 
@@ -113,12 +142,7 @@ namespace OVIA.Desktop.Controls
                 if (breadcrumbLabel != null)
                 {
                     breadcrumbLabel.Text = text;
-                    breadcrumbLabel.Links.Clear();
-
-                    if (text.StartsWith("메인"))
-                    {
-                        breadcrumbLabel.Links.Add(0, "메인".Length, "MAIN");
-                    }
+                    ApplyBreadcrumbLinks(text);
                 }
 
                 if (pathTextBox != null)
@@ -144,6 +168,74 @@ namespace OVIA.Desktop.Controls
         {
             get { return btnUp != null && btnUp.Enabled; }
             set { SetNavigationEnabled(btnUp, value); }
+        }
+
+        private void ApplyBreadcrumbLinks(string text)
+        {
+            if (breadcrumbLabel == null)
+            {
+                return;
+            }
+
+            breadcrumbLabel.Links.Clear();
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return;
+            }
+
+            string lastSegment = GetLastBreadcrumbSegment(text);
+            AddBreadcrumbLink(text, "메인", "MAIN", lastSegment != "메인");
+            AddBreadcrumbLink(text, "공사관리", "PROJECT_MANAGER", lastSegment != "공사관리");
+            AddBreadcrumbLink(text, "공사별 BarList", "PROJECT_BARLIST_LIST", lastSegment != "공사별 BarList");
+            AddBreadcrumbLink(text, "환경설정", "SETTINGS", lastSegment != "환경설정");
+        }
+
+        private void AddBreadcrumbLink(string text, string caption, string target, bool enabled)
+        {
+            if (!enabled || breadcrumbLabel == null || string.IsNullOrEmpty(text) || string.IsNullOrEmpty(caption))
+            {
+                return;
+            }
+
+            int start = text.IndexOf(caption, StringComparison.Ordinal);
+
+            if (start < 0)
+            {
+                return;
+            }
+
+            foreach (LinkLabel.Link link in breadcrumbLabel.Links)
+            {
+                int linkStart = link.Start;
+                int linkEnd = link.Start + link.Length;
+                int nextStart = start;
+                int nextEnd = start + caption.Length;
+
+                if (nextStart < linkEnd && nextEnd > linkStart)
+                {
+                    return;
+                }
+            }
+
+            breadcrumbLabel.Links.Add(start, caption.Length, target);
+        }
+
+        private string GetLastBreadcrumbSegment(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return string.Empty;
+            }
+
+            string[] parts = text.Split(new char[] { '›' }, StringSplitOptions.RemoveEmptyEntries);
+
+            if (parts.Length == 0)
+            {
+                return text.Trim();
+            }
+
+            return parts[parts.Length - 1].Trim();
         }
 
         private void BuildControls()
@@ -195,8 +287,9 @@ namespace OVIA.Desktop.Controls
             pathTextBox.Margin = Padding.Empty;
             pathTextBox.TabStop = false;
             pathTextBox.Visible = false;
-            pathTextBox.Click += delegate { pathTextBox.SelectAll(); };
-            pathTextBox.Enter += delegate { pathTextBox.SelectAll(); };
+            pathTextBox.HideSelection = false;
+            pathTextBox.ShortcutsEnabled = true;
+            pathTextBox.Cursor = Cursors.IBeam;
             pathTextBox.Leave += delegate { HidePathEditMode(); };
             pathTextBox.KeyDown += PathTextBox_KeyDown;
             addressBar.Controls.Add(pathTextBox);
@@ -236,6 +329,34 @@ namespace OVIA.Desktop.Controls
         {
             base.OnResize(e);
             LayoutControls();
+        }
+
+        protected override void OnHandleDestroyed(EventArgs e)
+        {
+            UninstallPathEditMessageFilter();
+            base.OnHandleDestroyed(e);
+        }
+
+        public bool PreFilterMessage(ref Message m)
+        {
+            if (!IsPathEditModeVisible() || !IsPathEditCloseCandidateMessage(m.Msg))
+            {
+                return false;
+            }
+
+            Point screenPoint;
+
+            if (!TryGetScreenPointFromMessage(m, out screenPoint))
+            {
+                return false;
+            }
+
+            if (!IsScreenPointInsidePathWhiteArea(screenPoint))
+            {
+                HidePathEditMode();
+            }
+
+            return false;
         }
 
         private Button CreateExplorerButton(string text, string tip)
@@ -306,10 +427,29 @@ namespace OVIA.Desktop.Controls
         {
             string target = e.Link.LinkData == null ? string.Empty : e.Link.LinkData.ToString();
 
+            if (RaisePathSegmentClicked(target))
+            {
+                return;
+            }
+
             if (target == "MAIN")
             {
                 Raise(MainPathClicked);
             }
+        }
+
+        private bool RaisePathSegmentClicked(string target)
+        {
+            EventHandler<OviaWorkspacePathClickedEventArgs> handler = PathSegmentClicked;
+
+            if (handler == null)
+            {
+                return false;
+            }
+
+            OviaWorkspacePathClickedEventArgs args = new OviaWorkspacePathClickedEventArgs(target);
+            handler(this, args);
+            return args.Handled;
         }
 
         private void BreadcrumbLabel_MouseClick(object sender, MouseEventArgs e)
@@ -350,10 +490,14 @@ namespace OVIA.Desktop.Controls
                 pathTextBox.Focus();
                 pathTextBox.SelectAll();
             }
+
+            InstallPathEditMessageFilter();
         }
 
         private void HidePathEditMode()
         {
+            UninstallPathEditMessageFilter();
+
             if (pathTextBox != null)
             {
                 pathTextBox.Visible = false;
@@ -363,6 +507,76 @@ namespace OVIA.Desktop.Controls
             {
                 breadcrumbLabel.Visible = true;
             }
+        }
+
+        private void InstallPathEditMessageFilter()
+        {
+            if (pathEditMessageFilterInstalled)
+            {
+                return;
+            }
+
+            Application.AddMessageFilter(this);
+            pathEditMessageFilterInstalled = true;
+        }
+
+        private void UninstallPathEditMessageFilter()
+        {
+            if (!pathEditMessageFilterInstalled)
+            {
+                return;
+            }
+
+            Application.RemoveMessageFilter(this);
+            pathEditMessageFilterInstalled = false;
+        }
+
+        private bool IsPathEditModeVisible()
+        {
+            return pathTextBox != null && pathTextBox.Visible;
+        }
+
+        private bool IsPathEditCloseCandidateMessage(int messageId)
+        {
+            return messageId == WmLButtonDown
+                || messageId == WmRButtonDown
+                || messageId == WmMButtonDown
+                || messageId == WmNcLButtonDown;
+        }
+
+        private bool TryGetScreenPointFromMessage(Message message, out Point screenPoint)
+        {
+            screenPoint = Point.Empty;
+
+            if (message.Msg == WmNcLButtonDown)
+            {
+                int raw = message.LParam.ToInt32();
+                screenPoint = new Point((short)(raw & 0xFFFF), (short)((raw >> 16) & 0xFFFF));
+                return true;
+            }
+
+            Control source = Control.FromHandle(message.HWnd);
+
+            if (source == null)
+            {
+                return false;
+            }
+
+            int lParam = message.LParam.ToInt32();
+            Point clientPoint = new Point((short)(lParam & 0xFFFF), (short)((lParam >> 16) & 0xFFFF));
+            screenPoint = source.PointToScreen(clientPoint);
+            return true;
+        }
+
+        private bool IsScreenPointInsidePathWhiteArea(Point screenPoint)
+        {
+            if (addressBar == null || addressBar.IsDisposed || !addressBar.Visible)
+            {
+                return false;
+            }
+
+            Rectangle whiteArea = addressBar.RectangleToScreen(addressBar.ClientRectangle);
+            return whiteArea.Contains(screenPoint);
         }
 
         private void PathTextBox_KeyDown(object sender, KeyEventArgs e)

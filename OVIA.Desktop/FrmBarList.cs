@@ -329,8 +329,66 @@ namespace OVIA.Desktop
                 },
                 delegate { RequestLogout(); },
                 true,
-                true
+                true,
+                delegate(string target)
+                {
+                    NavigateByWorkspacePath(target);
+                }
             );
+        }
+
+        private void NavigateByWorkspacePath(string target)
+        {
+            IOviaWorkspaceNavigator workspace = OviaWorkspaceNavigation.FindNavigator(this);
+
+            if (target == "PROJECT_MANAGER")
+            {
+                if (workspace != null)
+                {
+                    workspace.NavigateToProjectManager();
+                    return;
+                }
+
+                if (!ConfirmDiscardUnsavedForNavigation())
+                {
+                    return;
+                }
+
+                suppressUnsavedClosePrompt = true;
+                FrmProjectManager form = new FrmProjectManager(companyId, userId);
+                ShowReplacementWindow(form);
+                return;
+            }
+
+            if (target == "MAIN")
+            {
+                if (workspace != null)
+                {
+                    workspace.NavigateToMain();
+                    return;
+                }
+
+                NavigateToMain();
+                return;
+            }
+
+            if (target == "PROJECT_BARLIST_LIST")
+            {
+                if (workspace != null)
+                {
+                    workspace.NavigateToProjectBarListList(projectNo, projectName, clientName, projectStatus);
+                    return;
+                }
+
+                if (!ConfirmDiscardUnsavedForNavigation())
+                {
+                    return;
+                }
+
+                suppressUnsavedClosePrompt = true;
+                FrmProjectBarListList form = new FrmProjectBarListList(companyId, userId, projectNo, projectName, clientName, projectStatus);
+                ShowReplacementWindow(form);
+            }
         }
 
 
@@ -649,67 +707,7 @@ namespace OVIA.Desktop
         private void Breadcrumb_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
         {
             string target = e.Link.LinkData == null ? "" : e.Link.LinkData.ToString();
-
-            if (target == "PROJECT_MANAGER")
-            {
-                if (!ConfirmDiscardUnsavedForNavigation())
-                {
-                    return;
-                }
-
-                suppressUnsavedClosePrompt = true;
-                IOviaWorkspaceNavigator workspace = OviaWorkspaceNavigation.FindNavigator(this);
-
-                if (workspace != null)
-                {
-                    workspace.NavigateToProjectManager();
-                    return;
-                }
-
-                FrmProjectManager form = new FrmProjectManager(companyId, userId);
-                ShowReplacementWindow(form);
-                return;
-            }
-
-            if (target == "MAIN")
-            {
-                if (!ConfirmDiscardUnsavedForNavigation())
-                {
-                    return;
-                }
-
-                suppressUnsavedClosePrompt = true;
-                IOviaWorkspaceNavigator workspace = OviaWorkspaceNavigation.FindNavigator(this);
-
-                if (workspace != null)
-                {
-                    workspace.NavigateToMain();
-                    return;
-                }
-
-                this.Close();
-                return;
-            }
-
-            if (target == "PROJECT_BARLIST_LIST")
-            {
-                if (!ConfirmDiscardUnsavedForNavigation())
-                {
-                    return;
-                }
-
-                suppressUnsavedClosePrompt = true;
-                IOviaWorkspaceNavigator workspace = OviaWorkspaceNavigation.FindNavigator(this);
-
-                if (workspace != null)
-                {
-                    workspace.NavigateToProjectBarListList(projectNo, projectName, clientName, projectStatus);
-                    return;
-                }
-
-                FrmProjectBarListList form = new FrmProjectBarListList(companyId, userId, projectNo, projectName, clientName, projectStatus);
-                ShowReplacementWindow(form);
-            }
+            NavigateByWorkspacePath(target);
         }
 
         private void BuildProjectInfo(Control parent)
