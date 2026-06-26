@@ -557,7 +557,7 @@ namespace OVIA.Desktop
             button.FlatAppearance.BorderSize = 0;
             button.FlatAppearance.MouseOverBackColor = OviaFluentTheme.NavigationHover;
             button.FlatAppearance.MouseDownBackColor = OviaFluentTheme.NavigationSelected;
-            button.Font = new Font("Segoe MDL2 Assets", 9.5F, FontStyle.Regular);
+            button.Font = OviaIconFont.Create(9.5F, FontStyle.Regular);
             button.ForeColor = Color.Black;
             button.BackColor = SurfaceColor;
             button.TabStop = false;

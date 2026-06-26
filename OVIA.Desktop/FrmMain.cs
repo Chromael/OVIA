@@ -54,6 +54,7 @@ namespace OVIA.Desktop
         private TableLayoutPanel mainLayout;
         private Panel workspacePanel;
         private Label bottomStatusLabel;
+        private string bottomAutoCadStatusText = "AutoCAD 상태 확인 중";
         private Form currentScreen;
         private Form projectManagerForm;
         private FrmBarList barListForm;
@@ -289,7 +290,7 @@ namespace OVIA.Desktop
                 "AutoCAD 상태",
                 "AutoCAD 비활성",
                 "AutoCAD 실행 후 도면 추출을 준비하세요.",
-                "\uE8A5",
+                "\uE71B",
                 OviaFluentTheme.DashboardPrimary,
                 "비활성",
                 OviaStatusKind.Danger,
@@ -345,7 +346,7 @@ namespace OVIA.Desktop
                 "공사 현황",
                 GetProjectStatusTitle(),
                 GetProjectStatusNote(),
-                "\uEC81",
+                "\uE90F",
                 OviaFluentTheme.DashboardPrimary,
                 "현황",
                 OviaStatusKind.Warning,
@@ -374,7 +375,7 @@ namespace OVIA.Desktop
             Label lblTitle = new Label();
             lblTitle.Text = title;
             lblTitle.AutoSize = false;
-            lblTitle.Size = new Size(170, 28);
+            lblTitle.Size = new Size(220, 28);
             lblTitle.TextAlign = ContentAlignment.MiddleLeft;
             lblTitle.Font = OviaFluentTheme.FontTitle(10.7F, FontStyle.Bold);
             lblTitle.ForeColor = TextDark;
@@ -382,13 +383,6 @@ namespace OVIA.Desktop
             lblTitle.Location = new Point(22, 14);
             card.Controls.Add(lblTitle);
 
-            OviaStatusBadge localBadge = new OviaStatusBadge();
-            localBadge.BadgeText = badgeText;
-            localBadge.Kind = badgeKind;
-            localBadge.Size = new Size(74, 26);
-            localBadge.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            localBadge.Location = new Point(card.Width - 98, 17);
-            card.Controls.Add(localBadge);
 
             OviaLineIconBox icon = new OviaLineIconBox();
             icon.IconText = iconText;
@@ -422,14 +416,14 @@ namespace OVIA.Desktop
 
             card.Resize += delegate
             {
-                localBadge.Location = new Point(Math.Max(22, card.Width - 98), 17);
+                lblTitle.Width = Math.Max(80, card.Width - 44);
                 localValueLabel.Width = Math.Max(60, card.Width - 104);
                 localNoteLabel.Width = Math.Max(80, card.Width - 44);
             };
 
             valueLabel = localValueLabel;
             noteLabel = localNoteLabel;
-            badge = localBadge;
+            badge = null;
 
             return card;
         }
@@ -1174,7 +1168,7 @@ namespace OVIA.Desktop
             button.FlatAppearance.BorderSize = 0;
             button.FlatAppearance.MouseOverBackColor = OviaFluentTheme.NavigationHover;
             button.FlatAppearance.MouseDownBackColor = OviaFluentTheme.NavigationSelected;
-            button.Font = new Font("Segoe MDL2 Assets", 9.5F, FontStyle.Regular);
+            button.Font = OviaIconFont.Create(9.5F, FontStyle.Regular);
             button.ForeColor = Color.Black;
             button.BackColor = SurfaceColor;
             button.TabStop = false;
@@ -1617,7 +1611,8 @@ namespace OVIA.Desktop
         {
             string today = DateTime.Now.ToString("yyyy년 M월 d일 dddd", new System.Globalization.CultureInfo("ko-KR"));
             string refresh = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-            SetBottomStatus("회사 ID : " + companyId + " / 사용자 ID : " + userId + " / 사용자명 : " + userId + " / 접속 IP : " + GetLocalIPAddress() + " / " + today + " / 마지막 새로고침 : " + refresh);
+            string autoCadText = string.IsNullOrWhiteSpace(bottomAutoCadStatusText) ? "AutoCAD 상태 확인 중" : bottomAutoCadStatusText;
+            SetBottomStatus("회사 ID : " + companyId + " / 사용자 ID : " + userId + " / 사용자명 : " + userId + " / 접속 IP : " + GetLocalIPAddress() + " / AutoCAD : " + autoCadText + " / " + today + " / 마지막 새로고침 : " + refresh);
         }
 
         private void StartWorkspaceStatusTimer()
@@ -1775,9 +1770,11 @@ namespace OVIA.Desktop
                 autoCadBadge = "차단";
             }
 
+            bottomAutoCadStatusText = report.GetDesktopAutoCadStatusText();
+
             if (lblAutoCadValue != null)
             {
-                lblAutoCadValue.Text = report.GetDesktopAutoCadStatusText();
+                lblAutoCadValue.Text = bottomAutoCadStatusText;
                 lblAutoCadValue.ForeColor = GetStatusTextColor(autoCadKind);
             }
 
@@ -1809,7 +1806,7 @@ namespace OVIA.Desktop
 
             if (lblEnvironmentValue != null)
             {
-                lblEnvironmentValue.Text = report.OverallStatusText;
+                lblEnvironmentValue.Text = GetEnvironmentDashboardStatusText(report);
                 lblEnvironmentValue.ForeColor = GetStatusTextColor(envKind);
             }
 
@@ -1865,6 +1862,26 @@ namespace OVIA.Desktop
             UpdateBottomStatusWithRefresh();
 
             RefreshDashboardCharts();
+        }
+
+        private string GetEnvironmentDashboardStatusText(OviaEnvironmentReport report)
+        {
+            if (report == null)
+            {
+                return "점검 대기";
+            }
+
+            if (report.OverallStatus == OviaEnvironmentStatus.Blocked)
+            {
+                return "지원 불가";
+            }
+
+            if (report.OverallStatus == OviaEnvironmentStatus.Warning)
+            {
+                return "제한지원";
+            }
+
+            return "정상지원가능";
         }
 
         private Color GetStatusTextColor(OviaStatusKind kind)
@@ -2464,6 +2481,55 @@ namespace OVIA.Desktop
         }
     }
 
+    public static class OviaIconFont
+    {
+        private static string cachedFamilyName;
+
+        public static Font Create(float size, FontStyle style)
+        {
+            return new Font(GetFamilyName(), size, style);
+        }
+
+        public static string GetFamilyName()
+        {
+            if (!string.IsNullOrEmpty(cachedFamilyName))
+            {
+                return cachedFamilyName;
+            }
+
+            string[] candidates = new string[]
+            {
+                "Segoe Fluent Icons",
+                "Segoe MDL2 Assets"
+            };
+
+            try
+            {
+                FontFamily[] families = FontFamily.Families;
+                int i;
+                int j;
+
+                for (i = 0; i < candidates.Length; i++)
+                {
+                    for (j = 0; j < families.Length; j++)
+                    {
+                        if (string.Equals(families[j].Name, candidates[i], StringComparison.OrdinalIgnoreCase))
+                        {
+                            cachedFamilyName = families[j].Name;
+                            return cachedFamilyName;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            cachedFamilyName = "Segoe MDL2 Assets";
+            return cachedFamilyName;
+        }
+    }
+
     public class OviaMenuButton : Control
     {
         public bool Selected = false;
@@ -2518,7 +2584,7 @@ namespace OVIA.Desktop
             string iconText = IconText == null ? "" : IconText;
 
             using (Font textFont = OviaFluentTheme.FontButton(10.4F, FontStyle.Bold))
-            using (Font iconFont = new Font("Segoe MDL2 Assets", 13.2F, FontStyle.Regular))
+            using (Font iconFont = OviaIconFont.Create(13.2F, FontStyle.Regular))
             {
                 Size textSize = TextRenderer.MeasureText(
                     e.Graphics,
@@ -2752,7 +2818,7 @@ namespace OVIA.Desktop
             TextRenderer.DrawText(
                 e.Graphics,
                 IconText,
-                new Font("Segoe MDL2 Assets", 17F, FontStyle.Regular),
+                OviaIconFont.Create(17F, FontStyle.Regular),
                 rect,
                 IconColor,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter
@@ -2834,7 +2900,7 @@ namespace OVIA.Desktop
             TextRenderer.DrawText(
                 e.Graphics,
                 IconText,
-                new Font("Segoe MDL2 Assets", 14F, FontStyle.Regular),
+                OviaIconFont.Create(14F, FontStyle.Regular),
                 iconRect,
                 IconColor,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter
@@ -3086,32 +3152,28 @@ namespace OVIA.Desktop
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-            Color mainColor = IsActive ? Color.FromArgb(25, 210, 115) : Color.FromArgb(230, 75, 75);
-            Color glowColor = IsActive ? Color.FromArgb(80, 25, 210, 115) : Color.FromArgb(80, 230, 75, 75);
+            Color mainColor = IsActive ? OviaFluentTheme.Success : OviaFluentTheme.Danger;
+            Color softColor = Color.FromArgb(22, mainColor.R, mainColor.G, mainColor.B);
+            Rectangle rect = new Rectangle(0, 0, Math.Max(1, this.Width - 1), Math.Max(1, this.Height - 1));
 
-            Rectangle glowRect = new Rectangle(2, 2, this.Width - 4, this.Height - 4);
-            Rectangle mainRect = new Rectangle(6, 6, this.Width - 12, this.Height - 12);
-            Rectangle pointRect = new Rectangle(9, 9, this.Width - 18, this.Height - 18);
-
-            using (SolidBrush glow = new SolidBrush(glowColor))
+            using (GraphicsPath path = MainDrawHelper.RoundRect(rect, 7))
+            using (SolidBrush fill = new SolidBrush(softColor))
             {
-                e.Graphics.FillEllipse(glow, glowRect);
+                e.Graphics.FillPath(fill, path);
             }
 
-            using (SolidBrush main = new SolidBrush(mainColor))
+            using (Font iconFont = OviaIconFont.Create(13.5F, FontStyle.Regular))
             {
-                e.Graphics.FillEllipse(main, mainRect);
-            }
-
-            using (SolidBrush point = new SolidBrush(Color.White))
-            {
-                e.Graphics.FillEllipse(point, pointRect);
-            }
-
-            using (Pen pen = new Pen(Color.FromArgb(180, Color.White), 1))
-            {
-                e.Graphics.DrawEllipse(pen, mainRect);
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    "\uE71B",
+                    iconFont,
+                    rect,
+                    mainColor,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine
+                );
             }
 
             base.OnPaint(e);

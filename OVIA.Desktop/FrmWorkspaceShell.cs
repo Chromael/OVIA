@@ -842,7 +842,7 @@ namespace OVIA.Desktop
             Color iconColor = Color.FromArgb(96, 104, 116);
             Color textColor = OviaFluentTheme.TextPrimary;
 
-            using (Font iconFont = new Font("Segoe MDL2 Assets", 12.5F, FontStyle.Regular))
+            using (Font iconFont = OviaIconFont.Create(12.5F, FontStyle.Regular))
             using (Font textFont = OviaFluentTheme.FontButton(9.2F, FontStyle.Regular))
             {
                 Rectangle iconRect = new Rectangle(15, 0, 22, this.Height);
