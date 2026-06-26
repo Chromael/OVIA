@@ -71,6 +71,16 @@ namespace OVIA.Desktop
 
         public bool IsLogoutRequested { get; private set; }
 
+        public string CurrentCompanyId
+        {
+            get { return companyId; }
+        }
+
+        public string CurrentUserId
+        {
+            get { return userId; }
+        }
+
         public FrmMain(string companyId, string userId)
         {
             this.companyId = companyId;
@@ -1461,6 +1471,23 @@ namespace OVIA.Desktop
             ShowWorkspaceScreen(new FrmRebarUnitWeightTable(companyId, userId), "OVIA 이형철근 단위중량표", "이형철근 단위중량표를 불러왔습니다.");
         }
 
+        public void NavigateToSystemSettings()
+        {
+            if (!OviaSystemSettingsStore.IsSuperAdminUser(userId))
+            {
+                MessageBox.Show(
+                    "시스템 설정은 최고관리자만 접근할 수 있습니다.\r\n\r\n현재 사용자 ID: " + userId,
+                    "OVIA 권한 확인",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+
+                return;
+            }
+
+            ShowWorkspaceScreen(new FrmSystemSettings(companyId, userId), "OVIA 시스템 설정", "시스템 설정을 불러왔습니다.");
+        }
+
         private void ShowWorkspaceScreen(Form nextScreen, string title, string statusText)
         {
             if (nextScreen == null)
@@ -1661,22 +1688,7 @@ namespace OVIA.Desktop
         private bool IsSystemAdminUser()
         {
             string value = userId == null ? "" : userId.Trim().ToLowerInvariant();
-
-            if (value == "")
-            {
-                return false;
-            }
-
-            return value == "admin"
-                || value == "administrator"
-                || value == "systemadmin"
-                || value == "sysadmin"
-                || value == "root"
-                || value == "celmon"
-                || value == "oviaadmin"
-                || value == "system"
-                || value == "관리자"
-                || value == "시스템관리자";
+            return OviaSystemSettingsStore.IsSuperAdminUser(userId) || value == "관리자";
         }
 
         private void ExtractReady_Click(object sender, EventArgs e)

@@ -49,8 +49,8 @@ namespace OVIA.Desktop
 
             GradientPanel bg		= new GradientPanel();
             bg.Dock					= DockStyle.Fill;
-            bg.StartColor			= OviaFluentTheme.AppBackgroundAlt;
-            bg.EndColor				= OviaFluentTheme.AppBackground;
+            bg.StartColor			= SurfaceColor;
+            bg.EndColor				= SurfaceColor;
             this.Controls.Add(bg);
 
             BuildBrandArea(bg);
@@ -69,10 +69,30 @@ namespace OVIA.Desktop
             parent.Controls.Add(brand);
 
             OviaLogoImage logo		= new OviaLogoImage();
-            logo.Location			= new Point(68, 105);
+            logo.Location			= new Point(68, 65);
             logo.Size				= new Size(370, 135);
             logo.SurfaceColor		= SurfaceColor;
             brand.Controls.Add(logo);
+
+            bool hasCompanyLogo = OviaLogoLoader.HasConfiguredCompanyLogo();
+
+            int sloganY = 220;
+            int descY = 265;
+
+            if (hasCompanyLogo)
+            {
+                Label oviaName = new Label();
+                oviaName.Text = "OVIA";
+                oviaName.AutoSize = true;
+                oviaName.Font = OviaFluentTheme.FontBrand(18F, FontStyle.Bold);
+                oviaName.ForeColor = Color.Black;
+                oviaName.BackColor = SurfaceColor;
+                oviaName.Location = new Point(75, 202);
+                brand.Controls.Add(oviaName);
+
+                sloganY = 238;
+                descY = 283;
+            }
 
             Label slogan			= new Label();
             slogan.Text				= "Operation · Value · Intelligence · Automation";
@@ -80,7 +100,7 @@ namespace OVIA.Desktop
             slogan.Font				= OviaFluentTheme.FontBrand(11F, FontStyle.Regular);
             slogan.ForeColor		= TextDark;
             slogan.BackColor		= SurfaceColor;
-            slogan.Location			= new Point(78, 260);
+            slogan.Location			= new Point(78, sloganY);
             brand.Controls.Add(slogan);
 
             Label desc				= new Label();
@@ -90,11 +110,11 @@ namespace OVIA.Desktop
             desc.Font				= OviaFluentTheme.FontBrand(10F, FontStyle.Regular);
             desc.ForeColor			= TextSub;
             desc.BackColor			= SurfaceColor;
-            desc.Location			= new Point(78, 305);
+            desc.Location			= new Point(78, descY);
             brand.Controls.Add(desc);
 
             OviaCubeIllustration cube = new OviaCubeIllustration();
-            cube.Location			= new Point(62, 390);
+            cube.Location			= new Point(62, 350);
             cube.Size				= new Size(390, 210);
             cube.SurfaceColor		= SurfaceColor;
             brand.Controls.Add(cube);
@@ -103,8 +123,8 @@ namespace OVIA.Desktop
         private void BuildLoginCard(Control parent)
         {
             OviaCard card			= new OviaCard();
-            card.Location			= new Point(520, 58);
-            card.Size				= new Size(500, 585);
+            card.Location			= new Point(520, 48);
+            card.Size				= new Size(500, 589);
             card.Radius				= 8;
             card.SurfaceColor		= SurfaceColor;
             card.FillColor			= Color.White;
@@ -333,7 +353,7 @@ namespace OVIA.Desktop
             parent.Controls.Add(copyright);
 
             Label version			= new Label();
-            version.Text			= "Version 1.0.0";
+            version.Text			= OviaSystemSettingsStore.GetDisplayVersionText();
             version.AutoSize		= true;
             version.Font			= OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
             version.ForeColor		= TextSub;
@@ -885,6 +905,23 @@ namespace OVIA.Desktop
     public static class OviaLogoLoader
     {
         public static string FindLogoPath()
+        {
+            string companyLogoPath = OviaSystemSettingsStore.GetConfiguredCompanyLogoPath();
+
+            if (companyLogoPath != "")
+            {
+                return companyLogoPath;
+            }
+
+            return FindDefaultLogoPath();
+        }
+
+        public static bool HasConfiguredCompanyLogo()
+        {
+            return OviaSystemSettingsStore.GetConfiguredCompanyLogoPath() != "";
+        }
+
+        public static string FindDefaultLogoPath()
         {
             string[] fileNames = new string[]
             {

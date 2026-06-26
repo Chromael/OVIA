@@ -73,6 +73,7 @@
     <Compile Include="Services\CadShapeRenderer.cs" />
     <Compile Include="Services\OviaEnvironmentChecker.cs" />
     <Compile Include="Services\OviaFontManager.cs" />
+    <Compile Include="Services\OviaSystemSettingsStore.cs" />
     <Compile Include="Controls\OviaWorkspaceStatusLabel.cs">
       <SubType>Component</SubType>
     </Compile>
@@ -98,6 +99,9 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="FrmRebarUnitWeightTable.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="FrmSystemSettings.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="FrmMain.cs">
