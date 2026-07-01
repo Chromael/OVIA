@@ -15,6 +15,12 @@ namespace OVIA.Desktop
         private OviaTextInput	txtUserId;
         private OviaTextInput	txtPassword;
         private CheckBox		chkSaveId;
+        private Timer		loginFadeTimer;
+        private bool		hasPlayedStartupFadeIn;
+        private OviaWindowCaptionTheme captionTheme;
+
+        private const double	LoginFadeStep	= 0.07D;
+        private const int	LoginFadeInterval	= 15;
 
         private readonly Color	BrandIndigo	= OviaFluentTheme.AccentHover;
         private readonly Color	BrandViolet	= OviaFluentTheme.Accent;
@@ -46,6 +52,8 @@ namespace OVIA.Desktop
             this.MinimizeBox		= true;
             this.ClientSize			= new Size(1080, 680);
             this.BackColor			= SurfaceColor;
+            this.Opacity			= 0D;
+            captionTheme = OviaWindowCaptionTheme.Attach(this);
 
             GradientPanel bg		= new GradientPanel();
             bg.Dock					= DockStyle.Fill;
@@ -58,6 +66,64 @@ namespace OVIA.Desktop
             BuildFooter(bg);
 
             this.ResumeLayout(false);
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            StartStartupFadeIn();
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            StopStartupFadeTimer();
+            base.OnFormClosed(e);
+        }
+
+        private void StartStartupFadeIn()
+        {
+            if (hasPlayedStartupFadeIn)
+            {
+                this.Opacity = 1D;
+                return;
+            }
+
+            hasPlayedStartupFadeIn = true;
+            this.Opacity = 0D;
+
+            StopStartupFadeTimer();
+
+            loginFadeTimer = new Timer();
+            loginFadeTimer.Interval = LoginFadeInterval;
+            loginFadeTimer.Tick += LoginFadeTimer_Tick;
+            loginFadeTimer.Start();
+        }
+
+        private void LoginFadeTimer_Tick(object sender, EventArgs e)
+        {
+            double nextOpacity = this.Opacity + LoginFadeStep;
+
+            if (nextOpacity >= 1D)
+            {
+                this.Opacity = 1D;
+                StopStartupFadeTimer();
+                return;
+            }
+
+            this.Opacity = nextOpacity;
+        }
+
+        private void StopStartupFadeTimer()
+        {
+            if (loginFadeTimer == null)
+            {
+                return;
+            }
+
+            loginFadeTimer.Stop();
+            loginFadeTimer.Tick -= LoginFadeTimer_Tick;
+            loginFadeTimer.Dispose();
+            loginFadeTimer = null;
         }
 
         private void BuildBrandArea(Control parent)
@@ -77,7 +143,6 @@ namespace OVIA.Desktop
             bool hasCompanyLogo = OviaLogoLoader.HasConfiguredCompanyLogo();
 
             int sloganY = 220;
-            int descY = 265;
 
             if (hasCompanyLogo)
             {
@@ -91,11 +156,10 @@ namespace OVIA.Desktop
                 brand.Controls.Add(oviaName);
 
                 sloganY = 238;
-                descY = 283;
             }
 
             Label slogan			= new Label();
-            slogan.Text				= "Operation · Value · Intelligence · Automation";
+            slogan.Text				= "Operational Value Intelligence Agent";
             slogan.AutoSize			= true;
             slogan.Font				= OviaFluentTheme.FontBrand(11F, FontStyle.Regular);
             slogan.ForeColor		= TextDark;
@@ -104,13 +168,13 @@ namespace OVIA.Desktop
             brand.Controls.Add(slogan);
 
             Label desc				= new Label();
-            desc.Text				= "엔지니어링과 데이터를 연결하여\r\n더 스마트한 의사결정과 효율적인 협업을 실현합니다.";
+            desc.Text				= "업무 가치를 올리는 AI 업무 에이전트";
             desc.AutoSize			= false;
             desc.Size				= new Size(390, 60);
-            desc.Font				= OviaFluentTheme.FontBrand(10F, FontStyle.Regular);
-            desc.ForeColor			= TextSub;
+            desc.Font				= OviaFluentTheme.FontBrand(10F, FontStyle.Bold);
+            desc.ForeColor			= Color.FromArgb(150, 158, 168);
             desc.BackColor			= SurfaceColor;
-            desc.Location			= new Point(78, descY);
+            desc.Location			= new Point(78, slogan.Bottom + 7);
             brand.Controls.Add(desc);
 
             OviaCubeIllustration cube = new OviaCubeIllustration();
@@ -137,21 +201,12 @@ namespace OVIA.Desktop
             title.Font				= OviaFluentTheme.FontTitle(19F, FontStyle.Bold);
             title.ForeColor			= TextDark;
             title.BackColor			= Color.White;
-            title.Location			= new Point(55, 42);
+            title.Location			= new Point(53, 42);
             card.Controls.Add(title);
 
-            Label sub				= new Label();
-            sub.Text				= "계정정보를 입력하고 로그인하세요.";
-            sub.AutoSize			= true;
-            sub.Font				= OviaFluentTheme.FontBrand(10F, FontStyle.Regular);
-            sub.ForeColor			= TextSub;
-            sub.BackColor			= Color.White;
-            sub.Location			= new Point(57, 86);
-            card.Controls.Add(sub);
-
-            txtCompanyId			= AddInput(card, "회사 아이디", "회사 아이디를 입력하세요", 55, 125, false);
-            txtUserId				= AddInput(card, "사용자 아이디", "사용자 아이디를 입력하세요", 55, 215, false);
-            txtPassword				= AddInput(card, "암호", "암호를 입력하세요", 55, 305, true);
+            txtCompanyId			= AddInput(card, "회사 아이디", "회사 아이디를 입력하세요", 55, 108, false);
+            txtUserId				= AddInput(card, "사용자 아이디", "사용자 아이디를 입력하세요", 55, 198, false);
+            txtPassword				= AddInput(card, "암호", "암호를 입력하세요", 55, 288, true);
 
             chkSaveId				= new CheckBox();
             chkSaveId.Text			= "아이디 저장";
@@ -160,12 +215,12 @@ namespace OVIA.Desktop
             chkSaveId.ForeColor		= TextDark;
             chkSaveId.BackColor		= Color.White;
             OviaFluentTheme.ApplyCheckBox(chkSaveId);
-            chkSaveId.Location		= new Point(55, 390);
+            chkSaveId.Location		= new Point(55, 372);
             card.Controls.Add(chkSaveId);
 
             OviaButton btnClose		= new OviaButton();
             btnClose.Text			= "종료";
-            btnClose.Location		= new Point(55, 430);
+            btnClose.Location		= new Point(55, 412);
             btnClose.Size			= new Size(185, 46);
             btnClose.IsPrimary		= false;
             btnClose.StartColor		= OviaFluentTheme.ControlBorder;
@@ -179,7 +234,7 @@ namespace OVIA.Desktop
 
             OviaButton btnLogin		= new OviaButton();
             btnLogin.Text			= "로그인";
-            btnLogin.Location		= new Point(260, 430);
+            btnLogin.Location		= new Point(260, 412);
             btnLogin.Size			= new Size(185, 46);
             btnLogin.IsPrimary		= true;
             btnLogin.StartColor		= OviaFluentTheme.Accent;
@@ -192,18 +247,19 @@ namespace OVIA.Desktop
             card.Controls.Add(btnLogin);
 
             Panel line				= new Panel();
-            line.Location			= new Point(55, 505);
+            line.Location			= new Point(55, 487);
             line.Size				= new Size(390, 1);
             line.BackColor			= OviaFluentTheme.CardBorder;
             card.Controls.Add(line);
 
             Label info				= new Label();
-            info.Text				= "ⓘ  승인된 사용자만 로그인할 수 있습니다.";
-            info.AutoSize			= true;
-            info.Font				= OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
-            info.ForeColor			= TextSub;
+            info.Text				= "본 시스템은 승인된 사용자만 로그인할 수 있습니다.\r\n비인가자가 불법 접근을 시도할 경우, 접속 IP 및 PC 고유 정보가\r\n실시간으로 추적·기록되며 법적 책임을 물을 수 있습니다.";
+            info.AutoSize			= false;
+            info.Size				= new Size(390, 60);
+            info.Font				= OviaFluentTheme.FontSystem(8.5F, FontStyle.Regular);
+            info.ForeColor			= Color.FromArgb(150, 158, 168);
             info.BackColor			= Color.White;
-            info.Location			= new Point(58, 526);
+            info.Location			= new Point(55, 508);
             card.Controls.Add(info);
         }
 
@@ -219,14 +275,14 @@ namespace OVIA.Desktop
             parent.Controls.Add(label);
 
             OviaTextInput input		= new OviaTextInput();
-            input.Location			= new Point(x, y + 30);
+            input.Location			= new Point(x, y + 26);
             input.Size				= new Size(390, 48);
             input.Placeholder		= placeholder;
             input.IsPassword		= isPassword;
             input.BorderColor		= BorderSoft;
             input.FocusBorderColor	= OviaFluentTheme.Accent;
-            input.TextColor			= TextDark;
-            input.PlaceholderColor	= OviaFluentTheme.TextTertiary;
+            input.TextColor			= Color.Black;
+            input.PlaceholderColor	= BorderSoft;
             input.SurfaceColor		= Color.White;
             input.Radius			= 2;
             parent.Controls.Add(input);
@@ -270,7 +326,7 @@ namespace OVIA.Desktop
                     txtPassword.Value = "";
                     this.Show();
                     this.Activate();
-                    txtPassword.Focus();
+                    txtPassword.FocusInput();
                     return;
                 }
 
@@ -354,11 +410,13 @@ namespace OVIA.Desktop
 
             Label version			= new Label();
             version.Text			= OviaSystemSettingsStore.GetDisplayVersionText();
-            version.AutoSize		= true;
+            version.AutoSize		= false;
+            version.Size			= new Size(498, 20);
             version.Font			= OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
             version.ForeColor		= TextSub;
             version.BackColor		= SurfaceColor;
-            version.Location		= new Point(900, 642);
+            version.Location		= new Point(520, 642);
+            version.TextAlign		= ContentAlignment.TopRight;
             parent.Controls.Add(version);
         }
 
@@ -467,12 +525,11 @@ namespace OVIA.Desktop
     public class OviaTextInput : UserControl
     {
         private TextBox innerTextBox;
+        private OviaPlaceholderLabel placeholderLabel;
+        private Label passwordMaskLabel;
+        private OviaCapsLockHint capsLockHint;
         private bool focused;
-
-        private const int EM_HIDEBALLOONTIP = 0x1504;
-
-        [DllImport("user32.dll", CharSet = CharSet.Auto)]
-        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+        private bool mouseInsideInput;
 
         public string Placeholder = "";
         public bool IsPassword = false;
@@ -487,22 +544,14 @@ namespace OVIA.Desktop
         {
             get
             {
-                if (innerTextBox.Text == Placeholder && innerTextBox.ForeColor.ToArgb() == PlaceholderColor.ToArgb())
-                {
-                    return "";
-                }
-
                 return innerTextBox.Text;
             }
             set
             {
-                innerTextBox.Text = value;
-                innerTextBox.ForeColor = TextColor;
-
-                if (IsPassword)
-                {
-                    innerTextBox.UseSystemPasswordChar = true;
-                }
+                innerTextBox.Text = value ?? "";
+                ApplyInputTextStyle();
+                UpdatePlaceholderVisibility();
+                UpdatePasswordMask();
             }
         }
 
@@ -518,24 +567,68 @@ namespace OVIA.Desktop
 
             innerTextBox = new TextBox();
             innerTextBox.BorderStyle = BorderStyle.None;
-            innerTextBox.Font = OviaFluentTheme.FontInput(10.5F, FontStyle.Regular);
+            innerTextBox.Font = OviaFluentTheme.FontInput(10.5F, FontStyle.Bold);
             innerTextBox.Location = new Point(18, 14);
             innerTextBox.Width = 350;
             innerTextBox.BackColor = Color.White;
-            innerTextBox.ForeColor = PlaceholderColor;
+            innerTextBox.ForeColor = TextColor;
+            innerTextBox.UseSystemPasswordChar = false;
+            innerTextBox.PasswordChar = '\0';
+
+            placeholderLabel = new OviaPlaceholderLabel();
+            placeholderLabel.Location = new Point(18, 14);
+            placeholderLabel.Size = new Size(350, 20);
+            placeholderLabel.BackColor = Color.White;
+            placeholderLabel.Cursor = Cursors.IBeam;
+            placeholderLabel.Click += delegate { innerTextBox.Focus(); };
+
+            passwordMaskLabel = new Label();
+            passwordMaskLabel.AutoSize = false;
+            passwordMaskLabel.Location = new Point(18, 14);
+            passwordMaskLabel.Size = new Size(350, 22);
+            passwordMaskLabel.BackColor = Color.White;
+            passwordMaskLabel.ForeColor = Color.Black;
+            passwordMaskLabel.Font = OviaFluentTheme.FontInput(10.5F, FontStyle.Bold);
+            passwordMaskLabel.TextAlign = ContentAlignment.MiddleLeft;
+            passwordMaskLabel.Cursor = Cursors.IBeam;
+            passwordMaskLabel.Visible = false;
+            passwordMaskLabel.Click += delegate { innerTextBox.Focus(); };
+
+            this.MouseEnter += InputMouse_Enter;
+            this.MouseLeave += InputMouse_Leave;
+            innerTextBox.MouseEnter += InputMouse_Enter;
+            innerTextBox.MouseLeave += InputMouse_Leave;
+            placeholderLabel.MouseEnter += InputMouse_Enter;
+            placeholderLabel.MouseLeave += InputMouse_Leave;
+            passwordMaskLabel.MouseEnter += InputMouse_Enter;
+            passwordMaskLabel.MouseLeave += InputMouse_Leave;
 
             innerTextBox.Enter += InnerTextBox_Enter;
             innerTextBox.Leave += InnerTextBox_Leave;
+            innerTextBox.TextChanged += InnerTextBox_TextChanged;
             innerTextBox.KeyDown += InnerTextBox_CapsLockStateChanged;
             innerTextBox.KeyUp += InnerTextBox_CapsLockStateChanged;
 
             this.Controls.Add(innerTextBox);
+            this.Controls.Add(passwordMaskLabel);
+            this.Controls.Add(placeholderLabel);
+            placeholderLabel.BringToFront();
+        }
+
+        protected override void OnParentChanged(EventArgs e)
+        {
+            base.OnParentChanged(e);
+            EnsureCapsLockHint();
         }
 
         protected override void OnCreateControl()
         {
             base.OnCreateControl();
-            ApplyPlaceholder();
+            EnsureCapsLockHint();
+            ApplyPlaceholderTextStyle();
+            ApplyInputTextStyle();
+            UpdatePlaceholderVisibility();
+            UpdatePasswordMask();
         }
 
         protected override void OnResize(EventArgs e)
@@ -548,6 +641,32 @@ namespace OVIA.Desktop
                 innerTextBox.Width = this.Width - 36;
                 innerTextBox.Location = new Point(18, (this.Height - innerTextBox.Height) / 2);
             }
+
+            if (placeholderLabel != null && innerTextBox != null)
+            {
+                placeholderLabel.Location = new Point(innerTextBox.Left, innerTextBox.Top - 1);
+                placeholderLabel.Size = new Size(innerTextBox.Width, innerTextBox.Height + 2);
+            }
+
+            if (passwordMaskLabel != null && innerTextBox != null)
+            {
+                passwordMaskLabel.Location = new Point(innerTextBox.Left, innerTextBox.Top - 1);
+                passwordMaskLabel.Size = new Size(innerTextBox.Width, innerTextBox.Height + 2);
+            }
+
+            UpdateCapsLockHintBounds();
+        }
+
+        protected override void OnLocationChanged(EventArgs e)
+        {
+            base.OnLocationChanged(e);
+            UpdateCapsLockHintBounds();
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            innerTextBox.Focus();
         }
 
         protected override void OnPaintBackground(PaintEventArgs e)
@@ -584,98 +703,368 @@ namespace OVIA.Desktop
         private void InnerTextBox_Enter(object sender, EventArgs e)
         {
             focused = true;
-            RefreshPasswordCapsLockBalloon();
-
-            if (innerTextBox.Text == Placeholder && innerTextBox.ForeColor.ToArgb() == PlaceholderColor.ToArgb())
-            {
-                innerTextBox.Text = "";
-                innerTextBox.ForeColor = TextColor;
-
-                if (IsPassword)
-                {
-                    innerTextBox.UseSystemPasswordChar = true;
-                }
-            }
-
+            UpdateCapsLockHint();
+            UpdatePlaceholderVisibility();
+            UpdatePasswordMask();
             this.Invalidate();
         }
 
         private void InnerTextBox_Leave(object sender, EventArgs e)
         {
             focused = false;
-            HidePasswordCapsLockBalloon();
-
-            if (innerTextBox.Text.Trim() == "")
-            {
-                ApplyPlaceholder();
-            }
-
+            mouseInsideInput = IsMouseInsideInputBounds();
+            UpdateCapsLockHint();
+            UpdatePlaceholderVisibility();
+            UpdatePasswordMask();
             this.Invalidate();
+        }
+
+        private void InnerTextBox_TextChanged(object sender, EventArgs e)
+        {
+            ApplyInputTextStyle();
+            UpdatePlaceholderVisibility();
+            UpdatePasswordMask();
+            UpdateCapsLockHint();
         }
 
         private void InnerTextBox_CapsLockStateChanged(object sender, KeyEventArgs e)
         {
-            RefreshPasswordCapsLockBalloon();
+            UpdateCapsLockHint();
         }
 
-        private void RefreshPasswordCapsLockBalloon()
+        private void InputMouse_Enter(object sender, EventArgs e)
         {
-            if (!IsPassword || innerTextBox == null || !innerTextBox.IsHandleCreated)
+            mouseInsideInput = true;
+            UpdateCapsLockHint();
+        }
+
+        private void InputMouse_Leave(object sender, EventArgs e)
+        {
+            try
+            {
+                this.BeginInvoke(new MethodInvoker(delegate
+                {
+                    mouseInsideInput = IsMouseInsideInputBounds();
+                    UpdateCapsLockHint();
+                }));
+            }
+            catch
+            {
+                mouseInsideInput = false;
+                HideCapsLockHint();
+            }
+        }
+
+        private bool IsMouseInsideInputBounds()
+        {
+            if (this.IsDisposed || !this.IsHandleCreated)
+            {
+                return false;
+            }
+
+            Point localPoint = this.PointToClient(Control.MousePosition);
+            return this.ClientRectangle.Contains(localPoint);
+        }
+
+        private void EnsureCapsLockHint()
+        {
+            if (this.Parent == null)
             {
                 return;
             }
 
-            if (!innerTextBox.Focused || !Control.IsKeyLocked(Keys.CapsLock))
+            if (capsLockHint != null && capsLockHint.Parent == this.Parent)
             {
-                HidePasswordCapsLockBalloon();
+                UpdateCapsLockHintBounds();
+                return;
+            }
 
+            if (capsLockHint != null)
+            {
                 try
                 {
-                    this.BeginInvoke(new MethodInvoker(delegate
-                    {
-                        if (innerTextBox != null && innerTextBox.IsHandleCreated)
-                        {
-                            if (!innerTextBox.Focused || !Control.IsKeyLocked(Keys.CapsLock))
-                            {
-                                HidePasswordCapsLockBalloon();
-                            }
-                        }
-                    }));
+                    capsLockHint.Parent.Controls.Remove(capsLockHint);
+                    capsLockHint.Dispose();
                 }
                 catch
                 {
                 }
             }
+
+            capsLockHint = new OviaCapsLockHint();
+            capsLockHint.Visible = false;
+            this.Parent.Controls.Add(capsLockHint);
+            capsLockHint.BringToFront();
+            UpdateCapsLockHintBounds();
         }
 
-        private void HidePasswordCapsLockBalloon()
+        private void UpdateCapsLockHintBounds()
         {
-            if (innerTextBox == null || !innerTextBox.IsHandleCreated)
+            if (capsLockHint == null || this.Parent == null)
             {
                 return;
             }
 
-            try
+            Size hintSize = capsLockHint.GetPreferredSize(Size.Empty);
+            int hintX = this.Left;
+            int hintY = this.Top - hintSize.Height - 6;
+
+            if (hintY < 4)
             {
-                SendMessage(innerTextBox.Handle, EM_HIDEBALLOONTIP, IntPtr.Zero, IntPtr.Zero);
+                hintY = this.Bottom + 4;
             }
-            catch
-            {
-            }
+
+            capsLockHint.SetBounds(hintX, hintY, hintSize.Width, hintSize.Height);
+            capsLockHint.BringToFront();
         }
 
-        private void ApplyPlaceholder()
+        private void UpdateCapsLockHint()
+        {
+            if (capsLockHint == null)
+            {
+                EnsureCapsLockHint();
+            }
+
+            if (capsLockHint == null)
+            {
+                return;
+            }
+
+            if (mouseInsideInput && Control.IsKeyLocked(Keys.CapsLock))
+            {
+                UpdateCapsLockHintBounds();
+                capsLockHint.Visible = true;
+                capsLockHint.BringToFront();
+                return;
+            }
+
+            HideCapsLockHint();
+        }
+
+        private void HideCapsLockHint()
+        {
+            if (capsLockHint == null)
+            {
+                return;
+            }
+
+            capsLockHint.Visible = false;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (capsLockHint != null)
+                {
+                    try
+                    {
+                        if (capsLockHint.Parent != null)
+                        {
+                            capsLockHint.Parent.Controls.Remove(capsLockHint);
+                        }
+                    }
+                    catch
+                    {
+                    }
+
+                    capsLockHint.Dispose();
+                    capsLockHint = null;
+                }
+            }
+
+            base.Dispose(disposing);
+        }
+
+        private void UpdatePlaceholderVisibility()
+        {
+            if (placeholderLabel == null || innerTextBox == null)
+            {
+                return;
+            }
+
+            placeholderLabel.PlaceholderText = Placeholder;
+            placeholderLabel.PlaceholderColor = PlaceholderColor;
+            placeholderLabel.PlaceholderFont = OviaFluentTheme.FontInput(9F, FontStyle.Regular);
+            placeholderLabel.LetterSpacing = -1F;
+            placeholderLabel.Visible = !focused && innerTextBox.Text.Trim() == "";
+            placeholderLabel.Invalidate();
+        }
+
+        private void UpdatePasswordMask()
         {
             if (innerTextBox == null)
             {
                 return;
             }
 
-            if (innerTextBox.Text.Trim() == "")
+            innerTextBox.UseSystemPasswordChar = false;
+            innerTextBox.PasswordChar = '\0';
+
+            if (passwordMaskLabel == null)
             {
-                innerTextBox.UseSystemPasswordChar = false;
-                innerTextBox.Text = Placeholder;
-                innerTextBox.ForeColor = PlaceholderColor;
+                return;
+            }
+
+            bool showMask = IsPassword && innerTextBox.Text.Length > 0;
+            passwordMaskLabel.Visible = showMask;
+
+            if (showMask)
+            {
+                passwordMaskLabel.Text = new string('●', innerTextBox.Text.Length);
+                passwordMaskLabel.Font = innerTextBox.Font;
+                passwordMaskLabel.BringToFront();
+                innerTextBox.ForeColor = Color.White;
+            }
+            else
+            {
+                passwordMaskLabel.Text = "";
+                innerTextBox.ForeColor = TextColor;
+            }
+        }
+
+        private void ApplyPlaceholderTextStyle()
+        {
+            if (placeholderLabel == null)
+            {
+                return;
+            }
+
+            placeholderLabel.PlaceholderText = Placeholder;
+            placeholderLabel.PlaceholderColor = PlaceholderColor;
+            placeholderLabel.PlaceholderFont = OviaFluentTheme.FontInput(9F, FontStyle.Regular);
+            placeholderLabel.LetterSpacing = -1F;
+            placeholderLabel.Invalidate();
+        }
+
+        private void ApplyInputTextStyle()
+        {
+            if (innerTextBox == null)
+            {
+                return;
+            }
+
+            innerTextBox.Font = OviaFluentTheme.FontInput(10.5F, FontStyle.Bold);
+
+            if (IsPassword && innerTextBox.Text.Length > 0)
+            {
+                innerTextBox.ForeColor = Color.White;
+                return;
+            }
+
+            innerTextBox.ForeColor = TextColor;
+        }
+
+        public void FocusInput()
+        {
+            if (innerTextBox != null)
+            {
+                innerTextBox.Focus();
+            }
+        }
+    }
+
+    public class OviaCapsLockHint : Control
+    {
+        private readonly Color fillColor = Color.FromArgb(28, 28, 28);
+        private readonly Color textColor = Color.White;
+        private const string HintText = "Caps Lock이 켜져있습니다.";
+
+        public OviaCapsLockHint()
+        {
+            this.SetStyle(ControlStyles.UserPaint, true);
+            this.SetStyle(ControlStyles.AllPaintingInWmPaint, true);
+            this.SetStyle(ControlStyles.OptimizedDoubleBuffer, true);
+            this.SetStyle(ControlStyles.ResizeRedraw, true);
+            this.DoubleBuffered = true;
+            // Color.Transparent는 일반 Control에서 런타임 예외가 발생할 수 있으므로 사용하지 않는다.
+            // 도움말 자체가 불투명한 짙은 배경이므로 BackColor도 동일 색상으로 고정한다.
+            this.BackColor = fillColor;
+            this.Font = OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
+        }
+
+        public override Size GetPreferredSize(Size proposedSize)
+        {
+            using (Graphics graphics = this.CreateGraphics())
+            {
+                SizeF textSize = graphics.MeasureString(HintText, this.Font);
+                return new Size((int)Math.Ceiling(textSize.Width) + 20, 24);
+            }
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs pevent)
+        {
+            using (SolidBrush brush = new SolidBrush(fillColor))
+            {
+                pevent.Graphics.FillRectangle(brush, this.ClientRectangle);
+            }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+            Rectangle rect = new Rectangle(0, 0, this.Width - 1, this.Height - 1);
+
+            using (GraphicsPath path = OviaDrawHelper.RoundRect(rect, 2))
+            {
+                using (SolidBrush brush = new SolidBrush(fillColor))
+                {
+                    e.Graphics.FillPath(brush, path);
+                }
+            }
+
+            TextRenderer.DrawText(
+                e.Graphics,
+                HintText,
+                this.Font,
+                new Rectangle(10, 0, this.Width - 20, this.Height),
+                textColor,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPrefix
+            );
+        }
+    }
+
+    public class OviaPlaceholderLabel : Control
+    {
+        public string PlaceholderText = "";
+        public Color PlaceholderColor = OviaFluentTheme.TextTertiary;
+        public Font PlaceholderFont = OviaFluentTheme.FontInput(9F, FontStyle.Regular);
+        public float LetterSpacing = -1F;
+
+        public OviaPlaceholderLabel()
+        {
+            this.SetStyle(ControlStyles.UserPaint, true);
+            this.SetStyle(ControlStyles.AllPaintingInWmPaint, true);
+            this.SetStyle(ControlStyles.OptimizedDoubleBuffer, true);
+            this.DoubleBuffered = true;
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs pevent)
+        {
+            using (SolidBrush brush = new SolidBrush(this.BackColor))
+            {
+                pevent.Graphics.FillRectangle(brush, this.ClientRectangle);
+            }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            e.Graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+
+            using (SolidBrush brush = new SolidBrush(PlaceholderColor))
+            {
+                float x = 0F;
+                float y = Math.Max(0F, (this.Height - PlaceholderFont.Height) / 2F);
+
+                for (int i = 0; i < PlaceholderText.Length; i++)
+                {
+                    string ch = PlaceholderText[i].ToString();
+                    e.Graphics.DrawString(ch, PlaceholderFont, brush, x, y);
+                    SizeF size = e.Graphics.MeasureString(ch, PlaceholderFont, PointF.Empty, StringFormat.GenericTypographic);
+                    x += Math.Max(1F, size.Width + LetterSpacing);
+                }
             }
         }
     }

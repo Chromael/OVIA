@@ -60,6 +60,7 @@ namespace OVIA.Desktop
         private FrmBarList barListForm;
         private FrmBarListMappingManager barListMappingForm;
         private bool logoutConfirmed;
+        private OviaWindowCaptionTheme captionTheme;
 
         private readonly Color BrandIndigo = OviaFluentTheme.DashboardPrimaryDark;
         private readonly Color BrandViolet = OviaFluentTheme.DashboardPrimary;
@@ -108,6 +109,7 @@ namespace OVIA.Desktop
             this.WindowState = FormWindowState.Maximized;
             this.BackColor = SurfaceColor;
             this.FormClosing += FrmMain_FormClosing;
+            captionTheme = OviaWindowCaptionTheme.Attach(this);
 
             windowToolTip = new ToolTip();
             windowToolTip.AutoPopDelay = 4000;
@@ -161,23 +163,21 @@ namespace OVIA.Desktop
             top.BackColor = Color.White;
             parent.Controls.Add(top, 0, 0);
 
-            OviaMenuButton dashboardMenu = AddMenu(top, "메인", 16, true);
-            dashboardMenu.Click += delegate { ShowDashboard(); };
-            OviaMenuButton projectMenu = AddMenu(top, "공사관리", 112, false);
+            OviaMenuButton projectMenu = AddMenu(top, "공사관리", 16, false);
             projectMenu.Click += OpenProjectManager_Click;
 
-            OviaMenuButton cadMenu = AddMenu(top, "AutoCAD 연결", 220, false);
+            OviaMenuButton cadMenu = AddMenu(top, "AutoCAD 연결", 128, false);
             cadMenu.Click += DetectAutoCad_Click;
-            OviaMenuButton extractMenu = AddMenu(top, "도면 추출", 348, false);
+            OviaMenuButton extractMenu = AddMenu(top, "도면 추출", 256, false);
             extractMenu.Click += ExtractReady_Click;
 
-            OviaMenuButton barListMenu = AddMenu(top, "BarList", 456, false);
+            OviaMenuButton barListMenu = AddMenu(top, "BarList", 364, false);
             barListMenu.Click += OpenBarList_Click;
 
-            OviaMenuButton settingsMenu = AddMenu(top, "환경 설정", 548, false);
+            OviaMenuButton settingsMenu = AddMenu(top, "환경 설정", 456, false);
             settingsMenu.Click += OpenBarListMapping_Click;
 
-            OviaMenuButton barListMappingMenu = AddMenu(top, "BarList 항목 매핑", 668, false);
+            OviaMenuButton barListMappingMenu = AddMenu(top, "BarList 항목 매핑", 576, false);
             barListMappingMenu.Click += OpenBarListMapping_Click;
 
             OviaSmallButton logout = new OviaSmallButton();

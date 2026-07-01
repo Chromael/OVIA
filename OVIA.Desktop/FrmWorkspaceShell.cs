@@ -84,16 +84,7 @@ namespace OVIA.Desktop
 
             commandBar.Controls.Clear();
 
-            AddMenu(commandBar, "메인", "\uE7F4", 34, 88, selectedMenu == "MAIN", delegate(Control source)
-            {
-                IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(source);
-                if (navigator != null)
-                {
-                    navigator.NavigateToMain();
-                }
-            });
-
-            AddMenu(commandBar, "공사관리", "\uE90F", 132, 112, selectedMenu == "PROJECT", delegate(Control source)
+            AddMenu(commandBar, "공사관리", "\uE90F", 34, 112, selectedMenu == "PROJECT", delegate(Control source)
             {
                 IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(source);
                 if (navigator != null)
@@ -102,7 +93,7 @@ namespace OVIA.Desktop
                 }
             });
 
-            AddMenu(commandBar, "AutoCAD 연결", "\uE71B", 254, 140, selectedMenu == "CAD", delegate(Control source)
+            AddMenu(commandBar, "AutoCAD 연결", "\uE71B", 156, 140, selectedMenu == "CAD", delegate(Control source)
             {
                 IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(source);
                 if (navigator != null)
@@ -111,7 +102,7 @@ namespace OVIA.Desktop
                 }
             });
 
-            AddMenu(commandBar, "도면 추출", "\uE896", 404, 118, selectedMenu == "EXTRACT", delegate(Control source)
+            AddMenu(commandBar, "도면 추출", "\uE896", 306, 118, selectedMenu == "EXTRACT", delegate(Control source)
             {
                 IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(source);
                 if (navigator != null)
@@ -120,7 +111,7 @@ namespace OVIA.Desktop
                 }
             });
 
-            AddMenu(commandBar, "BarList", "\uE8A5", 532, 104, selectedMenu == "BARLIST", delegate(Control source)
+            AddMenu(commandBar, "BarList", "\uE8A5", 434, 104, selectedMenu == "BARLIST", delegate(Control source)
             {
                 IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(source);
                 if (navigator != null)
@@ -129,12 +120,12 @@ namespace OVIA.Desktop
                 }
             });
 
-            AddMenu(commandBar, "ERP", "\uE774", 646, 76, selectedMenu == "ERP", delegate(Control source)
+            AddMenu(commandBar, "ERP", "\uE774", 548, 76, selectedMenu == "ERP", delegate(Control source)
             {
                 OpenErpInDefaultBrowser(source);
             });
 
-            OviaMenuButton settings = AddMenu(commandBar, "환경 설정 \uE70D", "\uE713", 732, 142, selectedMenu == "SETTINGS", null);
+            OviaMenuButton settings = AddMenu(commandBar, "환경 설정 \uE70D", "\uE713", 634, 142, selectedMenu == "SETTINGS", null);
             settings.Click += delegate
             {
                 ToggleSettingsDropDown(settings);
@@ -347,7 +338,7 @@ namespace OVIA.Desktop
 
             DialogResult result = MessageBox.Show(
                 "OVIA / 오비아\r\n" +
-                "Operation + Value + Intelligence + Automation\r\n\r\n" +
+                "Operational Value Intelligence Agent\r\n\r\n" +
                 "현재 버전: " + displayVersion + "\r\n\r\n" +
                 "최고관리자 권한으로 버전정보를 수정하시겠습니까?",
                 "OVIA 버전정보",
@@ -389,7 +380,7 @@ namespace OVIA.Desktop
         {
             MessageBox.Show(
                 "OVIA / 오비아\r\n" +
-                "Operation + Value + Intelligence + Automation\r\n\r\n" +
+                "Operational Value Intelligence Agent\r\n\r\n" +
                 "버전: " + displayVersion + "\r\n" +
                 "모드: 개발/테스트 버전\r\n\r\n" +
                 "AutoCAD BarList 추출 및 공사별 철근 데이터 관리 솔루션입니다.",
@@ -842,7 +833,7 @@ namespace OVIA.Desktop
             Color iconColor = Color.FromArgb(96, 104, 116);
             Color textColor = OviaFluentTheme.TextPrimary;
 
-            using (Font iconFont = OviaIconFont.Create(12.5F, FontStyle.Regular))
+            using (Font iconFont = new Font("Segoe MDL2 Assets", 12.5F, FontStyle.Regular))
             using (Font textFont = OviaFluentTheme.FontButton(9.2F, FontStyle.Regular))
             {
                 Rectangle iconRect = new Rectangle(15, 0, 22, this.Height);
@@ -1116,6 +1107,7 @@ namespace OVIA.Desktop
         private readonly string userId;
         private Panel hostPanel;
         private Form currentScreen;
+        private OviaWindowCaptionTheme captionTheme;
 
         public string CurrentCompanyId
         {
@@ -1150,6 +1142,7 @@ namespace OVIA.Desktop
             this.MinimumSize = new Size(1100, 750);
             this.BackColor = OviaFluentTheme.AppBackground;
             this.FormClosing += FrmWorkspaceShell_FormClosing;
+            captionTheme = OviaWindowCaptionTheme.Attach(this);
 
             hostPanel = new Panel();
             hostPanel.Dock = DockStyle.Fill;

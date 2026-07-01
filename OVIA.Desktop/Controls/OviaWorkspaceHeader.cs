@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
 namespace OVIA.Desktop.Controls
@@ -20,7 +21,7 @@ namespace OVIA.Desktop.Controls
         private const int HeaderLeft = 34;
         private const int HeaderTop = 8;
         private const int HeaderHeight = 32;
-        private const int NavigationWidth = 152;
+        private const int NavigationWidth = 188;
         private const int LogoutWidth = 30;
         private const int LogoutRightGap = 20;
         private const int BreadcrumbSafeGap = 40;
@@ -32,14 +33,17 @@ namespace OVIA.Desktop.Controls
         private readonly Color surfaceColor;
         private readonly Color textColor;
         private readonly Color inactiveColor;
+        private readonly Color explorerHoverColor;
+        private readonly Color explorerDownColor;
         private readonly Color logoutHoverColor;
         private readonly Color logoutDownColor;
 
-        private Button btnBack;
-        private Button btnForward;
-        private Button btnUp;
-        private Button btnRefresh;
-        private Button btnLogout;
+        private OviaExplorerIconButton btnBack;
+        private OviaExplorerIconButton btnForward;
+        private OviaExplorerIconButton btnUp;
+        private OviaExplorerIconButton btnRefresh;
+        private OviaExplorerIconButton btnHome;
+        private OviaExplorerIconButton btnLogout;
         private Panel addressBar;
         private LinkLabel breadcrumbLabel;
         private TextBox pathTextBox;
@@ -58,6 +62,8 @@ namespace OVIA.Desktop.Controls
             surfaceColor = OviaFluentTheme.AppBackground;
             textColor = Color.Black;
             inactiveColor = Color.FromArgb(175, 181, 190);
+            explorerHoverColor = Color.FromArgb(229, 233, 238);
+            explorerDownColor = Color.FromArgb(218, 224, 232);
             logoutHoverColor = Color.FromArgb(220, 53, 69);
             logoutDownColor = Color.FromArgb(185, 28, 28);
 
@@ -256,6 +262,18 @@ namespace OVIA.Desktop.Controls
             btnRefresh.Click += delegate { Raise(RefreshClicked); };
             Controls.Add(btnRefresh);
 
+            btnHome = CreateExplorerButton("\uE7F4", "메인");
+            btnHome.Click += delegate
+            {
+                if (RaisePathSegmentClicked("MAIN"))
+                {
+                    return;
+                }
+
+                Raise(MainPathClicked);
+            };
+            Controls.Add(btnHome);
+
             addressBar = new Panel();
             addressBar.BackColor = Color.White;
             addressBar.Margin = Padding.Empty;
@@ -311,6 +329,7 @@ namespace OVIA.Desktop.Controls
             btnForward.Location = new Point(36, 0);
             btnUp.Location = new Point(72, 0);
             btnRefresh.Location = new Point(108, 0);
+            btnHome.Location = new Point(144, 0);
 
             int logoutX = Math.Max(NavigationWidth, this.ClientSize.Width - LogoutRightGap - LogoutWidth);
             btnLogout.Location = new Point(logoutX, 0);
@@ -359,18 +378,20 @@ namespace OVIA.Desktop.Controls
             return false;
         }
 
-        private Button CreateExplorerButton(string text, string tip)
+        private OviaExplorerIconButton CreateExplorerButton(string text, string tip)
         {
-            Button button = new Button();
+            OviaExplorerIconButton button = new OviaExplorerIconButton();
             button.Text = text;
             button.Size = new Size(LogoutWidth, 30);
-            button.FlatStyle = FlatStyle.Flat;
-            button.FlatAppearance.BorderSize = 0;
-            button.FlatAppearance.MouseOverBackColor = OviaFluentTheme.NavigationHover;
-            button.FlatAppearance.MouseDownBackColor = OviaFluentTheme.NavigationSelected;
             button.Font = OVIA.Desktop.OviaIconFont.Create(9.5F, FontStyle.Regular);
             button.ForeColor = textColor;
+            button.NormalForeColor = textColor;
+            button.HoverForeColor = textColor;
+            button.DownForeColor = textColor;
             button.BackColor = surfaceColor;
+            button.HoverBackColor = explorerHoverColor;
+            button.DownBackColor = explorerDownColor;
+            button.CornerRadius = 2;
             button.TabStop = false;
 
             if (toolTip != null)
@@ -381,34 +402,24 @@ namespace OVIA.Desktop.Controls
             return button;
         }
 
-        private void StyleLogoutButton(Button button)
+        private void StyleLogoutButton(OviaExplorerIconButton button)
         {
             if (button == null)
             {
                 return;
             }
 
-            button.UseVisualStyleBackColor = false;
-            button.FlatAppearance.MouseOverBackColor = logoutHoverColor;
-            button.FlatAppearance.MouseDownBackColor = logoutDownColor;
             button.BackColor = surfaceColor;
             button.ForeColor = textColor;
-            button.Region = null;
-
-            button.MouseEnter += delegate
-            {
-                button.BackColor = logoutHoverColor;
-                button.ForeColor = Color.White;
-            };
-
-            button.MouseLeave += delegate
-            {
-                button.BackColor = surfaceColor;
-                button.ForeColor = textColor;
-            };
+            button.NormalForeColor = textColor;
+            button.HoverForeColor = Color.White;
+            button.DownForeColor = Color.White;
+            button.HoverBackColor = logoutHoverColor;
+            button.DownBackColor = logoutDownColor;
+            button.CornerRadius = 2;
         }
 
-        private void SetNavigationEnabled(Button button, bool enabled)
+        private void SetNavigationEnabled(OviaExplorerIconButton button, bool enabled)
         {
             if (button == null)
             {
@@ -418,9 +429,13 @@ namespace OVIA.Desktop.Controls
             button.Enabled = enabled;
             button.Cursor = enabled ? Cursors.Hand : Cursors.Default;
             button.ForeColor = enabled ? textColor : inactiveColor;
-            button.FlatAppearance.MouseOverBackColor = enabled ? OviaFluentTheme.NavigationHover : surfaceColor;
-            button.FlatAppearance.MouseDownBackColor = enabled ? OviaFluentTheme.NavigationSelected : surfaceColor;
-            button.BackColor = surfaceColor;
+            button.NormalForeColor = enabled ? textColor : inactiveColor;
+            button.HoverForeColor = enabled ? textColor : inactiveColor;
+            button.DownForeColor = enabled ? textColor : inactiveColor;
+            button.HoverBackColor = enabled ? explorerHoverColor : Color.Empty;
+            button.DownBackColor = enabled ? explorerDownColor : Color.Empty;
+            button.ResetInteractionState();
+            button.Invalidate();
         }
 
         private void BreadcrumbLabel_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
@@ -601,4 +616,175 @@ namespace OVIA.Desktop.Controls
             }
         }
     }
+
+    internal sealed class OviaExplorerIconButton : Control
+    {
+        private bool isHover;
+        private bool isDown;
+
+        public OviaExplorerIconButton()
+        {
+            SetStyle(
+                ControlStyles.UserPaint
+                | ControlStyles.AllPaintingInWmPaint
+                | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.ResizeRedraw
+                | ControlStyles.SupportsTransparentBackColor,
+                true);
+
+            SetStyle(ControlStyles.Selectable, false);
+            BackColor = Color.Transparent;
+            Cursor = Cursors.Hand;
+            Margin = Padding.Empty;
+            Padding = Padding.Empty;
+            TabStop = false;
+        }
+
+        public Color NormalForeColor { get; set; }
+        public Color HoverForeColor { get; set; }
+        public Color DownForeColor { get; set; }
+        public Color HoverBackColor { get; set; }
+        public Color DownBackColor { get; set; }
+        public int CornerRadius { get; set; }
+
+        public void ResetInteractionState()
+        {
+            isHover = false;
+            isDown = false;
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            if (Enabled)
+            {
+                isHover = true;
+                Invalidate();
+            }
+
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            isHover = false;
+            isDown = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            if (Enabled && e.Button == MouseButtons.Left)
+            {
+                isDown = true;
+                Invalidate();
+            }
+
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            isDown = false;
+            Invalidate();
+            base.OnMouseUp(e);
+        }
+
+        protected override void OnEnabledChanged(EventArgs e)
+        {
+            ResetInteractionState();
+            Invalidate();
+            base.OnEnabledChanged(e);
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs pevent)
+        {
+            // 배경은 OnPaint에서 부모 배경색으로 한 번만 지운다.
+            // 기본 Button/Control 배경 도형이나 포커스 잔상이 섞이지 않게 한다.
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            Color parentBackColor = Parent == null ? SystemColors.Control : Parent.BackColor;
+            g.Clear(parentBackColor);
+
+            Color fillColor = Color.Empty;
+            Color drawForeColor = NormalForeColor == Color.Empty ? ForeColor : NormalForeColor;
+
+            if (Enabled && isDown)
+            {
+                fillColor = DownBackColor;
+                if (DownForeColor != Color.Empty)
+                {
+                    drawForeColor = DownForeColor;
+                }
+            }
+            else if (Enabled && isHover)
+            {
+                fillColor = HoverBackColor;
+                if (HoverForeColor != Color.Empty)
+                {
+                    drawForeColor = HoverForeColor;
+                }
+            }
+
+            if (fillColor != Color.Empty && fillColor != Color.Transparent)
+            {
+                Rectangle hoverRect = GetCenteredSquareRectangle();
+                using (GraphicsPath path = CreateRoundRectPath(hoverRect, Math.Max(0, CornerRadius)))
+                using (SolidBrush brush = new SolidBrush(fillColor))
+                {
+                    g.FillPath(brush, path);
+                }
+            }
+
+            TextRenderer.DrawText(
+                g,
+                Text,
+                Font,
+                ClientRectangle,
+                drawForeColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+        }
+
+        private Rectangle GetCenteredSquareRectangle()
+        {
+            int size = Math.Min(30, Math.Min(Width, Height));
+            int left = Math.Max(0, (Width - size) / 2);
+            int top = Math.Max(0, (Height - size) / 2);
+            return new Rectangle(left, top, Math.Max(1, size - 1), Math.Max(1, size - 1));
+        }
+
+        private static GraphicsPath CreateRoundRectPath(Rectangle rect, int radius)
+        {
+            GraphicsPath path = new GraphicsPath();
+
+            if (radius <= 0)
+            {
+                path.AddRectangle(rect);
+                path.CloseFigure();
+                return path;
+            }
+
+            int diameter = radius * 2;
+            Rectangle arc = new Rectangle(rect.Left, rect.Top, diameter, diameter);
+            path.AddArc(arc, 180, 90);
+
+            arc.X = rect.Right - diameter;
+            path.AddArc(arc, 270, 90);
+
+            arc.Y = rect.Bottom - diameter;
+            path.AddArc(arc, 0, 90);
+
+            arc.X = rect.Left;
+            path.AddArc(arc, 90, 90);
+
+            path.CloseFigure();
+            return path;
+        }
+    }
+
 }
