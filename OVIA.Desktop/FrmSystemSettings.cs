@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
@@ -8,7 +8,7 @@ using OVIA.Desktop.Controls;
 
 namespace OVIA.Desktop
 {
-    public class FrmSystemSettings : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout
+    public class FrmSystemSettings : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider
     {
         private readonly string companyId;
         private readonly string userId;
@@ -38,6 +38,16 @@ namespace OVIA.Desktop
         private bool isLoading = false;
         private string cleanSignature = "";
 
+
+        public string WorkspaceHelpKey { get { return "SYSTEM_SETTINGS"; } }
+        public string WorkspaceHelpTitle { get { return "시스템 설정"; } }
+        public string WorkspaceHelpText
+        {
+            get
+            {
+                return "ERP 연결 주소와 회사 로고처럼 OVIA 전체에 적용되는 기본값을 관리합니다. 이 화면의 저장 권한은 최고관리자에게만 부여됩니다.";
+            }
+        }
         public FrmSystemSettings(string companyId, string userId)
         {
             this.companyId = companyId == null ? "" : companyId;
@@ -68,7 +78,6 @@ namespace OVIA.Desktop
 
             BuildExplorerHeader(this);
             BuildCommandBar(this);
-            BuildTitle(this);
             BuildContent(this);
             BuildBottomButtons(this);
             BuildStatus(this);
@@ -166,8 +175,8 @@ namespace OVIA.Desktop
         private void BuildContent(Control parent)
         {
             contentPanel = new Panel();
-            contentPanel.Location = new Point(32, 206);
-            contentPanel.Size = new Size(1116, 390);
+            contentPanel.Location = new Point(32, 124);
+            contentPanel.Size = new Size(1116, 472);
             contentPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             contentPanel.BackColor = SurfaceColor;
             contentPanel.AutoScroll = true;
@@ -367,7 +376,7 @@ namespace OVIA.Desktop
         public void ApplyWorkspaceLayout()
         {
             int contentWidth = Math.Max(1, this.ClientSize.Width - 64);
-            int contentHeight = Math.Max(220, this.ClientSize.Height - 318);
+            int contentHeight = Math.Max(220, this.ClientSize.Height - 236);
 
             if (descLabel != null)
             {

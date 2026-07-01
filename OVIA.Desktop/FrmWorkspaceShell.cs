@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -19,6 +19,7 @@ namespace OVIA.Desktop
         void NavigateToBarListMapping();
         void NavigateToRebarUnitWeightTable();
         void NavigateToSystemSettings();
+        void NavigateToMenuManager();
         void ShowAutoCadEnvironmentCheck();
         void ShowAutoCadExtractGuide();
         void RequestLogout();
@@ -84,7 +85,7 @@ namespace OVIA.Desktop
 
             commandBar.Controls.Clear();
 
-            AddMenu(commandBar, "공사관리", "\uE90F", 34, 112, selectedMenu == "PROJECT", delegate(Control source)
+            AddMenu(commandBar, "공사관리", "\uE74C", 34, 112, selectedMenu == "PROJECT", delegate(Control source)
             {
                 IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(source);
                 if (navigator != null)
@@ -194,7 +195,19 @@ namespace OVIA.Desktop
                 }
             });
 
-            menu.AddItem("버전정보", "\uE946", delegate
+            menu.AddItem("메뉴관리", "", delegate
+            {
+                IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(settingsButton);
+                menu.CloseImmediate();
+                currentSettingsDropDown = null;
+
+                if (navigator != null)
+                {
+                    navigator.NavigateToMenuManager();
+                }
+            });
+
+            menu.AddItem("버전정보", "", delegate
             {
                 menu.CloseImmediate();
                 currentSettingsDropDown = null;
@@ -1202,6 +1215,24 @@ namespace OVIA.Desktop
 
             this.Text = "OVIA 시스템 설정";
             ShowScreen(new FrmSystemSettings(companyId, userId));
+        }
+
+        public void NavigateToMenuManager()
+        {
+            if (!OviaSystemSettingsStore.IsSuperAdminUser(userId))
+            {
+                MessageBox.Show(
+                    "메뉴관리는 최고관리자만 접근할 수 있습니다.\r\n\r\n현재 사용자 ID: " + userId,
+                    "OVIA 권한 확인",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+
+                return;
+            }
+
+            this.Text = "OVIA 메뉴관리";
+            ShowScreen(new FrmMenuManager(companyId, userId));
         }
 
         public void ShowAutoCadEnvironmentCheck()

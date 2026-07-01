@@ -106,6 +106,9 @@
     <Compile Include="FrmSystemSettings.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="FrmMenuManager.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="FrmMain.cs">
       <SubType>Form</SubType>
     </Compile>

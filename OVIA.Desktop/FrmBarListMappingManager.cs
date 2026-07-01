@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -8,7 +8,7 @@ using OVIA.Desktop.Controls;
 
 namespace OVIA.Desktop
 {
-    public class FrmBarListMappingManager : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout
+    public class FrmBarListMappingManager : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider
     {
         private readonly string companyId;
         private readonly string userId;
@@ -44,6 +44,16 @@ namespace OVIA.Desktop
         private readonly Color EditCellBorderColor = Color.FromArgb(20, 20, 20);
         private readonly Color ChangedTextColor = OviaFluentTheme.Danger;
 
+
+        public string WorkspaceHelpKey { get { return "BARLIST_MAPPING"; } }
+        public string WorkspaceHelpTitle { get { return "BarList 항목 매핑"; } }
+        public string WorkspaceHelpText
+        {
+            get
+            {
+                return "CAD 도면마다 다른 철근재료표 헤더명을 OVIA 기본 헤더로 치환합니다. 매핑 텍스트는 셀 단위로 추가/수정할 수 있으며, 매핑 열은 드래그로 순서를 바꿀 수 있습니다.";
+            }
+        }
         public FrmBarListMappingManager(string companyId, string userId)
         {
             this.companyId = companyId == null ? "" : companyId;
@@ -80,28 +90,9 @@ namespace OVIA.Desktop
             BuildExplorerHeader(this, "메인  ›  환경설정  ›  BarList 항목 매핑");
             BuildCommandBar(this);
 
-            Label title = new Label();
-            title.Text = "BarList 항목 매핑";
-            title.AutoSize = true;
-            title.Font = OviaFluentTheme.FontTitle(20F, FontStyle.Bold);
-            title.ForeColor = TextDark;
-            title.BackColor = SurfaceColor;
-            title.Location = new Point(32, 128);
-            this.Controls.Add(title);
-
-            Label desc = new Label();
-            desc.Text = "CAD 도면마다 다른 철근재료표 헤더명을 OVIA 기본 헤더로 치환합니다. 매핑 텍스트는 셀 단위로 추가/수정할 수 있으며, 매핑 열은 드래그로 순서를 바꿀 수 있습니다.";
-            desc.AutoSize = false;
-            desc.Size = new Size(980, 42);
-            desc.Font = OviaFluentTheme.FontSystem(9.5F, FontStyle.Regular);
-            desc.ForeColor = TextSub;
-            desc.BackColor = SurfaceColor;
-            desc.Location = new Point(35, 172);
-            this.Controls.Add(desc);
-
             grid = new DataGridView();
-            grid.Location = new Point(32, 226);
-            grid.Size = new Size(1116, 302);
+            grid.Location = new Point(32, 124);
+            grid.Size = new Size(1116, 430);
             grid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             grid.AllowUserToAddRows = false;
             grid.AllowUserToDeleteRows = false;
@@ -186,7 +177,7 @@ namespace OVIA.Desktop
             if (grid != null)
             {
                 grid.Width = Math.Max(1, this.ClientSize.Width - 64);
-                grid.Height = Math.Max(120, this.ClientSize.Height - 338);
+                grid.Height = Math.Max(160, this.ClientSize.Height - 260);
             }
 
             if (lblStatus != null)

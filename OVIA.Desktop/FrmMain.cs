@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -54,6 +54,7 @@ namespace OVIA.Desktop
         private TableLayoutPanel mainLayout;
         private Panel workspacePanel;
         private Label bottomStatusLabel;
+        private OviaBottomHelpButton bottomHelpButton;
         private string bottomAutoCadStatusText = "AutoCAD 상태 확인 중";
         private Form currentScreen;
         private Form projectManagerForm;
@@ -205,13 +206,37 @@ namespace OVIA.Desktop
 
             bottomStatusLabel = new Label();
             bottomStatusLabel.AutoSize = false;
-            bottomStatusLabel.Dock = DockStyle.Fill;
+            bottomStatusLabel.Location = new Point(0, 1);
+            bottomStatusLabel.Size = new Size(Math.Max(1, bottom.ClientSize.Width - 40), Math.Max(1, bottom.ClientSize.Height - 1));
+            bottomStatusLabel.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right | AnchorStyles.Bottom;
             bottomStatusLabel.Padding = new Padding(16, 0, 16, 0);
             bottomStatusLabel.TextAlign = ContentAlignment.MiddleLeft;
             bottomStatusLabel.Font = OviaFluentTheme.FontStatus(8.7F, FontStyle.Regular);
             bottomStatusLabel.ForeColor = TextSub;
             bottomStatusLabel.BackColor = SurfaceColor;
             bottom.Controls.Add(bottomStatusLabel);
+
+            bottomHelpButton = new OviaBottomHelpButton();
+            bottomHelpButton.Text = "?";
+            bottomHelpButton.Size = new Size(28, 24);
+            bottomHelpButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            bottomHelpButton.Location = new Point(Math.Max(4, bottom.ClientSize.Width - 34), 3);
+            bottomHelpButton.Click += ShowCurrentPageHelp_Click;
+            bottom.Controls.Add(bottomHelpButton);
+            bottomHelpButton.BringToFront();
+
+            bottom.Resize += delegate
+            {
+                if (bottomStatusLabel != null && !bottomStatusLabel.IsDisposed)
+                {
+                    bottomStatusLabel.Size = new Size(Math.Max(1, bottom.ClientSize.Width - 40), Math.Max(1, bottom.ClientSize.Height - 1));
+                }
+
+                if (bottomHelpButton != null && !bottomHelpButton.IsDisposed)
+                {
+                    bottomHelpButton.Location = new Point(Math.Max(4, bottom.ClientSize.Width - 34), 3);
+                }
+            };
         }
 
         private void BottomStatus_Paint(object sender, PaintEventArgs e)
@@ -346,7 +371,7 @@ namespace OVIA.Desktop
                 "공사 현황",
                 GetProjectStatusTitle(),
                 GetProjectStatusNote(),
-                "\uE90F",
+                "\uE74C",
                 OviaFluentTheme.DashboardPrimary,
                 "현황",
                 OviaStatusKind.Warning,
@@ -1482,6 +1507,23 @@ namespace OVIA.Desktop
             ShowWorkspaceScreen(new FrmSystemSettings(companyId, userId), "OVIA 시스템 설정", "시스템 설정을 불러왔습니다.");
         }
 
+        public void NavigateToMenuManager()
+        {
+            if (!OviaSystemSettingsStore.IsSuperAdminUser(userId))
+            {
+                MessageBox.Show(
+                    "메뉴관리는 최고관리자만 접근할 수 있습니다.\r\n\r\n현재 사용자 ID: " + userId,
+                    "OVIA 권한 확인",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+
+                return;
+            }
+
+            ShowWorkspaceScreen(new FrmMenuManager(companyId, userId), "OVIA 메뉴관리", "메뉴관리 설정을 불러왔습니다.");
+        }
+
         private void ShowWorkspaceScreen(Form nextScreen, string title, string statusText)
         {
             if (nextScreen == null)
@@ -1597,6 +1639,87 @@ namespace OVIA.Desktop
 
             currentScreen.Bounds = workspacePanel.ClientRectangle;
             ApplyWorkspaceLayout(currentScreen);
+        }
+
+        private void ShowCurrentPageHelp_Click(object sender, EventArgs e)
+        {
+            string key = "MAIN";
+            string title = "메인";
+            string fallback = "OVIA 전체 업무 현황을 확인하는 대시보드입니다.";
+
+            IOviaWorkspaceHelpProvider provider = currentScreen as IOviaWorkspaceHelpProvider;
+            if (provider != null)
+            {
+                key = provider.WorkspaceHelpKey;
+                title = provider.WorkspaceHelpTitle;
+                fallback = provider.WorkspaceHelpText;
+            }
+            else if (currentScreen != null)
+            {
+                ResolveWorkspaceHelpContext(currentScreen, out key, out title, out fallback);
+            }
+
+            title = OviaMenuHelpStore.GetMenuName(key, title);
+            string helpText = OviaMenuHelpStore.GetHelpText(key, fallback);
+            OviaMenuHelpDialog.ShowHelp(this, title, helpText);
+        }
+
+        private static void ResolveWorkspaceHelpContext(Form screen, out string key, out string title, out string fallback)
+        {
+            key = "MAIN";
+            title = "메인";
+            fallback = "OVIA 전체 업무 현황을 확인하는 대시보드입니다.";
+
+            if (screen is FrmProjectManager)
+            {
+                key = "PROJECT_MANAGER";
+                title = "공사관리";
+                fallback = "공사 목록을 검색하고 공사 등록, 수정, 완료공사 포함 조회를 처리합니다.";
+                return;
+            }
+
+            if (screen is FrmProjectBarListList)
+            {
+                key = "PROJECT_BARLIST_LIST";
+                title = "공사별 BarList";
+                fallback = "선택한 공사에 저장된 BarList 목록을 조회하고 신규 등록, 수정, 다른 공사 BarList 불러오기 흐름으로 이동합니다.";
+                return;
+            }
+
+            if (screen is FrmBarList)
+            {
+                key = "BARLIST";
+                title = "BarList";
+                fallback = "CAD 도면 또는 Excel에서 BarList를 가져와 검토하고 저장하는 화면입니다.";
+                return;
+            }
+
+            if (screen is FrmBarListMappingManager)
+            {
+                key = "BARLIST_MAPPING";
+                title = "BarList 항목 매핑";
+                fallback = "CAD 도면마다 다른 철근재료표 헤더명을 OVIA 기본 헤더로 치환합니다.";
+                return;
+            }
+
+            if (screen is FrmRebarUnitWeightTable)
+            {
+                key = "REBAR_UNIT_WEIGHT";
+                title = "이형철근 단위중량표";
+                fallback = "규격과 단위무게 기준으로 1톤 단위 조견표와 총길이/중량 계산 기준을 관리합니다.";
+                return;
+            }
+
+            if (screen is FrmSystemSettings)
+            {
+                key = "SYSTEM_SETTINGS";
+                title = "시스템 설정";
+                fallback = "ERP 연결 주소와 회사 로고처럼 OVIA 전체에 적용되는 기본값을 관리합니다.";
+                return;
+            }
+
+            title = screen.Text == null || screen.Text.Trim() == "" ? "도움말" : screen.Text.Trim();
+            fallback = title + " 화면 도움말이 아직 등록되지 않았습니다.";
         }
 
         private void SetBottomStatus(string text)
@@ -2646,6 +2769,85 @@ namespace OVIA.Desktop
             }
 
             base.OnPaint(e);
+        }
+    }
+
+
+    internal sealed class OviaBottomHelpButton : Control
+    {
+        private bool isHover;
+        private bool isDown;
+
+        public OviaBottomHelpButton()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            Cursor = Cursors.Hand;
+            TabStop = false;
+            Font = OviaFluentTheme.FontButton(9F, FontStyle.Bold);
+            ForeColor = Color.White;
+            BackColor = OviaFluentTheme.AppBackground;
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            isHover = true;
+            Invalidate();
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            isHover = false;
+            isDown = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                isDown = true;
+                Invalidate();
+            }
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            isDown = false;
+            Invalidate();
+            base.OnMouseUp(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.Clear(BackColor);
+
+            int diameter = 18;
+            Rectangle circle = new Rectangle(
+                Math.Max(0, (Width - diameter) / 2),
+                Math.Max(0, (Height - diameter) / 2),
+                diameter,
+                diameter);
+
+            Color fill = isDown
+                ? Color.FromArgb(8, 8, 10)
+                : (isHover ? Color.FromArgb(38, 38, 42) : Color.FromArgb(17, 17, 19));
+
+            using (SolidBrush brush = new SolidBrush(fill))
+            {
+                e.Graphics.FillEllipse(brush, circle);
+            }
+
+            TextRenderer.DrawText(
+                e.Graphics,
+                "?",
+                Font,
+                circle,
+                Color.White,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
         }
     }
 

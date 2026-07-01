@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -10,7 +10,7 @@ using OVIA.Desktop.Controls;
 
 namespace OVIA.Desktop
 {
-    public class FrmRebarUnitWeightTable : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout
+    public class FrmRebarUnitWeightTable : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider
     {
         private readonly string companyId;
         private readonly string userId;
@@ -37,6 +37,16 @@ namespace OVIA.Desktop
         private bool suppressDirtyEvent = false;
         private string cleanSignature = "";
 
+
+        public string WorkspaceHelpKey { get { return "REBAR_UNIT_WEIGHT"; } }
+        public string WorkspaceHelpTitle { get { return "이형철근 단위중량표"; } }
+        public string WorkspaceHelpText
+        {
+            get
+            {
+                return "규격과 단위무게 기준으로 1톤 단위 조견표와 총길이/중량 계산 기준을 관리합니다. 최고관리자만 수정할 수 있습니다.";
+            }
+        }
         private static readonly double[] StandardLengths = new double[] { 6.0, 6.5, 7.0, 7.5, 8.0, 9.0, 10.0, 11.0, 12.0 };
         private static readonly string[] StandardLengthColumnNames = new string[] { "L6", "L6_5", "L7", "L7_5", "L8", "L9", "L10", "L11", "L12" };
         private static readonly string[] StandardLengthHeaders = new string[] { "6", "6.5", "7", "7.5", "8", "9", "10", "11", "12" };
@@ -75,7 +85,6 @@ namespace OVIA.Desktop
 
             BuildExplorerHeader(this);
             BuildCommandBar(this);
-            BuildTableHeader(this);
             BuildGrid(this);
             BuildButtons(this);
             BuildStatus(this);
@@ -192,8 +201,8 @@ namespace OVIA.Desktop
         private void BuildGrid(Control parent)
         {
             grid = new DataGridView();
-            grid.Location = new Point(32, 190);
-            grid.Size = new Size(1216, 426);
+            grid.Location = new Point(32, 124);
+            grid.Size = new Size(1216, 492);
             grid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             grid.AllowUserToAddRows = false;
             grid.AllowUserToDeleteRows = false;
@@ -1327,7 +1336,7 @@ namespace OVIA.Desktop
             if (grid != null)
             {
                 grid.Width = width;
-                grid.Height = Math.Max(220, this.ClientSize.Height - 334);
+                grid.Height = Math.Max(220, this.ClientSize.Height - 268);
             }
 
             int buttonY = Math.Max(0, this.ClientSize.Height - 118);

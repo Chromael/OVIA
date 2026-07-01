@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -44,8 +44,8 @@ namespace OVIA.Desktop.Controls
         private OviaExplorerIconButton btnRefresh;
         private OviaExplorerIconButton btnHome;
         private OviaExplorerIconButton btnLogout;
-        private Panel addressBar;
-        private LinkLabel breadcrumbLabel;
+        private OviaRoundedPanel addressBar;
+        private OviaBreadcrumbLabel breadcrumbLabel;
         private TextBox pathTextBox;
         private ToolTip toolTip;
         private bool pathEditMessageFilterInstalled;
@@ -147,7 +147,7 @@ namespace OVIA.Desktop.Controls
 
                 if (breadcrumbLabel != null)
                 {
-                    breadcrumbLabel.Text = text;
+                    breadcrumbLabel.PathText = text;
                     ApplyBreadcrumbLinks(text);
                 }
 
@@ -178,53 +178,10 @@ namespace OVIA.Desktop.Controls
 
         private void ApplyBreadcrumbLinks(string text)
         {
-            if (breadcrumbLabel == null)
+            if (breadcrumbLabel != null)
             {
-                return;
+                breadcrumbLabel.PathText = text == null ? string.Empty : text;
             }
-
-            breadcrumbLabel.Links.Clear();
-
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                return;
-            }
-
-            string lastSegment = GetLastBreadcrumbSegment(text);
-            AddBreadcrumbLink(text, "메인", "MAIN", lastSegment != "메인");
-            AddBreadcrumbLink(text, "공사관리", "PROJECT_MANAGER", lastSegment != "공사관리");
-            AddBreadcrumbLink(text, "공사별 BarList", "PROJECT_BARLIST_LIST", lastSegment != "공사별 BarList");
-            AddBreadcrumbLink(text, "환경설정", "SETTINGS", lastSegment != "환경설정");
-        }
-
-        private void AddBreadcrumbLink(string text, string caption, string target, bool enabled)
-        {
-            if (!enabled || breadcrumbLabel == null || string.IsNullOrEmpty(text) || string.IsNullOrEmpty(caption))
-            {
-                return;
-            }
-
-            int start = text.IndexOf(caption, StringComparison.Ordinal);
-
-            if (start < 0)
-            {
-                return;
-            }
-
-            foreach (LinkLabel.Link link in breadcrumbLabel.Links)
-            {
-                int linkStart = link.Start;
-                int linkEnd = link.Start + link.Length;
-                int nextStart = start;
-                int nextEnd = start + caption.Length;
-
-                if (nextStart < linkEnd && nextEnd > linkStart)
-                {
-                    return;
-                }
-            }
-
-            breadcrumbLabel.Links.Add(start, caption.Length, target);
         }
 
         private string GetLastBreadcrumbSegment(string text)
@@ -274,25 +231,22 @@ namespace OVIA.Desktop.Controls
             };
             Controls.Add(btnHome);
 
-            addressBar = new Panel();
-            addressBar.BackColor = Color.White;
+            addressBar = new OviaRoundedPanel();
+            addressBar.BackColor = surfaceColor;
+            addressBar.FillColor = Color.White;
+            addressBar.Radius = 2;
             addressBar.Margin = Padding.Empty;
             addressBar.Padding = new Padding(10, 6, 10, 0);
             Controls.Add(addressBar);
 
-            breadcrumbLabel = new LinkLabel();
+            breadcrumbLabel = new OviaBreadcrumbLabel();
             breadcrumbLabel.AutoSize = false;
             breadcrumbLabel.TextAlign = ContentAlignment.MiddleLeft;
             breadcrumbLabel.Font = OviaFluentTheme.FontKorean(10F, FontStyle.Regular);
             breadcrumbLabel.BackColor = Color.White;
             breadcrumbLabel.ForeColor = textColor;
-            breadcrumbLabel.LinkColor = textColor;
-            breadcrumbLabel.ActiveLinkColor = OviaFluentTheme.Accent;
-            breadcrumbLabel.VisitedLinkColor = textColor;
-            breadcrumbLabel.DisabledLinkColor = textColor;
-            breadcrumbLabel.LinkBehavior = LinkBehavior.NeverUnderline;
             breadcrumbLabel.TabStop = false;
-            breadcrumbLabel.LinkClicked += BreadcrumbLabel_LinkClicked;
+            breadcrumbLabel.PathSegmentClicked += BreadcrumbLabel_PathSegmentClicked;
             breadcrumbLabel.MouseClick += BreadcrumbLabel_MouseClick;
             addressBar.Controls.Add(breadcrumbLabel);
 
@@ -336,11 +290,12 @@ namespace OVIA.Desktop.Controls
 
             addressBar.Location = new Point(NavigationWidth, 0);
             addressBar.Size = new Size(Math.Max(1, logoutX - BreadcrumbSafeGap - NavigationWidth), HeaderHeight);
+            addressBar.RefreshRoundedRegion();
 
-            breadcrumbLabel.Location = new Point(10, 6);
+            breadcrumbLabel.Location = new Point(10, 4);
             breadcrumbLabel.Size = new Size(Math.Max(1, addressBar.ClientSize.Width - 20), 22);
 
-            pathTextBox.Location = new Point(10, 7);
+            pathTextBox.Location = new Point(10, 5);
             pathTextBox.Size = new Size(Math.Max(1, addressBar.ClientSize.Width - 20), 20);
         }
 
@@ -438,9 +393,9 @@ namespace OVIA.Desktop.Controls
             button.Invalidate();
         }
 
-        private void BreadcrumbLabel_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        private void BreadcrumbLabel_PathSegmentClicked(object sender, OviaBreadcrumbSegmentClickedEventArgs e)
         {
-            string target = e.Link.LinkData == null ? string.Empty : e.Link.LinkData.ToString();
+            string target = e == null ? string.Empty : e.Target;
 
             if (RaisePathSegmentClicked(target))
             {
@@ -482,13 +437,7 @@ namespace OVIA.Desktop.Controls
                 return false;
             }
 
-            int textWidth = TextRenderer.MeasureText(
-                breadcrumbLabel.Text,
-                breadcrumbLabel.Font,
-                new Size(int.MaxValue, breadcrumbLabel.Height),
-                TextFormatFlags.NoPadding | TextFormatFlags.SingleLine
-            ).Width;
-
+            int textWidth = breadcrumbLabel.ContentWidth;
             return e.X > textWidth + 8;
         }
 
@@ -615,6 +564,335 @@ namespace OVIA.Desktop.Controls
                 handler(this, EventArgs.Empty);
             }
         }
+    }
+
+
+
+    internal sealed class OviaRoundedPanel : Panel
+    {
+        public OviaRoundedPanel()
+        {
+            SetStyle(
+                ControlStyles.UserPaint
+                | ControlStyles.AllPaintingInWmPaint
+                | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.ResizeRedraw,
+                true);
+
+            Margin = Padding.Empty;
+        }
+
+        public Color FillColor { get; set; }
+        public int Radius { get; set; }
+
+        public void RefreshRoundedRegion()
+        {
+            ApplyRoundedRegion();
+            Invalidate();
+        }
+
+        protected override void OnSizeChanged(EventArgs e)
+        {
+            base.OnSizeChanged(e);
+            ApplyRoundedRegion();
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            Color back = Parent == null ? BackColor : Parent.BackColor;
+            using (SolidBrush brush = new SolidBrush(back))
+            {
+                e.Graphics.FillRectangle(brush, ClientRectangle);
+            }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+            Rectangle rect = new Rectangle(0, 0, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
+            using (GraphicsPath path = CreateRoundRectPath(rect, Math.Max(0, Radius)))
+            using (SolidBrush brush = new SolidBrush(FillColor == Color.Empty ? Color.White : FillColor))
+            {
+                e.Graphics.FillPath(brush, path);
+            }
+
+            base.OnPaint(e);
+        }
+
+        private void ApplyRoundedRegion()
+        {
+            if (Width <= 0 || Height <= 0)
+            {
+                return;
+            }
+
+            Rectangle rect = new Rectangle(0, 0, Width, Height);
+            using (GraphicsPath path = CreateRoundRectPath(rect, Math.Max(0, Radius)))
+            {
+                Region oldRegion = Region;
+                Region = new Region(path);
+
+                if (oldRegion != null)
+                {
+                    oldRegion.Dispose();
+                }
+            }
+        }
+
+        private static GraphicsPath CreateRoundRectPath(Rectangle rect, int radius)
+        {
+            GraphicsPath path = new GraphicsPath();
+
+            if (radius <= 0)
+            {
+                path.AddRectangle(rect);
+                path.CloseFigure();
+                return path;
+            }
+
+            int diameter = radius * 2;
+            Rectangle arc = new Rectangle(rect.Left, rect.Top, diameter, diameter);
+            path.AddArc(arc, 180, 90);
+
+            arc.X = rect.Right - diameter;
+            path.AddArc(arc, 270, 90);
+
+            arc.Y = rect.Bottom - diameter;
+            path.AddArc(arc, 0, 90);
+
+            arc.X = rect.Left;
+            path.AddArc(arc, 90, 90);
+
+            path.CloseFigure();
+            return path;
+        }
+    }
+
+    internal sealed class OviaBreadcrumbSegmentClickedEventArgs : EventArgs
+    {
+        public OviaBreadcrumbSegmentClickedEventArgs(string target)
+        {
+            Target = target == null ? string.Empty : target;
+        }
+
+        public string Target { get; private set; }
+    }
+
+    internal sealed class OviaBreadcrumbLabel : Control
+    {
+        private readonly System.Collections.Generic.List<OviaBreadcrumbSegmentInfo> segments = new System.Collections.Generic.List<OviaBreadcrumbSegmentInfo>();
+        private string pathText = string.Empty;
+        private int contentWidth;
+        private const float Tracking = -0.5F;
+
+        public event EventHandler<OviaBreadcrumbSegmentClickedEventArgs> PathSegmentClicked;
+
+        public OviaBreadcrumbLabel()
+        {
+            SetStyle(
+                ControlStyles.UserPaint
+                | ControlStyles.AllPaintingInWmPaint
+                | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.ResizeRedraw,
+                true);
+
+            Cursor = Cursors.IBeam;
+            TabStop = false;
+        }
+
+        public ContentAlignment TextAlign { get; set; }
+
+        public string PathText
+        {
+            get { return pathText; }
+            set
+            {
+                pathText = value == null ? string.Empty : value;
+                Text = pathText;
+                Invalidate();
+            }
+        }
+
+        public int ContentWidth
+        {
+            get { return contentWidth; }
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            Cursor = GetSegmentAt(e.Location) == null ? Cursors.IBeam : Cursors.Hand;
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            Cursor = Cursors.IBeam;
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            OviaBreadcrumbSegmentInfo segment = GetSegmentAt(e.Location);
+            if (segment != null && e.Button == MouseButtons.Left)
+            {
+                EventHandler<OviaBreadcrumbSegmentClickedEventArgs> handler = PathSegmentClicked;
+                if (handler != null)
+                {
+                    handler(this, new OviaBreadcrumbSegmentClickedEventArgs(segment.Target));
+                    return;
+                }
+            }
+
+            base.OnMouseClick(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+            e.Graphics.Clear(BackColor);
+
+            segments.Clear();
+            contentWidth = 0;
+
+            string text = pathText == null ? string.Empty : pathText;
+            if (text.Trim() == string.Empty)
+            {
+                return;
+            }
+
+            string[] parts = text.Split(new char[] { '›' }, StringSplitOptions.None);
+            string lastSegment = GetLastSegment(parts);
+            float x = 0F;
+            float y = Math.Max(0F, (Height - Font.Height) / 2F + 1F);
+
+            int visibleIndex = 0;
+            int i;
+            for (i = 0; i < parts.Length; i++)
+            {
+                string raw = parts[i] == null ? string.Empty : parts[i].Trim();
+                if (raw == string.Empty)
+                {
+                    continue;
+                }
+
+                if (visibleIndex > 0)
+                {
+                    x = DrawTrackedText(e.Graphics, "  ›  ", Font, ForeColor, x, y, Tracking);
+                }
+
+                bool isLast = raw == lastSegment;
+                bool isMain = raw == "메인";
+                bool isBold = isLast && !isMain;
+                Font drawFont = isBold ? OviaFluentTheme.FontKorean(Font.Size, FontStyle.Bold) : Font;
+                float startX = x;
+                x = DrawTrackedText(e.Graphics, raw, drawFont, ForeColor, x, y, Tracking);
+                Rectangle rect = new Rectangle((int)Math.Floor(startX), 0, Math.Max(1, (int)Math.Ceiling(x - startX)), Height);
+
+                if (!isLast)
+                {
+                    string target = ResolveTarget(raw);
+                    if (target != string.Empty)
+                    {
+                        segments.Add(new OviaBreadcrumbSegmentInfo(rect, target));
+                    }
+                }
+
+                if (!object.ReferenceEquals(drawFont, Font))
+                {
+                    drawFont.Dispose();
+                }
+
+                visibleIndex++;
+            }
+
+            contentWidth = (int)Math.Ceiling(x);
+        }
+
+        private static string GetLastSegment(string[] parts)
+        {
+            if (parts == null)
+            {
+                return string.Empty;
+            }
+
+            int i;
+            for (i = parts.Length - 1; i >= 0; i--)
+            {
+                string raw = parts[i] == null ? string.Empty : parts[i].Trim();
+                if (raw != string.Empty)
+                {
+                    return raw;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static string ResolveTarget(string segment)
+        {
+            if (segment == "메인") return "MAIN";
+            if (segment == "공사관리") return "PROJECT_MANAGER";
+            if (segment == "공사별 BarList") return "PROJECT_BARLIST_LIST";
+            if (segment == "환경설정") return "SETTINGS";
+            if (segment == "BarList 항목 매핑") return "BARLIST_MAPPING";
+            if (segment == "이형철근 단위중량표") return "REBAR_UNIT_WEIGHT";
+            if (segment == "시스템 설정") return "SYSTEM_SETTINGS";
+            if (segment == "메뉴관리") return "MENU_MANAGER";
+            return string.Empty;
+        }
+
+        private static float DrawTrackedText(Graphics g, string text, Font font, Color color, float x, float y, float tracking)
+        {
+            if (text == null || text.Length == 0)
+            {
+                return x;
+            }
+
+            using (SolidBrush brush = new SolidBrush(color))
+            using (StringFormat format = (StringFormat)StringFormat.GenericTypographic.Clone())
+            {
+                format.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
+                int i;
+                for (i = 0; i < text.Length; i++)
+                {
+                    string ch = text[i].ToString();
+                    g.DrawString(ch, font, brush, x, y, format);
+                    SizeF size = g.MeasureString(ch, font, PointF.Empty, format);
+                    x += Math.Max(0F, size.Width + tracking);
+                }
+            }
+
+            return x;
+        }
+
+        private OviaBreadcrumbSegmentInfo GetSegmentAt(Point point)
+        {
+            int i;
+            for (i = 0; i < segments.Count; i++)
+            {
+                if (segments[i].Bounds.Contains(point))
+                {
+                    return segments[i];
+                }
+            }
+
+            return null;
+        }
+    }
+
+    internal sealed class OviaBreadcrumbSegmentInfo
+    {
+        public OviaBreadcrumbSegmentInfo(Rectangle bounds, string target)
+        {
+            Bounds = bounds;
+            Target = target == null ? string.Empty : target;
+        }
+
+        public Rectangle Bounds { get; private set; }
+        public string Target { get; private set; }
     }
 
     internal sealed class OviaExplorerIconButton : Control
