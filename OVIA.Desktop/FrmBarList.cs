@@ -14,7 +14,7 @@ using OVIA.Desktop.Controls;
 
 namespace OVIA.Desktop
 {
-    public class FrmBarList : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout
+    public class FrmBarList : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceUnsavedState
     {
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -3389,6 +3389,16 @@ namespace OVIA.Desktop
             StopAutoCadWatcher();
         }
 
+        public bool HasUnsavedWorkspaceData()
+        {
+            return !isSaved && grid != null && grid.Columns.Count > 0 && grid.Rows.Count > 0;
+        }
+
+        public string GetUnsavedWorkspaceDataName()
+        {
+            return "BarList";
+        }
+
         private void Close_Click(object sender, EventArgs e)
         {
             NavigateBackToProjectBarListList();
@@ -6268,6 +6278,7 @@ namespace OVIA.Desktop
             btnOk.Text = "적용";
             btnOk.Location = new Point(238, 108);
             btnOk.Size = new Size(82, 30);
+            OviaFluentTheme.ApplyButton(btnOk, OviaButtonRole.Primary);
             btnOk.Click += BtnOk_Click;
             this.Controls.Add(btnOk);
 
@@ -6275,6 +6286,7 @@ namespace OVIA.Desktop
             btnCancel.Text = "취소";
             btnCancel.Location = new Point(328, 108);
             btnCancel.Size = new Size(82, 30);
+            OviaFluentTheme.ApplyButton(btnCancel, OviaButtonRole.Neutral);
             btnCancel.Click += BtnCancel_Click;
             this.Controls.Add(btnCancel);
 
@@ -7065,24 +7077,45 @@ namespace OVIA.Desktop
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
-            Color fillColor = hover ? OviaFluentTheme.AccentHover : StartColor;
+            OVIA.Desktop.OviaButtonRole role = OviaFluentTheme.InferButtonRole(this.Text);
+            Color fillColor = OviaFluentTheme.ButtonPrimaryBack;
+            Color borderColor = OviaFluentTheme.ButtonPrimaryBorder;
+            Color textColor = OviaFluentTheme.ButtonPrimaryText;
+
+            if (role == OVIA.Desktop.OviaButtonRole.Danger)
+            {
+                fillColor = hover ? OviaFluentTheme.ButtonDangerBackHover : OviaFluentTheme.ButtonDangerBack;
+                borderColor = OviaFluentTheme.ButtonDangerBorder;
+                textColor = OviaFluentTheme.ButtonDangerText;
+            }
+            else if (role == OVIA.Desktop.OviaButtonRole.Neutral)
+            {
+                fillColor = hover ? OviaFluentTheme.ButtonNeutralBackHover : OviaFluentTheme.ButtonNeutralBack;
+                borderColor = OviaFluentTheme.ButtonNeutralBorder;
+                textColor = OviaFluentTheme.ButtonNeutralText;
+            }
+            else
+            {
+                fillColor = hover ? OviaFluentTheme.ButtonPrimaryBackHover : OviaFluentTheme.ButtonPrimaryBack;
+            }
+
             Rectangle rect = new Rectangle(0, 0, this.Width - 1, this.Height - 1);
 
-            using (GraphicsPath path = OviaBarListDrawHelper.RoundRect(rect, 7))
+            using (GraphicsPath path = OviaBarListDrawHelper.RoundRect(rect, OviaFluentTheme.ButtonRadius))
+            using (SolidBrush brush = new SolidBrush(fillColor))
+            using (Pen pen = new Pen(borderColor, 1F))
             {
-                using (SolidBrush brush = new SolidBrush(fillColor))
-                {
-                    e.Graphics.FillPath(brush, path);
-                }
+                e.Graphics.FillPath(brush, path);
+                e.Graphics.DrawPath(pen, path);
             }
 
             TextRenderer.DrawText(
                 e.Graphics,
                 this.Text,
-                OviaFluentTheme.FontButton(9F, FontStyle.Bold),
+                OviaFluentTheme.FontButton(OviaFluentTheme.ButtonFontSize, FontStyle.Bold),
                 rect,
-                Color.White,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter
+                textColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis
             );
 
             base.OnPaint(e);

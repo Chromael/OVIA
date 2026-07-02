@@ -8,7 +8,7 @@ using OVIA.Desktop.Controls;
 
 namespace OVIA.Desktop
 {
-    public class FrmLicenseManager : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout
+    public class FrmLicenseManager : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceUnsavedState
     {
         private readonly string companyId;
         private readonly string userId;
@@ -189,16 +189,11 @@ namespace OVIA.Desktop
 
         private Button CreateButton(string text, int x, int y, int width)
         {
-            Button button = new Button();
+            Button button = new OVIA.Desktop.Controls.OviaButton();
             button.Text = text;
             button.Location = new Point(x, y);
-            button.Size = new Size(width, 34);
-            button.FlatStyle = FlatStyle.Flat;
-            button.BackColor = Color.White;
-            button.ForeColor = TextDark;
-            button.FlatAppearance.BorderColor = OviaFluentTheme.ControlBorder;
-            button.FlatAppearance.BorderSize = 1;
-            button.Font = OviaFluentTheme.FontButton(9F, FontStyle.Bold);
+            button.Size = OviaFluentTheme.MeasureButtonSize(text);
+            OviaFluentTheme.ApplyButton(button, text);
             return button;
         }
 
@@ -457,6 +452,22 @@ namespace OVIA.Desktop
         {
         }
 
+        public bool HasUnsavedWorkspaceData()
+        {
+            if (!canEdit)
+            {
+                return false;
+            }
+
+            isDirty = BuildSignature() != cleanSignature;
+            return isDirty;
+        }
+
+        public string GetUnsavedWorkspaceDataName()
+        {
+            return "License";
+        }
+
         public void ApplyWorkspaceLayout()
         {
             if (listPanel != null)
@@ -538,15 +549,10 @@ namespace OVIA.Desktop
             txtUrl = CreateTextBox(580, 16, 350, entry.Url, false);
             this.Controls.Add(txtUrl);
 
-            btnDelete = new Button();
+            btnDelete = new OVIA.Desktop.Controls.OviaButton();
             btnDelete.Text = "삭제";
-            btnDelete.Size = new Size(70, 30);
-            btnDelete.FlatStyle = FlatStyle.Flat;
-            btnDelete.BackColor = Color.White;
-            btnDelete.ForeColor = OviaFluentTheme.TextPrimary;
-            btnDelete.FlatAppearance.BorderColor = OviaFluentTheme.ControlBorder;
-            btnDelete.FlatAppearance.BorderSize = 1;
-            btnDelete.Font = OviaFluentTheme.FontButton(8.5F, FontStyle.Bold);
+            btnDelete.Size = OviaFluentTheme.MeasureButtonSize(btnDelete.Text);
+            OviaFluentTheme.ApplyButton(btnDelete, OviaButtonRole.Danger);
             btnDelete.Enabled = canEdit;
             btnDelete.Click += delegate
             {

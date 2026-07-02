@@ -588,21 +588,19 @@ namespace OVIA.Desktop
             card.SurfaceColor = SurfaceColor;
             parent.Controls.Add(card);
 
-            OviaProjectBarListButton newButton = new OviaProjectBarListButton();
+            OVIA.Desktop.Controls.OviaButton newButton = new OVIA.Desktop.Controls.OviaButton();
             newButton.Text = "신규 BarList 등록";
             newButton.Location = new Point(22, 28);
-            newButton.Size = new Size(145, 36);
-            newButton.StartColor = BrandCyan;
-            newButton.EndColor = BrandViolet;
+            newButton.Size = OviaFluentTheme.MeasureButtonSize(newButton.Text);
+            newButton.Role = OVIA.Desktop.OviaButtonRole.Primary;
             newButton.Click += NewButton_Click;
             card.Controls.Add(newButton);
 
-            OviaProjectBarListButton refreshButton = new OviaProjectBarListButton();
+            OVIA.Desktop.Controls.OviaButton refreshButton = new OVIA.Desktop.Controls.OviaButton();
             refreshButton.Text = "새로고침";
-            refreshButton.Location = new Point(180, 28);
-            refreshButton.Size = new Size(95, 36);
-            refreshButton.StartColor = OviaFluentTheme.TextSecondary;
-            refreshButton.EndColor = OviaFluentTheme.TextSecondary;
+            refreshButton.Location = new Point(newButton.Right + 10, 28);
+            refreshButton.Size = OviaFluentTheme.MeasureButtonSize(refreshButton.Text);
+            refreshButton.Role = OVIA.Desktop.OviaButtonRole.Neutral;
             refreshButton.Click += RefreshButton_Click;
             card.Controls.Add(refreshButton);
 
@@ -613,7 +611,7 @@ namespace OVIA.Desktop
             guide.Font = OviaFluentTheme.FontSystem(8.8F, FontStyle.Bold);
             guide.ForeColor = OviaFluentTheme.Danger;
             guide.BackColor = Color.FromArgb(255, 248, 230);
-            guide.Location = new Point(295, 27);
+            guide.Location = new Point(refreshButton.Right + 20, 27);
             guide.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             card.Controls.Add(guide);
         }
@@ -1339,24 +1337,45 @@ namespace OVIA.Desktop
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
-            Color fillColor = hover ? OviaFluentTheme.AccentHover : StartColor;
+            OVIA.Desktop.OviaButtonRole role = OviaFluentTheme.InferButtonRole(this.Text);
+            Color fillColor = OviaFluentTheme.ButtonPrimaryBack;
+            Color borderColor = OviaFluentTheme.ButtonPrimaryBorder;
+            Color textColor = OviaFluentTheme.ButtonPrimaryText;
+
+            if (role == OVIA.Desktop.OviaButtonRole.Danger)
+            {
+                fillColor = hover ? OviaFluentTheme.ButtonDangerBackHover : OviaFluentTheme.ButtonDangerBack;
+                borderColor = OviaFluentTheme.ButtonDangerBorder;
+                textColor = OviaFluentTheme.ButtonDangerText;
+            }
+            else if (role == OVIA.Desktop.OviaButtonRole.Neutral)
+            {
+                fillColor = hover ? OviaFluentTheme.ButtonNeutralBackHover : OviaFluentTheme.ButtonNeutralBack;
+                borderColor = OviaFluentTheme.ButtonNeutralBorder;
+                textColor = OviaFluentTheme.ButtonNeutralText;
+            }
+            else
+            {
+                fillColor = hover ? OviaFluentTheme.ButtonPrimaryBackHover : OviaFluentTheme.ButtonPrimaryBack;
+            }
+
             Rectangle rect = new Rectangle(0, 0, this.Width - 1, this.Height - 1);
 
-            using (GraphicsPath path = OviaProjectBarListDrawHelper.RoundRect(rect, 7))
+            using (GraphicsPath path = OviaProjectBarListDrawHelper.RoundRect(rect, OviaFluentTheme.ButtonRadius))
+            using (SolidBrush brush = new SolidBrush(fillColor))
+            using (Pen pen = new Pen(borderColor, 1F))
             {
-                using (SolidBrush brush = new SolidBrush(fillColor))
-                {
-                    e.Graphics.FillPath(brush, path);
-                }
+                e.Graphics.FillPath(brush, path);
+                e.Graphics.DrawPath(pen, path);
             }
 
             TextRenderer.DrawText(
                 e.Graphics,
                 this.Text,
-                OviaFluentTheme.FontButton(9F, FontStyle.Bold),
+                OviaFluentTheme.FontButton(OviaFluentTheme.ButtonFontSize, FontStyle.Bold),
                 rect,
-                Color.White,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter
+                textColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis
             );
 
             base.OnPaint(e);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
@@ -8,7 +8,7 @@ using OVIA.Desktop.Controls;
 
 namespace OVIA.Desktop
 {
-    public class FrmSystemSettings : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider
+    public class FrmSystemSettings : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider, IOviaWorkspaceUnsavedState
     {
         private readonly string companyId;
         private readonly string userId;
@@ -342,34 +342,21 @@ namespace OVIA.Desktop
 
         private Button CreateBlackButton(string text, int x, int y, int width, int height)
         {
-            Button button = new Button();
+            Button button = new OVIA.Desktop.Controls.OviaButton();
             button.Text = text;
-            button.Location = new Point(x, y);
-            button.Size = new Size(width, height);
-            button.Font = OviaFluentTheme.FontButton(9.5F, FontStyle.Bold);
-            button.FlatStyle = FlatStyle.Flat;
-            button.BackColor = Color.FromArgb(17, 17, 19);
-            button.ForeColor = Color.White;
-            button.FlatAppearance.BorderSize = 0;
-            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(35, 36, 40);
-            button.FlatAppearance.MouseDownBackColor = Color.FromArgb(0, 0, 0);
-            button.Cursor = Cursors.Hand;
+            button.Location = new Point(x, y + Math.Max(0, (height - OviaFluentTheme.ButtonHeight) / 2));
+            button.Size = OviaFluentTheme.MeasureButtonSize(text);
+            OviaFluentTheme.ApplyButton(button, OviaButtonRole.Primary);
             return button;
         }
 
         private Button CreateNormalButton(string text, int x, int y, int width, int height)
         {
-            Button button = new Button();
+            Button button = new OVIA.Desktop.Controls.OviaButton();
             button.Text = text;
-            button.Location = new Point(x, y);
-            button.Size = new Size(width, height);
-            button.Font = OviaFluentTheme.FontButton(9F, FontStyle.Regular);
-            button.FlatStyle = FlatStyle.Flat;
-            button.BackColor = Color.White;
-            button.ForeColor = TextDark;
-            button.FlatAppearance.BorderColor = OviaFluentTheme.ControlBorder;
-            button.FlatAppearance.BorderSize = 1;
-            button.Cursor = Cursors.Hand;
+            button.Location = new Point(x, y + Math.Max(0, (height - OviaFluentTheme.ButtonHeight) / 2));
+            button.Size = OviaFluentTheme.MeasureButtonSize(text);
+            OviaFluentTheme.ApplyButton(button, OviaButtonRole.Neutral);
             return button;
         }
 
@@ -774,6 +761,16 @@ namespace OVIA.Desktop
 
         public void BeforeLeaveWorkspaceScreen()
         {
+        }
+
+        public bool HasUnsavedWorkspaceData()
+        {
+            return canEdit && isDirty;
+        }
+
+        public string GetUnsavedWorkspaceDataName()
+        {
+            return "시스템 설정";
         }
 
         private void FrmSystemSettings_FormClosing(object sender, FormClosingEventArgs e)

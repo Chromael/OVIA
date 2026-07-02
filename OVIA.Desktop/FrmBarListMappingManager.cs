@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -8,7 +8,7 @@ using OVIA.Desktop.Controls;
 
 namespace OVIA.Desktop
 {
-    public class FrmBarListMappingManager : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider
+    public class FrmBarListMappingManager : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider, IOviaWorkspaceUnsavedState
     {
         private readonly string companyId;
         private readonly string userId;
@@ -102,7 +102,7 @@ namespace OVIA.Desktop
             grid.EditMode = DataGridViewEditMode.EditProgrammatically;
             grid.RowHeadersVisible = false;
             grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            grid.BackgroundColor = Color.White;
+            grid.BackgroundColor = SurfaceColor;
             grid.BorderStyle = BorderStyle.None;
             grid.EnableHeadersVisualStyles = false;
             grid.ColumnHeadersDefaultCellStyle.BackColor = OviaFluentTheme.HeaderBackground;
@@ -115,6 +115,7 @@ namespace OVIA.Desktop
             grid.RowTemplate.Height = 34;
 
             OviaFluentTheme.ApplyDataGrid(grid);
+            grid.BackgroundColor = SurfaceColor;
             grid.DefaultCellStyle.SelectionBackColor = ActiveRowBackColor;
             grid.DefaultCellStyle.SelectionForeColor = TextDark;
 
@@ -131,32 +132,35 @@ namespace OVIA.Desktop
 
             BuildColumnContextMenu();
 
-            Button btnAddColumn = CreateButton("매핑 열 추가", 32, 596, 130);
+            const int buttonTop = 596;
+            const int buttonGap = 10;
+            const int leftMargin = 32;
+            const int rightMargin = 32;
+
+            Button btnAddColumn = CreateButton("매핑 열 추가", leftMargin, buttonTop);
             btnAddColumn.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             btnAddColumn.Click += AddAliasColumn_Click;
             this.Controls.Add(btnAddColumn);
 
-            Button btnClearCell = CreateButton("선택 셀 비우기", 172, 596, 130);
+            Button btnClearCell = CreateButton("선택 셀 비우기", btnAddColumn.Right + buttonGap, buttonTop);
             btnClearCell.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             btnClearCell.Click += ClearSelectedCell_Click;
             this.Controls.Add(btnClearCell);
 
-            Button btnReset = CreateButton("기본값 복원", 312, 596, 120);
+            Button btnReset = CreateButton("기본값 복원", btnClearCell.Right + buttonGap, buttonTop);
             btnReset.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             btnReset.Click += ResetDefault_Click;
             this.Controls.Add(btnReset);
 
-            Button btnSave = CreateButton("저장하기", 902, 596, 120);
-            btnSave.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
-            btnSave.BackColor = OviaFluentTheme.Accent;
-            btnSave.ForeColor = Color.White;
-            btnSave.Click += Save_Click;
-            this.Controls.Add(btnSave);
-
-            Button btnClose = CreateButton("닫기", 1038, 596, 110);
+            Button btnClose = CreateButton("닫기", this.ClientSize.Width - rightMargin - OviaFluentTheme.MeasureButtonWidth("닫기"), buttonTop);
             btnClose.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             btnClose.Click += delegate { this.Close(); };
             this.Controls.Add(btnClose);
+
+            Button btnSave = CreateButton("저장하기", btnClose.Left - buttonGap - OviaFluentTheme.MeasureButtonWidth("저장하기"), buttonTop);
+            btnSave.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            btnSave.Click += Save_Click;
+            this.Controls.Add(btnSave);
 
             lblStatus = new Label();
             lblStatus.Text = "매핑 설정을 불러오는 중입니다.";
@@ -499,20 +503,13 @@ namespace OVIA.Desktop
             button.FlatAppearance.MouseDownBackColor = SurfaceColor;
         }
 
-        private Button CreateButton(string text, int x, int y, int width)
+        private Button CreateButton(string text, int x, int y)
         {
-            Button button = new Button();
+            Button button = new OVIA.Desktop.Controls.OviaButton();
             button.Text = text;
-            button.Location = new Point(x, y);
-            button.Size = new Size(width, 38);
-            button.FlatStyle = FlatStyle.Flat;
-            button.FlatAppearance.BorderColor = OviaFluentTheme.ControlBorder;
-            button.FlatAppearance.MouseOverBackColor = OviaFluentTheme.NavigationHover;
-            button.FlatAppearance.MouseDownBackColor = OviaFluentTheme.NavigationSelected;
-            button.BackColor = Color.White;
-            button.ForeColor = TextDark;
-            button.Font = OviaFluentTheme.FontButton(9.5F, FontStyle.Bold);
-            button.Cursor = Cursors.Hand;
+            button.Location = new Point(x, y + 1);
+            button.Size = OviaFluentTheme.MeasureButtonSize(text);
+            OviaFluentTheme.ApplyButton(button, text);
 
             return button;
         }
@@ -723,6 +720,16 @@ namespace OVIA.Desktop
 
         public void BeforeLeaveWorkspaceScreen()
         {
+        }
+
+        public bool HasUnsavedWorkspaceData()
+        {
+            return HasUnsavedChanges();
+        }
+
+        public string GetUnsavedWorkspaceDataName()
+        {
+            return "BarList 항목 매핑";
         }
 
         private void FrmBarListMappingManager_FormClosing(object sender, FormClosingEventArgs e)
@@ -1185,26 +1192,22 @@ namespace OVIA.Desktop
             label.BackColor = Color.White;
             dialog.Controls.Add(label);
 
-            Button btnCancel = new Button();
+            Button btnCancel = new OVIA.Desktop.Controls.OviaButton();
             btnCancel.Text = "취소";
-            btnCancel.Size = new Size(92, 34);
+            btnCancel.Size = OviaFluentTheme.MeasureButtonSize(btnCancel.Text);
             btnCancel.Location = new Point(208, 112);
             btnCancel.DialogResult = DialogResult.Cancel;
             btnCancel.FlatStyle = FlatStyle.Flat;
-            btnCancel.FlatAppearance.BorderColor = OviaFluentTheme.ControlBorder;
-            btnCancel.BackColor = Color.White;
-            btnCancel.ForeColor = TextDark;
+            OviaFluentTheme.ApplyButton(btnCancel, OviaButtonRole.Neutral);
             dialog.Controls.Add(btnCancel);
 
-            Button btnConfirm = new Button();
+            Button btnConfirm = new OVIA.Desktop.Controls.OviaButton();
             btnConfirm.Text = confirmText;
-            btnConfirm.Size = new Size(92, 34);
+            btnConfirm.Size = OviaFluentTheme.MeasureButtonSize(btnConfirm.Text);
             btnConfirm.Location = new Point(304, 112);
             btnConfirm.DialogResult = DialogResult.OK;
             btnConfirm.FlatStyle = FlatStyle.Flat;
-            btnConfirm.FlatAppearance.BorderColor = Color.FromArgb(180, 55, 65);
-            btnConfirm.BackColor = OviaFluentTheme.Danger;
-            btnConfirm.ForeColor = Color.White;
+            OviaFluentTheme.ApplyButton(btnConfirm, OviaButtonRole.Danger);
             dialog.Controls.Add(btnConfirm);
 
             dialog.AcceptButton = btnConfirm;

@@ -12,9 +12,9 @@ namespace OVIA.Desktop
         private readonly string companyId;
         private readonly string userId;
 
-        private TextBox txtSearch;
-        private ComboBox cboSort;
-        private CheckBox chkIncludeDone;
+        private OviaSearchBox txtSearch;
+        private OviaSelectBox cboSort;
+        private OviaCheckBox chkIncludeDone;
         private DataGridView grid;
         private Label lblStatus;
         private ToolTip windowToolTip;
@@ -543,63 +543,44 @@ namespace OVIA.Desktop
             card.SurfaceColor = SurfaceColor;
             parent.Controls.Add(card);
 
-            Label searchLabel = new Label();
-            searchLabel.Text = "공사 검색";
-            searchLabel.AutoSize = true;
-            searchLabel.Font = OviaFluentTheme.FontKorean(10F, FontStyle.Bold);
-            searchLabel.ForeColor = TextSub;
-            searchLabel.BackColor = Color.White;
-            searchLabel.Location = new Point(22, 17);
-            card.Controls.Add(searchLabel);
-
-            txtSearch = new TextBox();
-            txtSearch.Location = new Point(22, 44);
-            txtSearch.Size = new Size(380, 23);
-            txtSearch.Font = OviaFluentTheme.FontKorean(10F, FontStyle.Regular);
-            OviaFluentTheme.ApplyTextBox(txtSearch);
+            txtSearch = new OviaSearchBox();
+            txtSearch.PlaceholderText = "공사 검색";
+            txtSearch.Location = new Point(22, 36);
+            txtSearch.Size = new Size(380, OviaFluentTheme.CommonInputHeight);
+            txtSearch.Font = OviaFluentTheme.FontInput(10F, FontStyle.Regular);
             txtSearch.TextChanged += Filter_Changed;
             card.Controls.Add(txtSearch);
 
-            Label sortLabel = new Label();
-            sortLabel.Text = "정렬";
-            sortLabel.AutoSize = true;
-            sortLabel.Font = OviaFluentTheme.FontKorean(10F, FontStyle.Bold);
-            sortLabel.ForeColor = TextSub;
-            sortLabel.BackColor = Color.White;
-            sortLabel.Location = new Point(430, 17);
-            card.Controls.Add(sortLabel);
-
-            cboSort = new ComboBox();
-            OviaFluentTheme.ApplyComboBox(cboSort);
+            cboSort = new OviaSelectBox();
+            cboSort.Font = OviaFluentTheme.FontInput(9.5F, FontStyle.Regular);
             cboSort.DropDownStyle = ComboBoxStyle.DropDownList;
             cboSort.Items.Add("최근작업순");
             cboSort.Items.Add("생성순");
             cboSort.Items.Add("명칭순");
             cboSort.Items.Add("번호순");
             cboSort.SelectedIndex = 0;
-            cboSort.Location = new Point(430, 44);
-            cboSort.Size = new Size(150, 23);
+            cboSort.Location = new Point(426, 36);
+            cboSort.Size = new Size(150, OviaFluentTheme.CommonInputHeight);
             cboSort.SelectedIndexChanged += Filter_Changed;
             card.Controls.Add(cboSort);
 
-            chkIncludeDone = new CheckBox();
+            chkIncludeDone = new OviaCheckBox();
             chkIncludeDone.Text = "완료공사 포함";
-            chkIncludeDone.AutoSize = true;
-            chkIncludeDone.Font = OviaFluentTheme.FontKorean(10F, FontStyle.Regular);
+            chkIncludeDone.AutoSize = false;
+            chkIncludeDone.Font = OviaFluentTheme.FontInput(9.6F, FontStyle.Regular);
             chkIncludeDone.ForeColor = TextDark;
-            chkIncludeDone.BackColor = Color.White;
-            OviaFluentTheme.ApplyCheckBox(chkIncludeDone);
-            chkIncludeDone.Location = new Point(610, 46);
+            chkIncludeDone.BackColor = Color.Transparent;
+            chkIncludeDone.Location = new Point(604, 42);
+            chkIncludeDone.Size = new Size(128, 24);
             chkIncludeDone.CheckedChanged += Filter_Changed;
             card.Controls.Add(chkIncludeDone);
 
-            OviaProjectButton newButton = new OviaProjectButton();
+            OVIA.Desktop.Controls.OviaButton newButton = new OVIA.Desktop.Controls.OviaButton();
             newButton.Text = "새 공사";
+            newButton.Role = OVIA.Desktop.OviaButtonRole.Primary;
             newButton.Location = new Point(981, 38);
-            newButton.Size = new Size(105, 36);
+            newButton.Size = OviaFluentTheme.MeasureButtonSize(newButton.Text);
             newButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            newButton.StartColor = BrandViolet;
-            newButton.EndColor = BrandIndigo;
             newButton.Click += NewProject_Click;
             card.Controls.Add(newButton);
         }
@@ -1071,7 +1052,7 @@ namespace OVIA.Desktop
             Color fillColor = hover ? OviaFluentTheme.AccentHover : StartColor;
             Rectangle rect = new Rectangle(0, 0, this.Width - 1, this.Height - 1);
 
-            using (GraphicsPath path = OviaProjectDrawHelper.RoundRect(rect, 7))
+            using (GraphicsPath path = OviaProjectDrawHelper.RoundRect(rect, OviaFluentTheme.ButtonRadius))
             {
                 using (SolidBrush brush = new SolidBrush(fillColor))
                 {

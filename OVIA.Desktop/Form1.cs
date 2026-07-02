@@ -14,7 +14,7 @@ namespace OVIA.Desktop
         private OviaTextInput	txtCompanyId;
         private OviaTextInput	txtUserId;
         private OviaTextInput	txtPassword;
-        private CheckBox		chkSaveId;
+        private OVIA.Desktop.Controls.OviaCheckBox		chkSaveId;
         private Timer		loginFadeTimer;
         private bool		hasPlayedStartupFadeIn;
         private OviaWindowCaptionTheme captionTheme;
@@ -208,13 +208,12 @@ namespace OVIA.Desktop
             txtUserId				= AddInput(card, "사용자 아이디", "사용자 아이디를 입력하세요", 55, 198, false);
             txtPassword				= AddInput(card, "암호", "암호를 입력하세요", 55, 288, true);
 
-            chkSaveId				= new CheckBox();
+            chkSaveId				= new OVIA.Desktop.Controls.OviaCheckBox();
             chkSaveId.Text			= "아이디 저장";
-            chkSaveId.AutoSize		= true;
-            chkSaveId.Font			= OviaFluentTheme.FontInput(10F, FontStyle.Regular);
+            chkSaveId.Size			= new Size(130, 24);
+            chkSaveId.Font			= OviaFluentTheme.FontInput(9.6F, FontStyle.Regular);
             chkSaveId.ForeColor		= TextDark;
             chkSaveId.BackColor		= Color.White;
-            OviaFluentTheme.ApplyCheckBox(chkSaveId);
             chkSaveId.Location		= new Point(55, 372);
             card.Controls.Add(chkSaveId);
 
@@ -227,7 +226,7 @@ namespace OVIA.Desktop
             btnClose.EndColor		= OviaFluentTheme.ControlBorder;
             btnClose.TextColor		= OviaFluentTheme.TextPrimary;
             btnClose.SurfaceColor	= Color.White;
-            btnClose.Radius			= 6;
+            btnClose.Radius			= OviaFluentTheme.ButtonRadius;
             btnClose.Font			= OviaFluentTheme.FontButton(11F, FontStyle.Bold);
             btnClose.Click			+= delegate { this.Close(); };
             card.Controls.Add(btnClose);
@@ -241,7 +240,7 @@ namespace OVIA.Desktop
             btnLogin.EndColor		= OviaFluentTheme.Accent;
             btnLogin.TextColor		= Color.White;
             btnLogin.SurfaceColor	= Color.White;
-            btnLogin.Radius			= 6;
+            btnLogin.Radius			= OviaFluentTheme.ButtonRadius;
             btnLogin.Font			= OviaFluentTheme.FontButton(12F, FontStyle.Bold);
             btnLogin.Click			+= BtnLogin_Click;
             card.Controls.Add(btnLogin);
@@ -538,7 +537,7 @@ namespace OVIA.Desktop
         public Color TextColor = OviaFluentTheme.TextPrimary;
         public Color PlaceholderColor = OviaFluentTheme.TextTertiary;
         public Color SurfaceColor = Color.White;
-        public int Radius = 6;
+        public int Radius = OviaFluentTheme.ButtonRadius;
 
         public string Value
         {
@@ -1076,7 +1075,7 @@ namespace OVIA.Desktop
         public Color TextColor = Color.White;
         public Color SurfaceColor = Color.White;
         public bool IsPrimary = true;
-        public int Radius = 6;
+        public int Radius = OviaFluentTheme.ButtonRadius;
 
         private bool hover;
 

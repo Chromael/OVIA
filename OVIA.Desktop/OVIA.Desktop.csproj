@@ -74,10 +74,14 @@
     <Compile Include="Services\CadShapeRenderer.cs" />
     <Compile Include="Services\OviaEnvironmentChecker.cs" />
     <Compile Include="Services\OviaFontManager.cs" />
+    <Compile Include="Services\OviaSystemIconManager.cs" />
     <Compile Include="Services\OviaSystemSettingsStore.cs" />
     <Compile Include="Services\OviaWindowCaptionTheme.cs" />
     <Compile Include="Controls\OviaWorkspaceStatusLabel.cs">
       <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Controls\OviaInputControls.cs">
+      <SubType>UserControl</SubType>
     </Compile>
     <Compile Include="Controls\OviaWorkspaceHeader.cs">
       <SubType>UserControl</SubType>
@@ -107,6 +111,9 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="FrmMenuManager.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="FrmOviaMenuPage.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="FrmMain.cs">

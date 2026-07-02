@@ -266,7 +266,7 @@ namespace OVIA.Desktop.Controls
             pathTextBox.KeyDown += PathTextBox_KeyDown;
             addressBar.Controls.Add(pathTextBox);
 
-            btnLogout = CreateExplorerButton("\uE7E8", "로그아웃");
+            btnLogout = CreateExplorerButton("\uE7E8", "시스템 종료");
             StyleLogoutButton(btnLogout);
             btnLogout.Click += delegate { Raise(LogoutClicked); };
             Controls.Add(btnLogout);
@@ -780,7 +780,9 @@ namespace OVIA.Desktop.Controls
 
                 if (visibleIndex > 0)
                 {
-                    x = DrawTrackedText(e.Graphics, "  ›  ", Font, ForeColor, x, y, Tracking);
+                    x = DrawTrackedText(e.Graphics, "  ", Font, ForeColor, x, y, Tracking);
+                    x = DrawTrackedText(e.Graphics, "›", Font, ForeColor, x, y - 1F, Tracking);
+                    x = DrawTrackedText(e.Graphics, "  ", Font, ForeColor, x, y, Tracking);
                 }
 
                 bool isLast = raw == lastSegment;
@@ -836,6 +838,11 @@ namespace OVIA.Desktop.Controls
             if (segment == "메인") return "MAIN";
             if (segment == "공사관리") return "PROJECT_MANAGER";
             if (segment == "공사별 BarList") return "PROJECT_BARLIST_LIST";
+            if (segment == "운영현황") return "OPERATIONS";
+            if (segment == "자재/재고") return "MATERIAL_STOCK";
+            if (segment == "출하/송장") return "SHIPPING_INVOICE";
+            if (segment == "ERP") return "ERP";
+            if (segment == "기준정보") return "MASTER_DATA";
             if (segment == "환경설정") return "SETTINGS";
             if (segment == "BarList 항목 매핑") return "BARLIST_MAPPING";
             if (segment == "이형철근 단위중량표") return "REBAR_UNIT_WEIGHT";

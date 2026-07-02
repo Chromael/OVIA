@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -10,7 +10,7 @@ using OVIA.Desktop.Controls;
 
 namespace OVIA.Desktop
 {
-    public class FrmRebarUnitWeightTable : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider
+    public class FrmRebarUnitWeightTable : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider, IOviaWorkspaceUnsavedState
     {
         private readonly string companyId;
         private readonly string userId;
@@ -281,37 +281,40 @@ namespace OVIA.Desktop
 
         private void BuildButtons(Control parent)
         {
-            btnAdd = CreateButton("규격 추가", 32, 642, 110);
+            const int buttonTop = 642;
+            const int buttonGap = 10;
+            const int leftMargin = 32;
+            const int rightMargin = 32;
+
+            btnAdd = CreateButton("규격 추가", leftMargin, buttonTop);
             btnAdd.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             btnAdd.Enabled = canEdit;
             btnAdd.Click += Add_Click;
             parent.Controls.Add(btnAdd);
 
-            btnDelete = CreateButton("선택 규격 삭제", 154, 642, 142);
+            btnDelete = CreateButton("선택 규격 삭제", btnAdd.Right + buttonGap, buttonTop);
             btnDelete.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             btnDelete.Enabled = canEdit;
             btnDelete.Click += Delete_Click;
             parent.Controls.Add(btnDelete);
 
-            btnReset = CreateButton("기본값 복원", 312, 642, 126);
+            btnReset = CreateButton("기본값 복원", btnDelete.Right + buttonGap, buttonTop);
             btnReset.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             btnReset.Enabled = canEdit;
             btnReset.Click += Reset_Click;
             parent.Controls.Add(btnReset);
 
-            btnSave = CreateButton("저장하기", 1000, 642, 120);
-            btnSave.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
-            btnSave.BackColor = OviaFluentTheme.Accent;
-            btnSave.ForeColor = Color.White;
-            btnSave.Enabled = canEdit;
-            btnSave.Click += Save_Click;
-            parent.Controls.Add(btnSave);
-
-            btnClose = CreateButton("닫기", 1136, 642, 110);
+            btnClose = CreateButton("닫기", this.ClientSize.Width - rightMargin - OviaFluentTheme.MeasureButtonWidth("닫기"), buttonTop);
             btnClose.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             btnClose.CausesValidation = false;
             btnClose.Click += delegate { this.Close(); };
             parent.Controls.Add(btnClose);
+
+            btnSave = CreateButton("저장하기", btnClose.Left - buttonGap - OviaFluentTheme.MeasureButtonWidth("저장하기"), buttonTop);
+            btnSave.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            btnSave.Enabled = canEdit;
+            btnSave.Click += Save_Click;
+            parent.Controls.Add(btnSave);
         }
 
         private void BuildStatus(Control parent)
@@ -327,18 +330,13 @@ namespace OVIA.Desktop
             parent.Controls.Add(lblStatus);
         }
 
-        private Button CreateButton(string text, int x, int y, int width)
+        private Button CreateButton(string text, int x, int y)
         {
-            Button button = new Button();
+            Button button = new OVIA.Desktop.Controls.OviaButton();
             button.Text = text;
             button.Location = new Point(x, y);
-            button.Size = new Size(width, 34);
-            button.FlatStyle = FlatStyle.Flat;
-            button.Font = OviaFluentTheme.FontButton(8.7F, FontStyle.Bold);
-            button.BackColor = Color.White;
-            button.ForeColor = TextDark;
-            button.FlatAppearance.BorderColor = OviaFluentTheme.ControlBorder;
-            button.FlatAppearance.MouseOverBackColor = OviaFluentTheme.AccentLight;
+            button.Size = OviaFluentTheme.MeasureButtonSize(text);
+            OviaFluentTheme.ApplyButton(button, text);
             return button;
         }
 
@@ -1316,6 +1314,23 @@ namespace OVIA.Desktop
 
         public void BeforeLeaveWorkspaceScreen()
         {
+        }
+
+        public bool HasUnsavedWorkspaceData()
+        {
+            CommitCurrentEditIfNeeded();
+
+            if (!canEdit)
+            {
+                return false;
+            }
+
+            return HasUnsavedChanges();
+        }
+
+        public string GetUnsavedWorkspaceDataName()
+        {
+            return "이형철근 단위중량표";
         }
 
         public void ApplyWorkspaceLayout()

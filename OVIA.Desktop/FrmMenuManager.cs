@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -15,7 +15,7 @@ namespace OVIA.Desktop
         string WorkspaceHelpText { get; }
     }
 
-    public class FrmMenuManager : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider
+    public class FrmMenuManager : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider, IOviaWorkspaceUnsavedState
     {
         private readonly string companyId;
         private readonly string userId;
@@ -262,17 +262,11 @@ namespace OVIA.Desktop
 
         private Button CreateButton(string text, int x, int y, int width)
         {
-            Button button = new Button();
+            Button button = new OVIA.Desktop.Controls.OviaButton();
             button.Text = text;
             button.Location = new Point(x, y);
-            button.Size = new Size(width, 34);
-            button.FlatStyle = FlatStyle.Flat;
-            button.Font = OviaFluentTheme.FontButton(8.7F, FontStyle.Bold);
-            button.BackColor = Color.White;
-            button.ForeColor = TextDark;
-            button.FlatAppearance.BorderColor = OviaFluentTheme.ControlBorder;
-            button.FlatAppearance.MouseOverBackColor = OviaFluentTheme.AccentLight;
-            button.Cursor = Cursors.Hand;
+            button.Size = OviaFluentTheme.MeasureButtonSize(text);
+            OviaFluentTheme.ApplyButton(button, text);
             return button;
         }
 
@@ -523,6 +517,16 @@ namespace OVIA.Desktop
         {
         }
 
+        public bool HasUnsavedWorkspaceData()
+        {
+            return isDirty;
+        }
+
+        public string GetUnsavedWorkspaceDataName()
+        {
+            return "메뉴관리";
+        }
+
         private void FrmMenuManager_FormClosing(object sender, FormClosingEventArgs e)
         {
             if (!CanLeaveWorkspaceScreen())
@@ -708,19 +712,48 @@ namespace OVIA.Desktop
             Add(list, "PROJECT_MANAGER", "공사관리", 1, false, "공사 목록을 검색하고 공사 등록, 수정, 완료공사 포함 조회를 처리합니다. 공사별 BarList, 생산오더, 송장, 태그 업무는 공사 상세 콘텐츠에서 연결됩니다.");
             Add(list, "PROJECT_BARLIST_LIST", "공사별 BarList", 2, false, "선택한 공사에 저장된 BarList 목록을 조회하고 신규 등록, 수정, 다른 공사 BarList 불러오기 흐름으로 이동합니다.");
             Add(list, "BARLIST", "BarList", 3, false, "CAD 도면 또는 Excel에서 BarList를 가져와 검토하고 저장하는 화면입니다. 형상, 수량, 길이, 중량 데이터를 확인합니다.");
+
             Add(list, "OPERATIONS", "운영현황", 1, false, "전체 BarList, 생산오더, 입출고, 재고, 송장, 태그/QR, 미처리 작업을 통합 조회하는 메뉴입니다.");
+            Add(list, "OPERATIONS_ALL_BARLIST", "전체 BarList", 2, false, "모든 공사의 BarList를 통합 조회하고 검색, 필터, Excel 저장, 출력, 공사/BarList 이동을 처리합니다.");
+            Add(list, "OPERATIONS_ALL_ORDER", "전체 생산오더", 2, false, "전체 공사의 생산오더와 작업지시 상태를 조회합니다. 등록과 수정은 공사 상세 내부에서 처리합니다.");
+            Add(list, "OPERATIONS_INOUT", "입출고 현황", 2, false, "전체 입고와 출고 흐름을 기간, 공사, 거래처 기준으로 조회합니다.");
+            Add(list, "OPERATIONS_STOCK", "재고 현황", 2, false, "규격별, 길이별, 공사별 재고 상태를 통합 조회합니다.");
+            Add(list, "OPERATIONS_INVOICE", "송장/납품 현황", 2, false, "전체 송장, 납품표, 미송장, 출하 상태를 통합 조회합니다.");
+            Add(list, "OPERATIONS_TAG_QR", "태그/QR 현황", 2, false, "태그 발행, QR 생성, 미발행, 재발행 상태를 조회합니다.");
+            Add(list, "OPERATIONS_PENDING", "미처리 작업", 2, false, "미출력, 미송장, 미태그, 오류 데이터를 한 곳에 모아 확인합니다.");
+            Add(list, "OPERATIONS_PRINT_CENTER", "출력센터", 2, false, "재출력, 출력 이력, 프린터 오류, 태그/송장 재발행을 관리합니다.");
+
             Add(list, "MATERIAL_STOCK", "자재/재고", 1, false, "입고, 재고현황, 재고조정, 출고사용내역을 관리하는 메뉴입니다.");
+            Add(list, "MATERIAL_INBOUND", "입고관리", 2, false, "입고 자료 등록, 수정, 삭제, Excel 가져오기, 출력을 처리합니다.");
+            Add(list, "MATERIAL_STOCK_STATUS", "재고현황", 2, false, "규격별, 길이별, 공사별 재고를 조회하고 Excel 저장과 출력을 처리합니다.");
+            Add(list, "MATERIAL_STOCK_ADJUST", "재고조정", 2, false, "재고 추가, 차감, 보정과 조정 사유 입력을 관리합니다.");
+            Add(list, "MATERIAL_OUTBOUND_USAGE", "출고사용내역", 2, false, "출고 사용 상세 이력과 공사/자재별 사용 내역을 조회합니다.");
+
             Add(list, "SHIPPING_INVOICE", "출하/송장", 1, false, "송장 조회와 발행, 납품표, 인수증, 검수양식, 출하 실적등록을 처리하는 메뉴입니다.");
+            Add(list, "SHIPPING_INVOICE_MANAGE", "송장관리", 2, false, "송장 조회, 발행, 수정, 납품표, 인수증, 검수양식 출력과 차량/운전자 선택을 처리합니다.");
+            Add(list, "SHIPPING_RESULT_REGISTER", "출하실적등록", 2, false, "출하 실적 조회, 실적 등록, 거래처별 실적 양식 생성, ERP 전송을 처리합니다.");
+
             Add(list, "ERP", "ERP", 1, false, "시스템 설정에 저장된 ERP 주소를 기본 웹 브라우저로 열고, 추후 ERP 동기화 상태를 확인합니다.");
+            Add(list, "ERP_SHORTCUT", "ERP 바로가기", 2, false, "시스템 설정에 저장된 ERP URL을 사용자 PC 기본 웹 브라우저로 실행합니다.");
+            Add(list, "ERP_SYNC_STATUS", "ERP 동기화 상태", 2, false, "OVIA와 ERP의 동기화 오류, 마지막 전송 시각, 재시도 상태를 확인합니다.");
+
             Add(list, "MASTER_DATA", "기준정보", 1, false, "거래처, 철근메이커, 자재/규격, 형상코드, 차량, 작업자, 기계, 위치 같은 업무 기준 데이터를 관리합니다.");
+            Add(list, "MASTER_COMPANY", "거래처 관리", 2, false, "거래처, 가공사, 납품처 기준 데이터를 관리합니다.");
+            Add(list, "MASTER_REBAR_MAKER", "철근메이커 관리", 2, false, "철근메이커와 브랜드 기준 데이터를 관리합니다.");
+            Add(list, "MASTER_MATERIAL_SPEC", "자재/규격 관리", 2, false, "자재 코드와 철근 규격 기준 데이터를 관리합니다.");
+            Add(list, "MASTER_SHAPE_CODE", "형상코드 관리", 2, false, "형상 코드, 사용자 형상, 미리보기 기준 데이터를 관리합니다.");
+            Add(list, "MASTER_CAR_DRIVER", "차량/운전자 관리", 2, false, "차량번호, 기사, 운전자 정보를 관리합니다.");
+            Add(list, "MASTER_WORKER_TEAM", "작업자/작업반 관리", 2, false, "작업자와 작업반 기준 정보를 관리합니다.");
+            Add(list, "MASTER_MACHINE_LOCATION", "기계/위치 관리", 2, false, "기계, 설비, 위치, 창고 기준 데이터를 관리합니다.");
+
             Add(list, "SETTINGS", "환경설정", 1, false, "OVIA 시스템 동작, BarList 매핑, 단위중량표, 출력 양식, QR/바코드 양식, 프린터, 백업, 버전정보를 관리합니다.");
+            Add(list, "SYSTEM_SETTINGS", "시스템 설정", 2, true, "ERP 연결 주소와 회사 로고처럼 OVIA 전체에 적용되는 기본값을 관리합니다. 이 화면의 저장 권한은 최고관리자에게만 부여됩니다.");
             Add(list, "BARLIST_MAPPING", "BarList 항목 매핑", 2, true, "CAD 도면마다 다른 철근재료표 헤더명을 OVIA 기본 헤더로 치환합니다. 매핑 텍스트는 셀 단위로 추가/수정할 수 있으며, 매핑 열은 드래그로 순서를 바꿀 수 있습니다.");
             Add(list, "REBAR_UNIT_WEIGHT", "이형철근 단위중량표", 2, true, "규격과 단위무게 기준으로 1톤 단위 조견표와 총길이/중량 계산 기준을 관리합니다. 최고관리자만 수정할 수 있습니다.");
-            Add(list, "SYSTEM_SETTINGS", "시스템 설정", 2, true, "ERP 연결 주소와 회사 로고처럼 OVIA 전체에 적용되는 기본값을 관리합니다. 이 화면의 저장 권한은 최고관리자에게만 부여됩니다.");
-            Add(list, "IMPORT_TEMPLATE", "가져오기 양식 설정", 2, true, "SSBAR, Tekla, Excel, DBF, BAR 등 외부 데이터 가져오기 템플릿을 관리할 예정입니다.");
-            Add(list, "PRINT_TEMPLATE", "출력 양식 설정", 2, true, "송장, 납품표, 인수증, 검수양식, BarList 출력 템플릿을 관리할 예정입니다.");
-            Add(list, "QR_BARCODE_TEMPLATE", "QR/바코드 양식 설정", 2, true, "QR 데이터 구조, 바코드 종류, 태그 양식 연결 기준을 관리할 예정입니다.");
-            Add(list, "PRINTER_SETTINGS", "프린터 설정", 2, true, "기본 프린터, 라벨 프린터, 송장 프린터, 용지와 여백을 관리할 예정입니다.");
+            Add(list, "IMPORT_TEMPLATE", "가져오기 양식 설정", 2, true, "SSBAR, Tekla, Excel, DBF, BAR 등 외부 데이터 가져오기 템플릿을 관리합니다.");
+            Add(list, "PRINT_TEMPLATE", "출력 양식 설정", 2, true, "송장, 납품표, 인수증, 검수양식, BarList 출력 템플릿을 관리합니다.");
+            Add(list, "QR_BARCODE_TEMPLATE", "QR/바코드 양식 설정", 2, true, "QR 데이터 구조, 바코드 종류, 태그 양식 연결 기준을 관리합니다.");
+            Add(list, "PRINTER_SETTINGS", "프린터 설정", 2, true, "기본 프린터, 라벨 프린터, 송장 프린터, 용지와 여백을 관리합니다.");
             Add(list, "BACKUP_RESTORE", "백업/복원", 2, true, "로컬 데이터, 설정, 공사 데이터를 백업하거나 복원하는 메뉴입니다.");
             Add(list, "MENU_MANAGER", "메뉴관리", 2, true, "OVIA에 있는 모든 메뉴 및 페이지의 사용 여부, 최고관리자 접근 여부, 페이지별 도움말을 관리합니다. 권한관리는 추후 ERP 사용자 정보와 연동됩니다.");
             Add(list, "VERSION_INFO", "버전정보", 2, true, "로그인 화면 하단과 시스템 정보에 표시되는 OVIA 버전 정보를 관리합니다.");
@@ -869,27 +902,19 @@ namespace OVIA.Desktop
             txtHelp.Text = currentHelp == null ? string.Empty : currentHelp;
             Controls.Add(txtHelp);
 
-            Button save = new Button();
+            Button save = new OVIA.Desktop.Controls.OviaButton();
             save.Text = "저장";
             save.Location = new Point(380, 334);
-            save.Size = new Size(100, 34);
-            save.FlatStyle = FlatStyle.Flat;
-            save.BackColor = OviaFluentTheme.Accent;
-            save.ForeColor = Color.White;
-            save.Font = OviaFluentTheme.FontButton(9F, FontStyle.Bold);
-            save.FlatAppearance.BorderSize = 0;
+            save.Size = OviaFluentTheme.MeasureButtonSize(save.Text);
+            OviaFluentTheme.ApplyButton(save, OviaButtonRole.Primary);
             save.Click += Save_Click;
             Controls.Add(save);
 
-            Button cancel = new Button();
+            Button cancel = new OVIA.Desktop.Controls.OviaButton();
             cancel.Text = "취소";
-            cancel.Location = new Point(492, 334);
-            cancel.Size = new Size(100, 34);
-            cancel.FlatStyle = FlatStyle.Flat;
-            cancel.BackColor = Color.White;
-            cancel.ForeColor = OviaFluentTheme.TextPrimary;
-            cancel.Font = OviaFluentTheme.FontButton(9F, FontStyle.Regular);
-            cancel.FlatAppearance.BorderColor = OviaFluentTheme.ControlBorder;
+            cancel.Location = new Point(save.Right + 12, 334);
+            cancel.Size = OviaFluentTheme.MeasureButtonSize(cancel.Text);
+            OviaFluentTheme.ApplyButton(cancel, OviaButtonRole.Neutral);
             cancel.DialogResult = DialogResult.Cancel;
             Controls.Add(cancel);
 
