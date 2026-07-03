@@ -1367,15 +1367,15 @@ namespace OVIA.Desktop
 
         public void RequestLogout()
         {
-            if (!OviaWorkspaceExitHelper.ConfirmSystemExit(this, currentScreen))
+            if (!OviaWorkspaceExitHelper.ConfirmLogout(this, currentScreen))
             {
                 return;
             }
 
-            systemExitConfirmed = true;
-            logoutConfirmed = false;
-            IsLogoutRequested = false;
-            Application.Exit();
+            logoutConfirmed = true;
+            systemExitConfirmed = false;
+            IsLogoutRequested = true;
+            this.Close();
         }
 
         private string GetLocalIPAddress()
@@ -1608,6 +1608,11 @@ namespace OVIA.Desktop
             ShowWorkspaceScreen(new FrmMenuManager(companyId, userId), "OVIA 메뉴관리", "메뉴관리 설정을 불러왔습니다.");
         }
 
+        public void NavigateToNotifications()
+        {
+            ShowWorkspaceScreen(new FrmNotificationList(companyId, userId), "OVIA 알림", "알림 목록을 불러왔습니다.");
+        }
+
         public void NavigateToWorkspaceInfoPage(string menuKey, string pathText, string title, string selectedMenu, string helpText, string bodyText)
         {
             string displayTitle = string.IsNullOrWhiteSpace(title) ? "메뉴" : title.Trim();
@@ -1820,6 +1825,15 @@ namespace OVIA.Desktop
                 fallback = "OVIA 메뉴와 페이지별 도움말, 사용 여부, 최고관리자 전용 여부를 관리합니다.";
                 return;
             }
+
+            if (screen is FrmNotificationList)
+            {
+                key = "NOTIFICATIONS";
+                title = "알림";
+                fallback = "작업 내역 및 알림은 최대 7일간 보관되며, 7일 후 자동 삭제됩니다. 임의로 삭제할 수 없습니다.";
+                return;
+            }
+
             title = screen.Text == null || screen.Text.Trim() == "" ? "도움말" : screen.Text.Trim();
             fallback = title + " 화면 도움말이 아직 등록되지 않았습니다.";
         }
@@ -2143,6 +2157,20 @@ namespace OVIA.Desktop
 
         private void FrmMain_FormClosing(object sender, FormClosingEventArgs e)
         {
+            if (logoutConfirmed)
+            {
+                if (!CloseCurrentScreenForConfirmedClose())
+                {
+                    e.Cancel = true;
+                    logoutConfirmed = false;
+                    IsLogoutRequested = false;
+                    return;
+                }
+
+                IsLogoutRequested = true;
+                return;
+            }
+
             if (systemExitConfirmed)
             {
                 if (!CloseCurrentScreenForConfirmedClose())
@@ -2159,7 +2187,7 @@ namespace OVIA.Desktop
                 return;
             }
 
-            if (!logoutConfirmed && !OviaWorkspaceExitHelper.ConfirmLogout(this, currentScreen))
+            if (!OviaWorkspaceExitHelper.ConfirmLogout(this, currentScreen))
             {
                 e.Cancel = true;
                 return;

@@ -9,6 +9,7 @@ namespace OVIA.Desktop
         public string ErpLoginUrl = "";
         public string CompanyLogoFilePath = "";
         public string VersionText = "";
+        public int ListPageSize = 100;
     }
 
     public static class OviaSystemSettingsStore
@@ -77,6 +78,10 @@ namespace OVIA.Desktop
                     {
                         settings.VersionText = NormalizeVersionText(value);
                     }
+                    else if (key.Equals("ListPageSize", StringComparison.OrdinalIgnoreCase))
+                    {
+                        settings.ListPageSize = NormalizeListPageSize(value);
+                    }
                 }
             }
             catch
@@ -100,6 +105,7 @@ namespace OVIA.Desktop
             }
 
             settings.VersionText = NormalizeVersionText(settings.VersionText);
+            settings.ListPageSize = NormalizeListPageSize(settings.ListPageSize.ToString());
 
             return settings;
         }
@@ -118,7 +124,8 @@ namespace OVIA.Desktop
             {
                 "ErpLoginUrl=" + Encode(settings.ErpLoginUrl),
                 "CompanyLogoFilePath=" + Encode(settings.CompanyLogoFilePath),
-                "VersionText=" + Encode(NormalizeVersionText(settings.VersionText))
+                "VersionText=" + Encode(NormalizeVersionText(settings.VersionText)),
+                "ListPageSize=" + Encode(NormalizeListPageSize(settings.ListPageSize.ToString()).ToString())
             };
 
             File.WriteAllLines(GetSettingsFilePath(), lines, Encoding.UTF8);
@@ -198,6 +205,31 @@ namespace OVIA.Desktop
             }
 
             return "Version " + version;
+        }
+
+        public static int GetListPageSize()
+        {
+            return NormalizeListPageSize(Load().ListPageSize.ToString());
+        }
+
+        public static int NormalizeListPageSize(string value)
+        {
+            int size;
+            if (!int.TryParse(value == null ? "" : value.Trim(), out size))
+            {
+                size = 100;
+            }
+
+            if (size < 1)
+            {
+                size = 1;
+            }
+            else if (size > 1000)
+            {
+                size = 1000;
+            }
+
+            return size;
         }
 
         public static string NormalizeVersionText(string value)

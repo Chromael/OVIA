@@ -192,6 +192,7 @@ namespace OVIA.Desktop
                 if (!isLoading)
                 {
                     isDirty = GetCurrentVersion() != cleanVersion;
+                    UpdateSaveButtonVisibility();
                     UpdateStatusText();
                 }
             };
@@ -228,7 +229,8 @@ namespace OVIA.Desktop
             btnSave.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             btnSave.BackColor = OviaFluentTheme.Accent;
             btnSave.ForeColor = Color.White;
-            btnSave.Enabled = canEdit;
+            btnSave.Enabled = false;
+            btnSave.Visible = false;
             btnSave.Click += Save_Click;
             parent.Controls.Add(btnSave);
 
@@ -274,6 +276,7 @@ namespace OVIA.Desktop
 
                 cleanVersion = GetCurrentVersion();
                 isDirty = false;
+                UpdateSaveButtonVisibility();
                 UpdateStatusText();
             }
             finally
@@ -295,6 +298,12 @@ namespace OVIA.Desktop
                 return;
             }
 
+            if (!isDirty)
+            {
+                UpdateSaveButtonVisibility();
+                return;
+            }
+
             string version = GetCurrentVersion();
             if (version == "")
             {
@@ -312,8 +321,20 @@ namespace OVIA.Desktop
 
             cleanVersion = version;
             isDirty = false;
+            UpdateSaveButtonVisibility();
             UpdateStatusText();
             MessageBox.Show("버전정보가 저장되었습니다.", "OVIA 버전정보", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void UpdateSaveButtonVisibility()
+        {
+            if (btnSave == null)
+            {
+                return;
+            }
+
+            btnSave.Visible = canEdit && isDirty;
+            btnSave.Enabled = canEdit && isDirty;
         }
 
         private void UpdateStatusText()

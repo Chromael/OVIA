@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -22,8 +22,8 @@ namespace OVIA.Desktop.Controls
         private const int HeaderTop = 8;
         private const int HeaderHeight = 32;
         private const int NavigationWidth = 188;
-        private const int LogoutWidth = 30;
-        private const int LogoutRightGap = 20;
+        private const int NotificationWidth = 30;
+        private const int NotificationRightGap = 20;
         private const int BreadcrumbSafeGap = 40;
         private const int WmLButtonDown = 0x0201;
         private const int WmRButtonDown = 0x0204;
@@ -35,15 +35,15 @@ namespace OVIA.Desktop.Controls
         private readonly Color inactiveColor;
         private readonly Color explorerHoverColor;
         private readonly Color explorerDownColor;
-        private readonly Color logoutHoverColor;
-        private readonly Color logoutDownColor;
+        private readonly Color notificationBadgeColor;
 
         private OviaExplorerIconButton btnBack;
         private OviaExplorerIconButton btnForward;
         private OviaExplorerIconButton btnUp;
         private OviaExplorerIconButton btnRefresh;
         private OviaExplorerIconButton btnHome;
-        private OviaExplorerIconButton btnLogout;
+        private OviaExplorerIconButton btnNotification;
+        private Timer notificationRefreshTimer;
         private OviaRoundedPanel addressBar;
         private OviaBreadcrumbLabel breadcrumbLabel;
         private TextBox pathTextBox;
@@ -53,7 +53,7 @@ namespace OVIA.Desktop.Controls
         public event EventHandler BackClicked;
         public event EventHandler UpClicked;
         public event EventHandler RefreshClicked;
-        public event EventHandler LogoutClicked;
+        public event EventHandler NotificationClicked;
         public event EventHandler MainPathClicked;
         public event EventHandler<OviaWorkspacePathClickedEventArgs> PathSegmentClicked;
 
@@ -64,8 +64,7 @@ namespace OVIA.Desktop.Controls
             inactiveColor = Color.FromArgb(175, 181, 190);
             explorerHoverColor = Color.FromArgb(229, 233, 238);
             explorerDownColor = Color.FromArgb(218, 224, 232);
-            logoutHoverColor = Color.FromArgb(220, 53, 69);
-            logoutDownColor = Color.FromArgb(185, 28, 28);
+            notificationBadgeColor = Color.FromArgb(37, 99, 235);
 
             this.Height = HeaderHeight;
             this.BackColor = surfaceColor;
@@ -79,6 +78,7 @@ namespace OVIA.Desktop.Controls
 
             BuildControls();
             LayoutControls();
+            StartNotificationRefreshTimer();
         }
 
         public static OviaWorkspaceHeader AddTo(Control parent, string pathText, Action backAction, Action upAction, Action refreshAction, Action logoutAction, bool backEnabled, bool upEnabled, Action<string> pathSegmentAction = null)
@@ -121,10 +121,11 @@ namespace OVIA.Desktop.Controls
 
             if (logoutAction != null)
             {
-                header.LogoutClicked += delegate { logoutAction(); };
+                header.NotificationClicked += delegate { };
             }
 
             parent.Controls.Add(header);
+            header.RefreshNotificationBadge();
 
             parent.Resize += delegate
             {
@@ -266,10 +267,13 @@ namespace OVIA.Desktop.Controls
             pathTextBox.KeyDown += PathTextBox_KeyDown;
             addressBar.Controls.Add(pathTextBox);
 
-            btnLogout = CreateExplorerButton("\uE7E8", "시스템 종료");
-            StyleLogoutButton(btnLogout);
-            btnLogout.Click += delegate { Raise(LogoutClicked); };
-            Controls.Add(btnLogout);
+            btnNotification = CreateExplorerButton("\uF2A3", "알림");
+            // U+F2A3 종 아이콘은 같은 버튼 영역 안에서 뒤로/앞으로/위로가기 아이콘과 시각 크기를 맞춘다.
+            btnNotification.Font = OVIA.Desktop.OviaIconFont.Create(15F, FontStyle.Regular);
+            btnNotification.BadgeBackColor = notificationBadgeColor;
+            btnNotification.BadgeFont = OviaFluentTheme.FontData(7.2F, FontStyle.Bold);
+            btnNotification.Click += Notification_Click;
+            Controls.Add(btnNotification);
         }
 
         private void LayoutControls()
@@ -285,11 +289,10 @@ namespace OVIA.Desktop.Controls
             btnRefresh.Location = new Point(108, 0);
             btnHome.Location = new Point(144, 0);
 
-            int logoutX = Math.Max(NavigationWidth, this.ClientSize.Width - LogoutRightGap - LogoutWidth);
-            btnLogout.Location = new Point(logoutX, 0);
-
+            int notificationX = Math.Max(NavigationWidth, this.ClientSize.Width - NotificationRightGap - NotificationWidth);
+            btnNotification.Location = new Point(notificationX, 0);
             addressBar.Location = new Point(NavigationWidth, 0);
-            addressBar.Size = new Size(Math.Max(1, logoutX - BreadcrumbSafeGap - NavigationWidth), HeaderHeight);
+            addressBar.Size = new Size(Math.Max(1, notificationX - BreadcrumbSafeGap - NavigationWidth), HeaderHeight);
             addressBar.RefreshRoundedRegion();
 
             breadcrumbLabel.Location = new Point(10, 4);
@@ -308,6 +311,7 @@ namespace OVIA.Desktop.Controls
         protected override void OnHandleDestroyed(EventArgs e)
         {
             UninstallPathEditMessageFilter();
+            StopNotificationRefreshTimer();
             base.OnHandleDestroyed(e);
         }
 
@@ -337,7 +341,7 @@ namespace OVIA.Desktop.Controls
         {
             OviaExplorerIconButton button = new OviaExplorerIconButton();
             button.Text = text;
-            button.Size = new Size(LogoutWidth, 30);
+            button.Size = new Size(NotificationWidth, 30);
             button.Font = OVIA.Desktop.OviaIconFont.Create(9.5F, FontStyle.Regular);
             button.ForeColor = textColor;
             button.NormalForeColor = textColor;
@@ -357,21 +361,110 @@ namespace OVIA.Desktop.Controls
             return button;
         }
 
-        private void StyleLogoutButton(OviaExplorerIconButton button)
+        private void StartNotificationRefreshTimer()
         {
-            if (button == null)
+            if (notificationRefreshTimer != null)
             {
                 return;
             }
 
-            button.BackColor = surfaceColor;
-            button.ForeColor = textColor;
-            button.NormalForeColor = textColor;
-            button.HoverForeColor = Color.White;
-            button.DownForeColor = Color.White;
-            button.HoverBackColor = logoutHoverColor;
-            button.DownBackColor = logoutDownColor;
-            button.CornerRadius = 2;
+            OVIA.Desktop.OviaNotificationStore.NotificationsChanged += NotificationStore_NotificationsChanged;
+
+            notificationRefreshTimer = new Timer();
+            notificationRefreshTimer.Interval = 15000;
+            notificationRefreshTimer.Tick += delegate { RefreshNotificationBadge(); };
+            notificationRefreshTimer.Start();
+        }
+
+        private void StopNotificationRefreshTimer()
+        {
+            if (notificationRefreshTimer == null)
+            {
+                return;
+            }
+
+            OVIA.Desktop.OviaNotificationStore.NotificationsChanged -= NotificationStore_NotificationsChanged;
+            notificationRefreshTimer.Stop();
+            notificationRefreshTimer.Dispose();
+            notificationRefreshTimer = null;
+        }
+
+        private void NotificationStore_NotificationsChanged(object sender, EventArgs e)
+        {
+            RefreshNotificationBadge();
+        }
+
+        protected override void OnParentChanged(EventArgs e)
+        {
+            base.OnParentChanged(e);
+            RefreshNotificationBadge();
+        }
+
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            if (Visible)
+            {
+                RefreshNotificationBadge();
+            }
+        }
+
+        public void RefreshNotificationBadge()
+        {
+            if (btnNotification == null || btnNotification.IsDisposed)
+            {
+                return;
+            }
+
+            int count = 0;
+
+            try
+            {
+                OVIA.Desktop.IOviaWorkspaceNavigator navigator = OVIA.Desktop.OviaWorkspaceNavigation.FindNavigator(this);
+                if (navigator != null)
+                {
+                    count = OVIA.Desktop.OviaNotificationStore.GetUnreadCount(navigator.CurrentCompanyId, navigator.CurrentUserId);
+                }
+            }
+            catch
+            {
+                count = 0;
+            }
+
+            if (count <= 0)
+            {
+                btnNotification.BadgeVisible = false;
+                btnNotification.BadgeText = string.Empty;
+                btnNotification.Invalidate();
+                return;
+            }
+
+            btnNotification.BadgeText = count > 99 ? "99+" : count.ToString();
+            btnNotification.BadgeVisible = true;
+            btnNotification.Invalidate();
+        }
+
+        private void LayoutNotificationBadge()
+        {
+            // 알림 숫자 배지는 알림 아이콘 버튼 내부에서 직접 렌더링한다.
+            // 별도 자식 컨트롤을 겹치지 않아 hover 시 사각 배경이 보이지 않는다.
+        }
+
+        private void ApplyNotificationBadgeRegion()
+        {
+        }
+
+        private void Notification_Click(object sender, EventArgs e)
+        {
+            OVIA.Desktop.IOviaWorkspaceNavigator navigator = OVIA.Desktop.OviaWorkspaceNavigation.FindNavigator(this);
+            if (navigator != null)
+            {
+                navigator.NavigateToNotifications();
+                RefreshNotificationBadge();
+                return;
+            }
+
+            Raise(NotificationClicked);
         }
 
         private void SetNavigationEnabled(OviaExplorerIconButton button, bool enabled)
@@ -567,6 +660,68 @@ namespace OVIA.Desktop.Controls
     }
 
 
+
+
+    internal sealed class OviaNotificationBadge : Control
+    {
+        public Color BadgeBackColor { get; set; }
+
+        public OviaNotificationBadge()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
+            BackColor = Color.Transparent;
+            ForeColor = Color.White;
+            BadgeBackColor = OviaFluentTheme.Accent;
+            TabStop = false;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            Rectangle rect = new Rectangle(0, 0, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
+            using (GraphicsPath path = CreateRoundRectPath(rect, Math.Max(1, rect.Height / 2)))
+            using (SolidBrush brush = new SolidBrush(BadgeBackColor))
+            {
+                g.FillPath(brush, path);
+            }
+
+            TextRenderer.DrawText(
+                g,
+                Text,
+                Font,
+                ClientRectangle,
+                ForeColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+        }
+
+        private static GraphicsPath CreateRoundRectPath(Rectangle rect, int radius)
+        {
+            GraphicsPath path = new GraphicsPath();
+            if (radius <= 0)
+            {
+                path.AddRectangle(rect);
+                path.CloseFigure();
+                return path;
+            }
+
+            int diameter = Math.Min(radius * 2, Math.Min(rect.Width, rect.Height));
+            Rectangle arc = new Rectangle(rect.Left, rect.Top, diameter, diameter);
+            path.AddArc(arc, 180, 90);
+            arc.X = rect.Right - diameter;
+            path.AddArc(arc, 270, 90);
+            arc.Y = rect.Bottom - diameter;
+            path.AddArc(arc, 0, 90);
+            arc.X = rect.Left;
+            path.AddArc(arc, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+    }
 
     internal sealed class OviaRoundedPanel : Panel
     {
@@ -923,6 +1078,8 @@ namespace OVIA.Desktop.Controls
             Margin = Padding.Empty;
             Padding = Padding.Empty;
             TabStop = false;
+            BadgeText = string.Empty;
+            BadgeBackColor = OviaFluentTheme.Accent;
         }
 
         public Color NormalForeColor { get; set; }
@@ -931,6 +1088,10 @@ namespace OVIA.Desktop.Controls
         public Color HoverBackColor { get; set; }
         public Color DownBackColor { get; set; }
         public int CornerRadius { get; set; }
+        public bool BadgeVisible { get; set; }
+        public string BadgeText { get; set; }
+        public Color BadgeBackColor { get; set; }
+        public Font BadgeFont { get; set; }
 
         public void ResetInteractionState()
         {
@@ -1033,6 +1194,39 @@ namespace OVIA.Desktop.Controls
                 ClientRectangle,
                 drawForeColor,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+
+            DrawNotificationBadge(g);
+        }
+
+        private void DrawNotificationBadge(Graphics g)
+        {
+            if (!BadgeVisible || string.IsNullOrWhiteSpace(BadgeText))
+            {
+                return;
+            }
+
+            string text = BadgeText.Trim();
+            int badgeHeight = 18;
+            int badgeWidth = text.Length >= 3 ? 27 : 18;
+            Rectangle rect = new Rectangle(Width - badgeWidth - 1, 0, badgeWidth, badgeHeight);
+
+            using (GraphicsPath path = CreateRoundRectPath(new Rectangle(rect.X, rect.Y, rect.Width - 1, rect.Height - 1), badgeHeight / 2))
+            using (SolidBrush brush = new SolidBrush(BadgeBackColor == Color.Empty ? OviaFluentTheme.Accent : BadgeBackColor))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.FillPath(brush, path);
+            }
+
+            using (Font font = BadgeFont == null ? OviaFluentTheme.FontData(7.2F, FontStyle.Bold) : (Font)BadgeFont.Clone())
+            {
+                TextRenderer.DrawText(
+                    g,
+                    text,
+                    font,
+                    rect,
+                    Color.White,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+            }
         }
 
         private Rectangle GetCenteredSquareRectangle()

@@ -177,7 +177,8 @@ namespace OVIA.Desktop
             btnSave.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             btnSave.BackColor = OviaFluentTheme.Accent;
             btnSave.ForeColor = Color.White;
-            btnSave.Enabled = canEdit;
+            btnSave.Enabled = false;
+            btnSave.Visible = false;
             btnSave.Click += Save_Click;
             parent.Controls.Add(btnSave);
 
@@ -220,6 +221,7 @@ namespace OVIA.Desktop
                 RenderEntries();
                 cleanSignature = BuildSignature();
                 isDirty = false;
+                UpdateSaveButtonVisibility();
                 UpdateStatusText();
             }
             finally
@@ -266,6 +268,7 @@ namespace OVIA.Desktop
 
             PullEntriesFromPanels();
             isDirty = BuildSignature() != cleanSignature;
+            UpdateSaveButtonVisibility();
             UpdateStatusText();
         }
 
@@ -303,7 +306,9 @@ namespace OVIA.Desktop
 
             RenderEntries();
             isDirty = BuildSignature() != cleanSignature;
+            UpdateSaveButtonVisibility();
             UpdateStatusText();
+            OviaNotificationStore.AddWorkLog(companyId, userId, "라이선스 항목 삭제", "메인  ›  환경설정  ›  License");
         }
 
         private void Add_Click(object sender, EventArgs e)
@@ -322,6 +327,7 @@ namespace OVIA.Desktop
             entries.Add(entry);
             RenderEntries();
             isDirty = true;
+            UpdateSaveButtonVisibility();
             UpdateStatusText();
 
             if (entryPanels.Count > 0)
@@ -341,6 +347,12 @@ namespace OVIA.Desktop
             }
 
             PullEntriesFromPanels();
+            isDirty = BuildSignature() != cleanSignature;
+            UpdateSaveButtonVisibility();
+            if (!isDirty)
+            {
+                return;
+            }
 
             int i;
             for (i = 0; i < entries.Count; i++)
@@ -359,8 +371,10 @@ namespace OVIA.Desktop
             OviaOpenSourceLicenseStore.Save(entries);
             cleanSignature = BuildSignature();
             isDirty = false;
+            UpdateSaveButtonVisibility();
             UpdateStatusText();
             MessageBox.Show("License 정보가 저장되었습니다.", "OVIA License", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            OviaNotificationStore.AddWorkLog(companyId, userId, "License 정보 저장", "메인  ›  환경설정  ›  License");
         }
 
         private void PullEntriesFromPanels()
@@ -389,6 +403,17 @@ namespace OVIA.Desktop
             }
 
             PullEntriesFromPanels();
+        }
+
+        private void UpdateSaveButtonVisibility()
+        {
+            if (btnSave == null)
+            {
+                return;
+            }
+
+            btnSave.Visible = canEdit && isDirty;
+            btnSave.Enabled = canEdit && isDirty;
         }
 
         private void UpdateStatusText()

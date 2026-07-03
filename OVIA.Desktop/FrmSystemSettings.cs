@@ -21,11 +21,13 @@ namespace OVIA.Desktop
         private Panel contentPanel;
         private Panel erpSection;
         private Panel logoSection;
+        private Panel listSection;
         private Label titleLabel;
         private Label descLabel;
         private Label lblStatus;
         private OviaSystemInputBox txtErpUrl;
         private OviaSystemInputBox txtLogoPath;
+        private OviaSystemInputBox txtListPageSize;
         private PictureBox logoPreview;
         private Button btnBrowseLogo;
         private Button btnDefaultLogo;
@@ -45,7 +47,7 @@ namespace OVIA.Desktop
         {
             get
             {
-                return "ERP 연결 주소와 회사 로고처럼 OVIA 전체에 적용되는 기본값을 관리합니다. 이 화면의 저장 권한은 최고관리자에게만 부여됩니다.";
+                return "ERP 연결 주소, 회사 로고, 리스트 출력 수처럼 OVIA 전체에 적용되는 기본값을 관리합니다. 리스트 출력 수는 알림, 공사관리, 공사별 BarList 등 리스트 형식 화면의 한 페이지 표시 기준으로 사용됩니다.";
             }
         }
         public FrmSystemSettings(string companyId, string userId)
@@ -184,6 +186,7 @@ namespace OVIA.Desktop
 
             BuildErpSection(contentPanel);
             BuildLogoSection(contentPanel);
+            BuildListSection(contentPanel);
         }
 
         private void BuildErpSection(Control parent)
@@ -297,11 +300,49 @@ namespace OVIA.Desktop
             logoSection.Controls.Add(previewNote);
         }
 
+        private void BuildListSection(Control parent)
+        {
+            listSection = new Panel();
+            listSection.Location = new Point(0, 400);
+            listSection.Size = new Size(1088, 142);
+            listSection.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            listSection.BackColor = SurfaceColor;
+            parent.Controls.Add(listSection);
+
+            AddRequiredTitle(listSection, "리스트 출력 수 설정", 0, 0);
+
+            txtListPageSize = new OviaSystemInputBox();
+            txtListPageSize.Location = new Point(0, 38);
+            txtListPageSize.Size = new Size(180, 48);
+            txtListPageSize.Placeholder = "100";
+            txtListPageSize.ValueChanged += Input_ValueChanged;
+            listSection.Controls.Add(txtListPageSize);
+
+            Label helper = new Label();
+            helper.Text = "기본값은 100개입니다. 입력한 숫자는 알림 목록을 포함한 OVIA 리스트 형식 화면의 한 페이지 출력 개수 기준으로 사용됩니다.";
+            helper.AutoSize = false;
+            helper.Location = new Point(2, 96);
+            helper.Size = new Size(980, 24);
+            helper.TextAlign = ContentAlignment.MiddleLeft;
+            helper.Font = OviaFluentTheme.FontStatus(8.8F, FontStyle.Regular);
+            helper.ForeColor = TextSub;
+            helper.BackColor = SurfaceColor;
+            listSection.Controls.Add(helper);
+
+            Panel line = new Panel();
+            line.Location = new Point(0, 136);
+            line.Size = new Size(1088, 1);
+            line.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+            line.BackColor = OviaFluentTheme.CardBorder;
+            listSection.Controls.Add(line);
+        }
+
         private void BuildBottomButtons(Control parent)
         {
             btnSave = CreateBlackButton("저장하기", 1018, 616, 130, 46);
             btnSave.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             btnSave.Click += Save_Click;
+            btnSave.Visible = false;
             parent.Controls.Add(btnSave);
         }
 
@@ -385,6 +426,11 @@ namespace OVIA.Desktop
                 logoSection.Width = Math.Max(1, contentWidth - 18);
             }
 
+            if (listSection != null)
+            {
+                listSection.Width = Math.Max(1, contentWidth - 18);
+            }
+
             if (txtErpUrl != null)
             {
                 txtErpUrl.Width = Math.Max(520, contentWidth - 38);
@@ -426,6 +472,10 @@ namespace OVIA.Desktop
             {
                 OviaSystemSettings settings = OviaSystemSettingsStore.Load();
                 txtErpUrl.Value = settings.ErpLoginUrl;
+                if (txtListPageSize != null)
+                {
+                    txtListPageSize.Value = OviaSystemSettingsStore.NormalizeListPageSize(settings.ListPageSize.ToString()).ToString();
+                }
 
                 currentLogoPath = "";
                 pendingLogoSourcePath = "";
@@ -454,8 +504,10 @@ namespace OVIA.Desktop
                 }
                 else
                 {
-                    UpdateStatus("시스템 설정을 불러왔습니다. ERP 주소와 회사 로고를 수정한 뒤 저장하기를 누르세요.");
+                    UpdateStatus("시스템 설정을 불러왔습니다. 변경사항이 있으면 저장하기 버튼이 표시됩니다.");
                 }
+
+                UpdateSaveButtonVisibility();
             }
             finally
             {
@@ -475,6 +527,11 @@ namespace OVIA.Desktop
                 txtLogoPath.ReadOnly = true;
             }
 
+            if (txtListPageSize != null)
+            {
+                txtListPageSize.ReadOnly = true;
+            }
+
             if (btnBrowseLogo != null)
             {
                 btnBrowseLogo.Enabled = false;
@@ -488,6 +545,7 @@ namespace OVIA.Desktop
             if (btnSave != null)
             {
                 btnSave.Enabled = false;
+                btnSave.Visible = false;
             }
         }
 
@@ -537,7 +595,33 @@ namespace OVIA.Desktop
                 return;
             }
 
+            if (!isDirty)
+            {
+                UpdateSaveButtonVisibility();
+                return;
+            }
+
             string erpUrl = txtErpUrl.Value.Trim();
+            string listPageSizeText = txtListPageSize == null ? "100" : txtListPageSize.Value.Trim();
+            int listPageSize;
+
+            if (!int.TryParse(listPageSizeText, out listPageSize) || listPageSize < 1 || listPageSize > 1000)
+            {
+                MessageBox.Show(
+                    "리스트 출력 수는 1 이상 1000 이하의 숫자로 입력해 주세요.",
+                    "OVIA 시스템 설정",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+
+                if (txtListPageSize != null)
+                {
+                    txtListPageSize.Focus();
+                }
+                return;
+            }
+
+            listPageSize = OviaSystemSettingsStore.NormalizeListPageSize(listPageSize.ToString());
 
             if (erpUrl != "" && !IsValidWebUrl(erpUrl))
             {
@@ -555,7 +639,10 @@ namespace OVIA.Desktop
             try
             {
                 OviaSystemSettings settings = OviaSystemSettingsStore.Load();
+                string beforeLogoPath = settings.CompanyLogoFilePath == null ? "" : settings.CompanyLogoFilePath.Trim();
+
                 settings.ErpLoginUrl = erpUrl;
+                settings.ListPageSize = listPageSize;
 
                 if (defaultLogoRequested)
                 {
@@ -570,7 +657,15 @@ namespace OVIA.Desktop
                     settings.CompanyLogoFilePath = currentLogoPath != null && File.Exists(currentLogoPath) ? currentLogoPath : "";
                 }
 
+                string afterLogoPath = settings.CompanyLogoFilePath == null ? "" : settings.CompanyLogoFilePath.Trim();
+                bool logoChanged = !AreSameLogoPath(beforeLogoPath, afterLogoPath);
+
                 OviaSystemSettingsStore.Save(settings);
+
+                if (txtListPageSize != null)
+                {
+                    txtListPageSize.Value = settings.ListPageSize.ToString();
+                }
 
                 currentLogoPath = settings.CompanyLogoFilePath == null ? "" : settings.CompanyLogoFilePath;
                 pendingLogoSourcePath = "";
@@ -589,15 +684,21 @@ namespace OVIA.Desktop
 
                 cleanSignature = GetCurrentSignature();
                 isDirty = false;
+                UpdateSaveButtonVisibility();
+
+                string savedMessage = logoChanged
+                    ? "저장되었습니다.\r\n\r\n회사 로고는 다음 로그인 화면부터 적용됩니다."
+                    : "저장되었습니다.";
 
                 MessageBox.Show(
-                    "시스템 설정이 저장되었습니다.\r\n\r\n회사 로고는 다음 로그인 화면부터 적용됩니다.",
+                    savedMessage,
                     "OVIA 시스템 설정",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information
                 );
 
                 UpdateStatus("시스템 설정을 저장했습니다. 저장 위치: " + OviaSystemSettingsStore.GetSettingsFilePath());
+                OviaNotificationStore.AddWorkLog(companyId, userId, "시스템 설정 저장", "메인  ›  환경설정  ›  시스템 설정");
             }
             catch (Exception ex)
             {
@@ -704,17 +805,62 @@ namespace OVIA.Desktop
             }
 
             isDirty = GetCurrentSignature() != cleanSignature;
+            UpdateSaveButtonVisibility();
+
             if (isDirty)
             {
                 UpdateStatus("변경된 시스템 설정이 있습니다. 저장하기를 눌러 적용하세요.");
             }
+            else
+            {
+                UpdateStatus("변경사항이 없습니다.");
+            }
+        }
+
+        private void UpdateSaveButtonVisibility()
+        {
+            if (btnSave == null)
+            {
+                return;
+            }
+
+            btnSave.Visible = canEdit && isDirty;
+            btnSave.Enabled = canEdit && isDirty;
         }
 
         private string GetCurrentSignature()
         {
             string erp = txtErpUrl == null ? "" : txtErpUrl.Value.Trim();
-            string logo = defaultLogoRequested ? "DEFAULT" : (pendingLogoSourcePath.Trim() != "" ? pendingLogoSourcePath.Trim() : currentLogoPath.Trim());
-            return erp + "|" + logo;
+            string pending = pendingLogoSourcePath == null ? "" : pendingLogoSourcePath.Trim();
+            string current = currentLogoPath == null ? "" : currentLogoPath.Trim();
+            string logo = defaultLogoRequested || (pending == "" && current == "") ? "DEFAULT" : (pending != "" ? pending : current);
+            string listPageSize = txtListPageSize == null ? "100" : txtListPageSize.Value.Trim();
+            return erp + "|" + logo + "|" + listPageSize;
+        }
+
+        private bool AreSameLogoPath(string left, string right)
+        {
+            string a = NormalizeLogoPathForCompare(left);
+            string b = NormalizeLogoPathForCompare(right);
+            return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string NormalizeLogoPathForCompare(string path)
+        {
+            string value = path == null ? "" : path.Trim();
+            if (value == "")
+            {
+                return "DEFAULT";
+            }
+
+            try
+            {
+                return Path.GetFullPath(value);
+            }
+            catch
+            {
+                return value;
+            }
         }
 
         private bool EnsureCanEdit()

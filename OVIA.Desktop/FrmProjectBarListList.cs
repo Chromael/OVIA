@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -22,6 +22,7 @@ namespace OVIA.Desktop
 
         private DataGridView grid;
         private Label lblStatus;
+        private Panel pagerPanel;
         private Label lblProjectTitle;
         private Label lblProjectSub;
         private ToolTip windowToolTip;
@@ -40,6 +41,11 @@ namespace OVIA.Desktop
         private bool isScrollResetQueued = false;
         private bool isInternalNavigation = false;
         private bool isBackNavigationQueued = false;
+        private List<ProjectBarListSummary> currentBarListRows = new List<ProjectBarListSummary>();
+        private int pageSize = 100;
+        private int currentPage = 1;
+        private string headerSortColumn = "";
+        private bool headerSortAscending = true;
 
         public FrmProjectBarListList(string companyId, string userId, string projectNo, string projectName, string clientName, string projectStatus)
         {
@@ -635,6 +641,7 @@ namespace OVIA.Desktop
             grid.RowHeadersVisible = false;
             grid.ReadOnly = true;
             grid.CellDoubleClick += Grid_CellDoubleClick;
+            grid.ColumnHeaderMouseClick += Grid_ColumnHeaderMouseClick;
 
             grid.EnableHeadersVisualStyles = false;
             grid.ColumnHeadersDefaultCellStyle.BackColor = OviaFluentTheme.HeaderBackground;
@@ -706,13 +713,20 @@ namespace OVIA.Desktop
             column.FillWeight = Math.Max(1, width);
             column.MinimumWidth = width <= 0 ? 5 : 45;
             column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-            column.SortMode = DataGridViewColumnSortMode.NotSortable;
+            column.SortMode = DataGridViewColumnSortMode.Programmatic;
             column.Resizable = DataGridViewTriState.True;
             grid.Columns.Add(column);
         }
 
         private void BuildFooter(Control parent)
         {
+            pagerPanel = new Panel();
+            pagerPanel.Location = new Point(38, 612);
+            pagerPanel.Size = new Size(1040, 36);
+            pagerPanel.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+            pagerPanel.BackColor = SurfaceColor;
+            parent.Controls.Add(pagerPanel);
+
             lblStatus = OviaWorkspaceStatusLabel.Create(parent, "", 38, 660);
             lblStatus.Font = OviaFluentTheme.FontStatus(8.2F, FontStyle.Regular);
         }
@@ -749,28 +763,158 @@ namespace OVIA.Desktop
         {
             grid.Rows.Clear();
 
-            List<ProjectBarListSummary> list = GetBarListSummaries();
+            currentBarListRows = GetBarListSummaries();
+            pageSize = GetConfiguredListPageSize();
 
+            int maxPage = GetMaxPage();
+            if (currentPage > maxPage)
+            {
+                currentPage = maxPage;
+            }
+            if (currentPage < 1)
+            {
+                currentPage = 1;
+            }
+
+            int start = (currentPage - 1) * pageSize;
+            int end = Math.Min(start + pageSize, currentBarListRows.Count);
             int i;
 
-            for (i = 0; i < list.Count; i++)
+            for (i = start; i < end; i++)
             {
                 grid.Rows.Add(
-                    list[i].Status,
-                    list[i].Title,
-                    list[i].CreatedDate,
-                    list[i].ModifiedDate,
-                    list[i].RowCount.ToString(),
-                    list[i].TotalQty.ToString("0.###"),
-                    list[i].TotalLength.ToString("0.###"),
-                    list[i].TotalWeight.ToString("0.###"),
-                    list[i].Writer,
-                    list[i].Memo,
-                    list[i].FilePath
+                    currentBarListRows[i].Status,
+                    currentBarListRows[i].Title,
+                    currentBarListRows[i].CreatedDate,
+                    currentBarListRows[i].ModifiedDate,
+                    currentBarListRows[i].RowCount.ToString(),
+                    currentBarListRows[i].TotalQty.ToString("0.###"),
+                    currentBarListRows[i].TotalLength.ToString("0.###"),
+                    currentBarListRows[i].TotalWeight.ToString("0.###"),
+                    currentBarListRows[i].Writer,
+                    currentBarListRows[i].Memo,
+                    currentBarListRows[i].FilePath
                 );
             }
 
-            lblStatus.Text = "저장된 BarList: " + list.Count.ToString() + "건";
+            RenderPager();
+            UpdateSortGlyph();
+
+            int displayCount = Math.Max(0, end - start);
+            lblStatus.Text = currentBarListRows.Count > displayCount
+                ? "저장된 BarList: " + currentBarListRows.Count.ToString() + "건 / 현재 표시: " + displayCount.ToString() + "건 / 페이지당 " + pageSize.ToString() + "건"
+                : "저장된 BarList: " + currentBarListRows.Count.ToString() + "건 / 페이지당 " + pageSize.ToString() + "건";
+        }
+
+        private void RenderPager()
+        {
+            if (pagerPanel == null)
+            {
+                return;
+            }
+
+            pagerPanel.Controls.Clear();
+
+            int maxPage = GetMaxPage();
+            int left = 0;
+
+            AddPagerLink("처음", 1, ref left, currentPage > 1);
+            AddPagerLink("이전", currentPage - 1, ref left, currentPage > 1);
+
+            int firstPage = Math.Max(1, currentPage - 2);
+            int lastPage = Math.Min(maxPage, firstPage + 4);
+            if (lastPage - firstPage < 4)
+            {
+                firstPage = Math.Max(1, lastPage - 4);
+            }
+
+            for (int page = firstPage; page <= lastPage; page++)
+            {
+                AddPagerLink(page.ToString(), page, ref left, true);
+            }
+
+            AddPagerLink("다음", currentPage + 1, ref left, currentPage < maxPage);
+            AddPagerLink("끝", maxPage, ref left, currentPage < maxPage);
+        }
+
+        private void AddPagerLink(string text, int targetPage, ref int left, bool enabled)
+        {
+            bool isCurrentPage = targetPage == currentPage && IsNumericText(text);
+            Button button = new Button();
+            button.Text = text;
+            button.Tag = targetPage;
+            button.AutoSize = false;
+            button.Size = MeasurePagerButtonSize(text);
+            button.Location = new Point(left, 4);
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderSize = 1;
+            button.FlatAppearance.BorderColor = enabled ? Color.FromArgb(208, 216, 226) : Color.FromArgb(222, 226, 232);
+            button.FlatAppearance.MouseOverBackColor = isCurrentPage ? OviaFluentTheme.AccentHover : Color.FromArgb(241, 246, 255);
+            button.FlatAppearance.MouseDownBackColor = isCurrentPage ? OviaFluentTheme.AccentHover : Color.FromArgb(226, 237, 255);
+            button.BackColor = isCurrentPage ? OviaFluentTheme.Accent : Color.White;
+            button.ForeColor = isCurrentPage ? Color.White : (enabled ? TextDark : TextSub);
+            button.Font = OviaFluentTheme.FontData(8.7F, FontStyle.Regular);
+            button.TextAlign = ContentAlignment.MiddleCenter;
+            button.Cursor = enabled ? Cursors.Hand : Cursors.Default;
+            button.Enabled = enabled;
+            button.UseVisualStyleBackColor = false;
+            button.Click += Pager_Click;
+            pagerPanel.Controls.Add(button);
+            left += button.Width + 7;
+        }
+
+        private Size MeasurePagerButtonSize(string text)
+        {
+            Size textSize = TextRenderer.MeasureText(text, OviaFluentTheme.FontData(8.7F, FontStyle.Regular));
+            return new Size(Math.Max(34, textSize.Width + 18), 28);
+        }
+
+        private bool IsNumericText(string text)
+        {
+            int value;
+            return int.TryParse(text, out value);
+        }
+
+        private void Pager_Click(object sender, EventArgs e)
+        {
+            Control control = sender as Control;
+            if (control == null || control.Tag == null)
+            {
+                return;
+            }
+
+            int nextPage = Convert.ToInt32(control.Tag);
+            nextPage = Math.Max(1, Math.Min(GetMaxPage(), nextPage));
+            if (nextPage == currentPage)
+            {
+                return;
+            }
+
+            currentPage = nextPage;
+            BindBarListRows();
+        }
+
+        private int GetMaxPage()
+        {
+            if (pageSize <= 0)
+            {
+                pageSize = 100;
+            }
+
+            int count = currentBarListRows == null ? 0 : currentBarListRows.Count;
+            return Math.Max(1, (int)Math.Ceiling(count / (double)pageSize));
+        }
+
+        private int GetConfiguredListPageSize()
+        {
+            try
+            {
+                return OviaSystemSettingsStore.GetListPageSize();
+            }
+            catch
+            {
+                return 100;
+            }
         }
 
         private List<ProjectBarListSummary> GetBarListSummaries()
@@ -792,18 +936,93 @@ namespace OVIA.Desktop
                 list.Add(BuildSummary(files[i]));
             }
 
-            list.Sort(delegate (ProjectBarListSummary a, ProjectBarListSummary b)
+            if (!string.IsNullOrWhiteSpace(headerSortColumn))
             {
-                DateTime at;
-                DateTime bt;
-
-                DateTime.TryParse(a.ModifiedDate, out at);
-                DateTime.TryParse(b.ModifiedDate, out bt);
-
-                return bt.CompareTo(at);
-            });
+                list.Sort(delegate (ProjectBarListSummary a, ProjectBarListSummary b)
+                {
+                    int result = CompareBarListRows(a, b, headerSortColumn);
+                    return headerSortAscending ? result : -result;
+                });
+            }
+            else
+            {
+                list.Sort(delegate (ProjectBarListSummary a, ProjectBarListSummary b)
+                {
+                    return CompareDateText(b.ModifiedDate, a.ModifiedDate);
+                });
+            }
 
             return list;
+        }
+
+        private int CompareBarListRows(ProjectBarListSummary a, ProjectBarListSummary b, string columnName)
+        {
+            if (columnName == "상태")
+            {
+                return string.Compare(a.Status, b.Status, StringComparison.CurrentCultureIgnoreCase);
+            }
+
+            if (columnName == "제목")
+            {
+                return string.Compare(a.Title, b.Title, StringComparison.CurrentCultureIgnoreCase);
+            }
+
+            if (columnName == "등록일")
+            {
+                return CompareDateText(a.CreatedDate, b.CreatedDate);
+            }
+
+            if (columnName == "수정일")
+            {
+                return CompareDateText(a.ModifiedDate, b.ModifiedDate);
+            }
+
+            if (columnName == "행수")
+            {
+                return a.RowCount.CompareTo(b.RowCount);
+            }
+
+            if (columnName == "총수량")
+            {
+                return a.TotalQty.CompareTo(b.TotalQty);
+            }
+
+            if (columnName == "총길이(M)")
+            {
+                return a.TotalLength.CompareTo(b.TotalLength);
+            }
+
+            if (columnName == "중량(Ton)")
+            {
+                return a.TotalWeight.CompareTo(b.TotalWeight);
+            }
+
+            if (columnName == "작성자")
+            {
+                return string.Compare(a.Writer, b.Writer, StringComparison.CurrentCultureIgnoreCase);
+            }
+
+            if (columnName == "비고")
+            {
+                return string.Compare(a.Memo, b.Memo, StringComparison.CurrentCultureIgnoreCase);
+            }
+
+            return 0;
+        }
+
+        private int CompareDateText(string a, string b)
+        {
+            DateTime da;
+            DateTime db;
+            bool aOk = DateTime.TryParse(a, out da);
+            bool bOk = DateTime.TryParse(b, out db);
+
+            if (aOk && bOk)
+            {
+                return da.CompareTo(db);
+            }
+
+            return string.Compare(a, b, StringComparison.CurrentCultureIgnoreCase);
         }
 
         private ProjectBarListSummary BuildSummary(string filePath)
@@ -1152,8 +1371,55 @@ namespace OVIA.Desktop
             this.Close();
         }
 
+        private void Grid_ColumnHeaderMouseClick(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (grid == null || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            string columnName = grid.Columns[e.ColumnIndex].Name;
+            if (string.IsNullOrWhiteSpace(columnName) || columnName == "FilePath")
+            {
+                return;
+            }
+
+            if (headerSortColumn == columnName)
+            {
+                headerSortAscending = !headerSortAscending;
+            }
+            else
+            {
+                headerSortColumn = columnName;
+                headerSortAscending = true;
+            }
+
+            currentPage = 1;
+            BindBarListRows();
+        }
+
+        private void UpdateSortGlyph()
+        {
+            if (grid == null)
+            {
+                return;
+            }
+
+            int i;
+            for (i = 0; i < grid.Columns.Count; i++)
+            {
+                grid.Columns[i].HeaderCell.SortGlyphDirection = SortOrder.None;
+            }
+
+            if (!string.IsNullOrWhiteSpace(headerSortColumn) && grid.Columns.Contains(headerSortColumn))
+            {
+                grid.Columns[headerSortColumn].HeaderCell.SortGlyphDirection = headerSortAscending ? SortOrder.Ascending : SortOrder.Descending;
+            }
+        }
+
         private void RefreshButton_Click(object sender, EventArgs e)
         {
+            currentPage = 1;
             BindBarListRows();
         }
 

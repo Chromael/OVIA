@@ -312,7 +312,8 @@ namespace OVIA.Desktop
 
             btnSave = CreateButton("저장하기", btnClose.Left - buttonGap - OviaFluentTheme.MeasureButtonWidth("저장하기"), buttonTop);
             btnSave.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
-            btnSave.Enabled = canEdit;
+            btnSave.Enabled = false;
+            btnSave.Visible = false;
             btnSave.Click += Save_Click;
             parent.Controls.Add(btnSave);
         }
@@ -355,6 +356,7 @@ namespace OVIA.Desktop
 
             cleanSignature = BuildGridSignature();
             isDirty = false;
+            UpdateSaveButtonVisibility();
             isLoading = false;
             UpdateStatus(canEdit ? "이형철근 단위중량표를 불러왔습니다. 최고관리자는 규격/단위무게만 수정할 수 있으며 조견표 값은 자동 계산됩니다." : "이형철근 단위중량표 보기 전용입니다. 최고관리자만 수정할 수 있습니다.");
             grid.ClearSelection();
@@ -373,6 +375,7 @@ namespace OVIA.Desktop
 
             cleanSignature = BuildGridSignature();
             isDirty = false;
+            UpdateSaveButtonVisibility();
             suppressDirtyEvent = false;
             UpdateStatus(canEdit ? "이형철근 단위중량표를 불러왔습니다. 최고관리자는 규격/단위무게만 수정할 수 있으며 조견표 값은 자동 계산됩니다." : "이형철근 단위중량표 보기 전용입니다. 최고관리자만 수정할 수 있습니다.");
         }
@@ -1056,6 +1059,7 @@ namespace OVIA.Desktop
             selectedSpecStartRow = -1;
             MarkDirtyIfChanged();
             UpdateStatus("선택한 규격이 삭제되었습니다. 저장하기를 눌러 반영하세요.");
+            OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량 규격 삭제", "메인  ›  환경설정  ›  이형철근 단위중량표");
         }
 
         private void Reset_Click(object sender, EventArgs e)
@@ -1107,6 +1111,12 @@ namespace OVIA.Desktop
                 grid.EndEdit();
             }
 
+            if (!HasUnsavedChanges())
+            {
+                UpdateSaveButtonVisibility();
+                return;
+            }
+
             List<RebarUnitWeightRow> rows;
             if (!TryBuildRowsFromGrid(out rows))
             {
@@ -1119,6 +1129,7 @@ namespace OVIA.Desktop
                 cleanSignature = BuildGridSignature();
                 isDirty = false;
                 UpdateStatus("이형철근 단위중량표 저장 완료. 이후 BarList 계산 기준에 반영됩니다.");
+                OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량표 저장", "메인  ›  환경설정  ›  이형철근 단위중량표");
             }
             catch (Exception ex)
             {
@@ -1384,10 +1395,22 @@ namespace OVIA.Desktop
             }
 
             isDirty = cleanSignature != BuildGridSignature();
+            UpdateSaveButtonVisibility();
             if (isDirty)
             {
                 UpdateStatus("저장하지 않은 단위중량표 변경사항이 있습니다.");
             }
+        }
+
+        private void UpdateSaveButtonVisibility()
+        {
+            if (btnSave == null)
+            {
+                return;
+            }
+
+            btnSave.Visible = canEdit && isDirty;
+            btnSave.Enabled = canEdit && isDirty;
         }
 
         private bool HasUnsavedChanges()
@@ -1398,6 +1421,7 @@ namespace OVIA.Desktop
             }
 
             isDirty = cleanSignature != BuildGridSignature();
+            UpdateSaveButtonVisibility();
             return isDirty;
         }
 

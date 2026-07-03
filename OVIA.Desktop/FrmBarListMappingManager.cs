@@ -20,6 +20,7 @@ namespace OVIA.Desktop
 
         private DataGridView grid;
         private Label lblStatus;
+        private Button btnSave;
         private ToolTip windowToolTip;
         private ContextMenuStrip columnMenu;
         private ToolStripMenuItem deleteColumnMenuItem;
@@ -157,8 +158,10 @@ namespace OVIA.Desktop
             btnClose.Click += delegate { this.Close(); };
             this.Controls.Add(btnClose);
 
-            Button btnSave = CreateButton("저장하기", btnClose.Left - buttonGap - OviaFluentTheme.MeasureButtonWidth("저장하기"), buttonTop);
+            btnSave = CreateButton("저장하기", btnClose.Left - buttonGap - OviaFluentTheme.MeasureButtonWidth("저장하기"), buttonTop);
             btnSave.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            btnSave.Visible = false;
+            btnSave.Enabled = false;
             btnSave.Click += Save_Click;
             this.Controls.Add(btnSave);
 
@@ -620,6 +623,7 @@ namespace OVIA.Desktop
             AddAliasColumn();
             NormalizeAliasColumnHeadersByDisplayOrder();
             ApplyColumnHeaderAlignment();
+            UpdateSaveButtonVisibility();
             lblStatus.Text = "매핑 열을 추가했습니다. 필요한 헤더명을 입력한 뒤 저장하세요.";
             lblStatus.ForeColor = TextSub;
         }
@@ -662,12 +666,19 @@ namespace OVIA.Desktop
 
             PushUndoSnapshot();
             LoadStoreToGrid(OviaBarListMappingStore.CreateBuiltInDefault());
+            UpdateSaveButtonVisibility();
             lblStatus.Text = "기본값으로 화면을 복원했습니다. 저장하기를 클릭하면 기본값이 설정 파일에 저장됩니다.";
             lblStatus.ForeColor = TextSub;
         }
 
         private void Save_Click(object sender, EventArgs e)
         {
+            if (!HasUnsavedChanges())
+            {
+                UpdateSaveButtonVisibility();
+                return;
+            }
+
             DialogResult result = MessageBox.Show(
                 "현재 설정을 저장하시겠습니까?\r\n\r\n저장 후 새로 불러오는 BarList CSV부터 변경된 매핑 기준이 적용됩니다.",
                 "OVIA BarList 항목 매핑 저장",
@@ -689,6 +700,7 @@ namespace OVIA.Desktop
                 lblStatus.ForeColor = OviaFluentTheme.Success;
                 changedCells.Clear();
                 undoStack.Clear();
+                UpdateSaveButtonVisibility();
                 redoStack.Clear();
                 ApplyActiveRowHighlight();
 
@@ -698,6 +710,7 @@ namespace OVIA.Desktop
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information
                 );
+                OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 항목 매핑 저장", "메인  ›  환경설정  ›  BarList 항목 매핑");
             }
             catch (Exception ex)
             {
@@ -755,6 +768,18 @@ namespace OVIA.Desktop
             );
 
             return result == DialogResult.Yes;
+        }
+
+        private void UpdateSaveButtonVisibility()
+        {
+            if (btnSave == null)
+            {
+                return;
+            }
+
+            bool hasChanges = HasUnsavedChanges();
+            btnSave.Visible = hasChanges;
+            btnSave.Enabled = hasChanges;
         }
 
         private bool HasUnsavedChanges()
@@ -1078,8 +1103,10 @@ namespace OVIA.Desktop
             selectedCellColumnIndex = -1;
             ApplyActiveRowHighlight();
 
+            UpdateSaveButtonVisibility();
             lblStatus.Text = "선택한 매핑 열 전체를 삭제했습니다. 저장하기 전까지 실제 설정에는 반영되지 않습니다.";
             lblStatus.ForeColor = TextSub;
+            OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 매핑 열 삭제", "메인  ›  환경설정  ›  BarList 항목 매핑");
         }
 
         private bool IsAliasColumn(int columnIndex)
@@ -1127,9 +1154,11 @@ namespace OVIA.Desktop
             selectedCellRowIndex = rowIndex;
             selectedCellColumnIndex = columnIndex;
             ApplyActiveRowHighlight();
+            UpdateSaveButtonVisibility();
 
             lblStatus.Text = "선택한 매핑 셀의 내용을 삭제했습니다.";
             lblStatus.ForeColor = TextSub;
+            OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 매핑 셀 삭제", "메인  ›  환경설정  ›  BarList 항목 매핑");
         }
 
         private void ShiftAliasCellsLeft(int rowIndex, int columnIndex)
@@ -1297,6 +1326,7 @@ namespace OVIA.Desktop
             }
 
             changedCells.Add(GetCellKey(rowIndex, columnIndex));
+            UpdateSaveButtonVisibility();
         }
 
         private void ClearChangedCellsFromAliasColumn(int rowIndex, int columnIndex)

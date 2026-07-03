@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -20,6 +20,7 @@ namespace OVIA.Desktop
         void NavigateToRebarUnitWeightTable();
         void NavigateToSystemSettings();
         void NavigateToMenuManager();
+        void NavigateToNotifications();
         void NavigateToWorkspaceInfoPage(string menuKey, string pathText, string title, string selectedMenu, string helpText, string bodyText);
         void ShowAutoCadEnvironmentCheck();
         void ShowAutoCadExtractGuide();
@@ -48,17 +49,17 @@ namespace OVIA.Desktop
 
             if (hasUnsavedData)
             {
-                message = "저장되지 않은 \"" + dataName + "\" 데이터가 있습니다.\r\n\r\n그래도 시스템을 종료하시겠습니까?";
+                message = "저장되지 않은 \"" + dataName + "\" 데이터가 있습니다.\r\n\r\n그래도 프로그램을 종료하시겠습니까?";
             }
             else
             {
-                message = "OVIA 시스템을 종료하시겠습니까?";
+                message = "프로그램을 종료하시겠습니까?";
             }
 
             return MessageBox.Show(
                 owner,
                 message,
-                "OVIA 시스템 종료",
+                "OVIA 프로그램 종료",
                 MessageBoxButtons.YesNo,
                 hasUnsavedData ? MessageBoxIcon.Warning : MessageBoxIcon.Question
             ) == DialogResult.Yes;
@@ -72,20 +73,20 @@ namespace OVIA.Desktop
 
             if (hasUnsavedData)
             {
-                message = "저장되지 않은 \"" + dataName + "\" 데이터가 있습니다.\r\n\r\n그래도 로그아웃하시겠습니까?";
+                message = "저장되지 않은 \"" + dataName + "\" 데이터가 있습니다.\r\n\r\n그래도 프로그램을 종료하시겠습니까?";
             }
             else
             {
-                message = "로그아웃을 하시겠습니까?";
+                message = "프로그램을 종료하시겠습니까?";
             }
 
             return MessageBox.Show(
                 owner,
                 message,
-                "OVIA 로그아웃",
-                MessageBoxButtons.OKCancel,
+                "OVIA 프로그램 종료",
+                MessageBoxButtons.YesNo,
                 hasUnsavedData ? MessageBoxIcon.Warning : MessageBoxIcon.Question
-            ) == DialogResult.OK;
+            ) == DialogResult.Yes;
         }
 
         public static bool HasUnsavedData(Form currentScreen)
@@ -1404,6 +1405,12 @@ namespace OVIA.Desktop
             ShowScreen(new FrmMenuManager(companyId, userId));
         }
 
+        public void NavigateToNotifications()
+        {
+            this.Text = "OVIA 알림";
+            ShowScreen(new FrmNotificationList(companyId, userId));
+        }
+
         public void NavigateToWorkspaceInfoPage(string menuKey, string pathText, string title, string selectedMenu, string helpText, string bodyText)
         {
             string displayTitle = string.IsNullOrWhiteSpace(title) ? "메뉴" : title.Trim();
@@ -1459,13 +1466,13 @@ namespace OVIA.Desktop
 
         public void RequestLogout()
         {
-            if (!OviaWorkspaceExitHelper.ConfirmSystemExit(this, currentScreen))
+            if (!OviaWorkspaceExitHelper.ConfirmLogout(this, currentScreen))
             {
                 return;
             }
 
             systemExitConfirmed = true;
-            Application.Exit();
+            this.Close();
         }
 
         private void ShowScreen(Form nextScreen)

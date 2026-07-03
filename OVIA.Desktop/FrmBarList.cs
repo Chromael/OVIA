@@ -1424,6 +1424,7 @@ namespace OVIA.Desktop
                 txtFilePath.Text = filePath;
                 lastLoadedFilePath = filePath;
                 savedProjectFilePath = filePath;
+                OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 저장", "메인  ›  공사관리  ›  공사별 BarList  ›  BarList");
             }
             catch (Exception ex)
             {
@@ -1509,6 +1510,7 @@ namespace OVIA.Desktop
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information
                 );
+                OviaNotificationStore.AddWorkLog(companyId, userId, "BarList CSV 저장", "메인  ›  공사관리  ›  공사별 BarList  ›  BarList");
             }
             catch (Exception ex)
             {
@@ -1554,6 +1556,7 @@ namespace OVIA.Desktop
             MarkUnsaved();
             RecalculateSummary();
             grid.Invalidate();
+            OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 행 삭제", "메인  ›  공사관리  ›  공사별 BarList  ›  BarList");
         }
 
         private void Grid_CellBeginEdit(object sender, DataGridViewCellCancelEventArgs e)

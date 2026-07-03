@@ -237,7 +237,8 @@ namespace OVIA.Desktop
             btnSave.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             btnSave.BackColor = OviaFluentTheme.Accent;
             btnSave.ForeColor = Color.White;
-            btnSave.Enabled = canEdit;
+            btnSave.Enabled = false;
+            btnSave.Visible = false;
             btnSave.Click += Save_Click;
             parent.Controls.Add(btnSave);
 
@@ -292,6 +293,7 @@ namespace OVIA.Desktop
 
             isDirty = false;
             isLoading = false;
+            UpdateSaveButtonVisibility();
             UpdateStatus(canEdit ? "메뉴별 사용 여부, 최고관리자 권한, 도움말을 관리합니다. 도움말은 하단 물음표 아이콘에서 표시됩니다." : "메뉴관리는 최고관리자만 수정할 수 있습니다.");
         }
 
@@ -361,6 +363,7 @@ namespace OVIA.Desktop
             row.Enabled = Convert.ToBoolean(grid.Rows[e.RowIndex].Cells["Enabled"].Value);
             row.SuperAdminOnly = Convert.ToBoolean(grid.Rows[e.RowIndex].Cells["SuperAdminOnly"].Value);
             isDirty = true;
+            UpdateSaveButtonVisibility();
             UpdateStatus("저장하지 않은 메뉴관리 변경사항이 있습니다.");
         }
 
@@ -422,6 +425,7 @@ namespace OVIA.Desktop
             row.HelpText = newHelp;
             grid.Rows[rowIndex].Cells["HelpText"].Value = Shorten(row.HelpText, 80);
             isDirty = true;
+            UpdateSaveButtonVisibility();
             UpdateStatus("저장하지 않은 메뉴관리 도움말 변경사항이 있습니다.");
         }
 
@@ -445,6 +449,7 @@ namespace OVIA.Desktop
 
             LoadRowsToGrid(OviaMenuHelpStore.CreateDefaultSettings());
             isDirty = true;
+            UpdateSaveButtonVisibility();
             UpdateStatus("기본값으로 복원되었습니다. 저장하기를 클릭해야 실제 저장됩니다.");
         }
 
@@ -455,9 +460,28 @@ namespace OVIA.Desktop
                 return;
             }
 
+            if (!isDirty)
+            {
+                UpdateSaveButtonVisibility();
+                return;
+            }
+
             OviaMenuHelpStore.Save(rows);
             isDirty = false;
+            UpdateSaveButtonVisibility();
             UpdateStatus("메뉴관리 설정이 저장되었습니다.");
+            OviaNotificationStore.AddWorkLog(companyId, userId, "메뉴관리 설정 저장", "메인  ›  환경설정  ›  메뉴관리");
+        }
+
+        private void UpdateSaveButtonVisibility()
+        {
+            if (btnSave == null)
+            {
+                return;
+            }
+
+            btnSave.Visible = canEdit && isDirty;
+            btnSave.Enabled = canEdit && isDirty;
         }
 
         private void UpdateStatus(string text)
@@ -709,6 +733,7 @@ namespace OVIA.Desktop
         {
             List<OviaMenuSetting> list = new List<OviaMenuSetting>();
             Add(list, "MAIN", "메인", 1, false, "OVIA 전체 업무 현황, AutoCAD 상태, 최근 BarList 작업, 공사 현황, 공지사항을 확인하는 대시보드입니다.");
+            Add(list, "NOTIFICATIONS", "알림", 2, false, "작업 내역 및 알림은 최대 7일간 보관되며, 7일 후 자동 삭제됩니다. 임의로 삭제할 수 없습니다.");
             Add(list, "PROJECT_MANAGER", "공사관리", 1, false, "공사 목록을 검색하고 공사 등록, 수정, 완료공사 포함 조회를 처리합니다. 공사별 BarList, 생산오더, 송장, 태그 업무는 공사 상세 콘텐츠에서 연결됩니다.");
             Add(list, "PROJECT_BARLIST_LIST", "공사별 BarList", 2, false, "선택한 공사에 저장된 BarList 목록을 조회하고 신규 등록, 수정, 다른 공사 BarList 불러오기 흐름으로 이동합니다.");
             Add(list, "BARLIST", "BarList", 3, false, "CAD 도면 또는 Excel에서 BarList를 가져와 검토하고 저장하는 화면입니다. 형상, 수량, 길이, 중량 데이터를 확인합니다.");
@@ -747,7 +772,7 @@ namespace OVIA.Desktop
             Add(list, "MASTER_MACHINE_LOCATION", "기계/위치 관리", 2, false, "기계, 설비, 위치, 창고 기준 데이터를 관리합니다.");
 
             Add(list, "SETTINGS", "환경설정", 1, false, "OVIA 시스템 동작, BarList 매핑, 단위중량표, 출력 양식, QR/바코드 양식, 프린터, 백업, 버전정보를 관리합니다.");
-            Add(list, "SYSTEM_SETTINGS", "시스템 설정", 2, true, "ERP 연결 주소와 회사 로고처럼 OVIA 전체에 적용되는 기본값을 관리합니다. 이 화면의 저장 권한은 최고관리자에게만 부여됩니다.");
+            Add(list, "SYSTEM_SETTINGS", "시스템 설정", 2, true, "ERP 연결 주소, 회사 로고, 리스트 출력 수처럼 OVIA 전체에 적용되는 기본값을 관리합니다. 리스트 출력 수는 알림, 공사관리, 공사별 BarList 등 리스트 형식 화면의 한 페이지 표시 기준으로 사용됩니다.");
             Add(list, "BARLIST_MAPPING", "BarList 항목 매핑", 2, true, "CAD 도면마다 다른 철근재료표 헤더명을 OVIA 기본 헤더로 치환합니다. 매핑 텍스트는 셀 단위로 추가/수정할 수 있으며, 매핑 열은 드래그로 순서를 바꿀 수 있습니다.");
             Add(list, "REBAR_UNIT_WEIGHT", "이형철근 단위중량표", 2, true, "규격과 단위무게 기준으로 1톤 단위 조견표와 총길이/중량 계산 기준을 관리합니다. 최고관리자만 수정할 수 있습니다.");
             Add(list, "IMPORT_TEMPLATE", "가져오기 양식 설정", 2, true, "SSBAR, Tekla, Excel, DBF, BAR 등 외부 데이터 가져오기 템플릿을 관리합니다.");
