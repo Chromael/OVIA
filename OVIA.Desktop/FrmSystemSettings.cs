@@ -22,15 +22,23 @@ namespace OVIA.Desktop
         private Panel erpSection;
         private Panel logoSection;
         private Panel listSection;
+        private Panel colorSection;
         private Label titleLabel;
         private Label descLabel;
         private Label lblStatus;
         private OviaSystemInputBox txtErpUrl;
         private OviaSystemInputBox txtLogoPath;
         private OviaSystemInputBox txtListPageSize;
+        private OviaSystemInputBox txtBrandPrimaryHex;
+        private OviaSystemInputBox txtBrandHoverHex;
         private PictureBox logoPreview;
         private Button btnBrowseLogo;
         private Button btnDefaultLogo;
+        private Panel pnlBrandPrimaryPreview;
+        private Panel pnlBrandHoverPreview;
+        private Button btnPickBrandPrimary;
+        private Button btnPickBrandHover;
+        private Button btnDefaultBrandColors;
         private Button btnSave;
 
         private string currentLogoPath = "";
@@ -47,7 +55,7 @@ namespace OVIA.Desktop
         {
             get
             {
-                return "ERP 연결 주소, 회사 로고, 리스트 출력 수처럼 OVIA 전체에 적용되는 기본값을 관리합니다. 리스트 출력 수는 알림, 공사관리, 공사별 BarList 등 리스트 형식 화면의 한 페이지 표시 기준으로 사용됩니다.";
+                return "ERP 연결 주소, 회사 로고, 리스트 출력 수, OVIA 주력 색상처럼 OVIA 전체에 적용되는 기본값을 관리합니다. 리스트 출력 수는 알림, 공사관리, 공사별 BarList 등 리스트 형식 화면의 한 페이지 표시 기준으로 사용됩니다.";
             }
         }
         public FrmSystemSettings(string companyId, string userId)
@@ -187,6 +195,8 @@ namespace OVIA.Desktop
             BuildErpSection(contentPanel);
             BuildLogoSection(contentPanel);
             BuildListSection(contentPanel);
+            BuildColorSection(contentPanel);
+            contentPanel.AutoScrollMinSize = new Size(0, 760);
         }
 
         private void BuildErpSection(Control parent)
@@ -337,6 +347,201 @@ namespace OVIA.Desktop
             listSection.Controls.Add(line);
         }
 
+        private void BuildColorSection(Control parent)
+        {
+            colorSection = new Panel();
+            colorSection.Location = new Point(0, 566);
+            colorSection.Size = new Size(1088, 176);
+            colorSection.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            colorSection.BackColor = SurfaceColor;
+            parent.Controls.Add(colorSection);
+
+            AddRequiredTitle(colorSection, "색상 규칙", 0, 0);
+
+            Label primaryLabel = new Label();
+            primaryLabel.Text = "OVIA 주력 색상";
+            primaryLabel.AutoSize = false;
+            primaryLabel.Location = new Point(2, 34);
+            primaryLabel.Size = new Size(160, 20);
+            primaryLabel.TextAlign = ContentAlignment.MiddleLeft;
+            primaryLabel.Font = OviaFluentTheme.FontStatus(8.8F, FontStyle.Bold);
+            primaryLabel.ForeColor = TextDark;
+            primaryLabel.BackColor = SurfaceColor;
+            colorSection.Controls.Add(primaryLabel);
+
+            txtBrandPrimaryHex = new OviaSystemInputBox();
+            txtBrandPrimaryHex.Location = new Point(0, 58);
+            txtBrandPrimaryHex.Size = new Size(160, 48);
+            txtBrandPrimaryHex.Placeholder = OviaSystemSettingsStore.DefaultBrandPrimaryHex;
+            txtBrandPrimaryHex.ValueChanged += ColorInput_ValueChanged;
+            colorSection.Controls.Add(txtBrandPrimaryHex);
+
+            pnlBrandPrimaryPreview = CreateColorPreviewPanel(174, 66);
+            colorSection.Controls.Add(pnlBrandPrimaryPreview);
+
+            btnPickBrandPrimary = CreateNormalButton("색상 선택", 220, 58, 112, 48);
+            btnPickBrandPrimary.Click += PickBrandPrimary_Click;
+            colorSection.Controls.Add(btnPickBrandPrimary);
+
+            Label hoverLabel = new Label();
+            hoverLabel.Text = "OVIA Hover 색상";
+            hoverLabel.AutoSize = false;
+            hoverLabel.Location = new Point(374, 34);
+            hoverLabel.Size = new Size(180, 20);
+            hoverLabel.TextAlign = ContentAlignment.MiddleLeft;
+            hoverLabel.Font = OviaFluentTheme.FontStatus(8.8F, FontStyle.Bold);
+            hoverLabel.ForeColor = TextDark;
+            hoverLabel.BackColor = SurfaceColor;
+            colorSection.Controls.Add(hoverLabel);
+
+            txtBrandHoverHex = new OviaSystemInputBox();
+            txtBrandHoverHex.Location = new Point(372, 58);
+            txtBrandHoverHex.Size = new Size(160, 48);
+            txtBrandHoverHex.Placeholder = OviaSystemSettingsStore.DefaultBrandHoverHex;
+            txtBrandHoverHex.ValueChanged += ColorInput_ValueChanged;
+            colorSection.Controls.Add(txtBrandHoverHex);
+
+            pnlBrandHoverPreview = CreateColorPreviewPanel(546, 66);
+            colorSection.Controls.Add(pnlBrandHoverPreview);
+
+            btnPickBrandHover = CreateNormalButton("색상 선택", 592, 58, 112, 48);
+            btnPickBrandHover.Click += PickBrandHover_Click;
+            colorSection.Controls.Add(btnPickBrandHover);
+
+            btnDefaultBrandColors = CreateNormalButton("기본값 설정", 742, 58, 126, 48);
+            btnDefaultBrandColors.Click += DefaultBrandColors_Click;
+            colorSection.Controls.Add(btnDefaultBrandColors);
+
+            Label helper = new Label();
+            helper.Text = "저장 시 체크박스 색상, 페이징 활성 색상, 파란색 계열 버튼 등 OVIA 전체 주력 색감에 적용됩니다.";
+            helper.AutoSize = false;
+            helper.Location = new Point(2, 120);
+            helper.Size = new Size(980, 24);
+            helper.TextAlign = ContentAlignment.MiddleLeft;
+            helper.Font = OviaFluentTheme.FontStatus(8.8F, FontStyle.Regular);
+            helper.ForeColor = TextSub;
+            helper.BackColor = SurfaceColor;
+            colorSection.Controls.Add(helper);
+
+            Panel line = new Panel();
+            line.Location = new Point(0, 168);
+            line.Size = new Size(1088, 1);
+            line.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+            line.BackColor = OviaFluentTheme.CardBorder;
+            colorSection.Controls.Add(line);
+        }
+
+        private Panel CreateColorPreviewPanel(int x, int y)
+        {
+            Panel panel = new Panel();
+            panel.Location = new Point(x, y);
+            panel.Size = new Size(30, 30);
+            panel.BackColor = OviaFluentTheme.Accent;
+            panel.Paint += ColorPreviewPanel_Paint;
+            return panel;
+        }
+
+        private void ColorPreviewPanel_Paint(object sender, PaintEventArgs e)
+        {
+            Control control = sender as Control;
+            if (control == null)
+            {
+                return;
+            }
+
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            Rectangle rect = new Rectangle(0, 0, control.Width - 1, control.Height - 1);
+
+            using (GraphicsPath path = OviaDrawHelper.RoundRect(rect, 6))
+            using (SolidBrush brush = new SolidBrush(control.BackColor))
+            using (Pen pen = new Pen(OviaFluentTheme.ControlBorder, 1))
+            {
+                e.Graphics.FillPath(brush, path);
+                e.Graphics.DrawPath(pen, path);
+            }
+        }
+
+        private void ColorInput_ValueChanged(object sender, EventArgs e)
+        {
+            UpdateColorPreviews();
+            MarkDirty();
+        }
+
+        private void PickBrandPrimary_Click(object sender, EventArgs e)
+        {
+            PickColorForInput(txtBrandPrimaryHex, OviaSystemSettingsStore.DefaultBrandPrimaryHex);
+        }
+
+        private void PickBrandHover_Click(object sender, EventArgs e)
+        {
+            PickColorForInput(txtBrandHoverHex, OviaSystemSettingsStore.DefaultBrandHoverHex);
+        }
+
+        private void PickColorForInput(OviaSystemInputBox input, string fallbackHex)
+        {
+            if (!EnsureCanEdit() || input == null)
+            {
+                return;
+            }
+
+            Color fallback = OviaSystemSettingsStore.HexToColor(fallbackHex, OviaFluentTheme.Accent);
+            ColorDialog dialog = new ColorDialog();
+            dialog.FullOpen = true;
+            dialog.AnyColor = true;
+            dialog.Color = OviaSystemSettingsStore.HexToColor(input.Value, fallback);
+
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+            {
+                return;
+            }
+
+            input.Value = OviaSystemSettingsStore.ColorToHex(dialog.Color);
+            UpdateColorPreviews();
+            MarkDirty();
+        }
+
+        private void DefaultBrandColors_Click(object sender, EventArgs e)
+        {
+            if (!EnsureCanEdit())
+            {
+                return;
+            }
+
+            if (txtBrandPrimaryHex != null)
+            {
+                txtBrandPrimaryHex.Value = OviaSystemSettingsStore.DefaultBrandPrimaryHex;
+            }
+
+            if (txtBrandHoverHex != null)
+            {
+                txtBrandHoverHex.Value = OviaSystemSettingsStore.DefaultBrandHoverHex;
+            }
+
+            UpdateColorPreviews();
+            MarkDirty();
+        }
+
+        private void UpdateColorPreviews()
+        {
+            if (pnlBrandPrimaryPreview != null)
+            {
+                pnlBrandPrimaryPreview.BackColor = OviaSystemSettingsStore.HexToColor(
+                    txtBrandPrimaryHex == null ? OviaSystemSettingsStore.DefaultBrandPrimaryHex : txtBrandPrimaryHex.Value,
+                    OviaSystemSettingsStore.HexToColor(OviaSystemSettingsStore.DefaultBrandPrimaryHex, Color.FromArgb(37, 99, 235))
+                );
+                pnlBrandPrimaryPreview.Invalidate();
+            }
+
+            if (pnlBrandHoverPreview != null)
+            {
+                pnlBrandHoverPreview.BackColor = OviaSystemSettingsStore.HexToColor(
+                    txtBrandHoverHex == null ? OviaSystemSettingsStore.DefaultBrandHoverHex : txtBrandHoverHex.Value,
+                    OviaSystemSettingsStore.HexToColor(OviaSystemSettingsStore.DefaultBrandHoverHex, Color.FromArgb(29, 78, 216))
+                );
+                pnlBrandHoverPreview.Invalidate();
+            }
+        }
+
         private void BuildBottomButtons(Control parent)
         {
             btnSave = CreateBlackButton("저장하기", 1018, 616, 130, 46);
@@ -431,6 +636,16 @@ namespace OVIA.Desktop
                 listSection.Width = Math.Max(1, contentWidth - 18);
             }
 
+            if (colorSection != null)
+            {
+                colorSection.Width = Math.Max(1, contentWidth - 18);
+            }
+
+            if (contentPanel != null)
+            {
+                contentPanel.AutoScrollMinSize = new Size(0, 760);
+            }
+
             if (txtErpUrl != null)
             {
                 txtErpUrl.Width = Math.Max(520, contentWidth - 38);
@@ -476,6 +691,18 @@ namespace OVIA.Desktop
                 {
                     txtListPageSize.Value = OviaSystemSettingsStore.NormalizeListPageSize(settings.ListPageSize.ToString()).ToString();
                 }
+
+                if (txtBrandPrimaryHex != null)
+                {
+                    txtBrandPrimaryHex.Value = OviaSystemSettingsStore.NormalizeHexColor(settings.BrandPrimaryHex, OviaSystemSettingsStore.DefaultBrandPrimaryHex);
+                }
+
+                if (txtBrandHoverHex != null)
+                {
+                    txtBrandHoverHex.Value = OviaSystemSettingsStore.NormalizeHexColor(settings.BrandHoverHex, OviaSystemSettingsStore.DefaultBrandHoverHex);
+                }
+
+                UpdateColorPreviews();
 
                 currentLogoPath = "";
                 pendingLogoSourcePath = "";
@@ -530,6 +757,31 @@ namespace OVIA.Desktop
             if (txtListPageSize != null)
             {
                 txtListPageSize.ReadOnly = true;
+            }
+
+            if (txtBrandPrimaryHex != null)
+            {
+                txtBrandPrimaryHex.ReadOnly = true;
+            }
+
+            if (txtBrandHoverHex != null)
+            {
+                txtBrandHoverHex.ReadOnly = true;
+            }
+
+            if (btnPickBrandPrimary != null)
+            {
+                btnPickBrandPrimary.Enabled = false;
+            }
+
+            if (btnPickBrandHover != null)
+            {
+                btnPickBrandHover.Enabled = false;
+            }
+
+            if (btnDefaultBrandColors != null)
+            {
+                btnDefaultBrandColors.Enabled = false;
             }
 
             if (btnBrowseLogo != null)
@@ -603,6 +855,8 @@ namespace OVIA.Desktop
 
             string erpUrl = txtErpUrl.Value.Trim();
             string listPageSizeText = txtListPageSize == null ? "100" : txtListPageSize.Value.Trim();
+            string brandPrimaryHex;
+            string brandHoverHex;
             int listPageSize;
 
             if (!int.TryParse(listPageSizeText, out listPageSize) || listPageSize < 1 || listPageSize > 1000)
@@ -622,6 +876,38 @@ namespace OVIA.Desktop
             }
 
             listPageSize = OviaSystemSettingsStore.NormalizeListPageSize(listPageSize.ToString());
+
+            if (!OviaSystemSettingsStore.TryNormalizeHexColor(txtBrandPrimaryHex == null ? OviaSystemSettingsStore.DefaultBrandPrimaryHex : txtBrandPrimaryHex.Value, out brandPrimaryHex))
+            {
+                MessageBox.Show(
+                    "OVIA 주력 색상은 #2563EB 형식의 6자리 HEX 색상값으로 입력해 주세요.",
+                    "OVIA 시스템 설정",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+
+                if (txtBrandPrimaryHex != null)
+                {
+                    txtBrandPrimaryHex.Focus();
+                }
+                return;
+            }
+
+            if (!OviaSystemSettingsStore.TryNormalizeHexColor(txtBrandHoverHex == null ? OviaSystemSettingsStore.DefaultBrandHoverHex : txtBrandHoverHex.Value, out brandHoverHex))
+            {
+                MessageBox.Show(
+                    "OVIA Hover 색상은 #1D4ED8 형식의 6자리 HEX 색상값으로 입력해 주세요.",
+                    "OVIA 시스템 설정",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+
+                if (txtBrandHoverHex != null)
+                {
+                    txtBrandHoverHex.Focus();
+                }
+                return;
+            }
 
             if (erpUrl != "" && !IsValidWebUrl(erpUrl))
             {
@@ -643,6 +929,8 @@ namespace OVIA.Desktop
 
                 settings.ErpLoginUrl = erpUrl;
                 settings.ListPageSize = listPageSize;
+                settings.BrandPrimaryHex = brandPrimaryHex;
+                settings.BrandHoverHex = brandHoverHex;
 
                 if (defaultLogoRequested)
                 {
@@ -666,6 +954,18 @@ namespace OVIA.Desktop
                 {
                     txtListPageSize.Value = settings.ListPageSize.ToString();
                 }
+
+                if (txtBrandPrimaryHex != null)
+                {
+                    txtBrandPrimaryHex.Value = settings.BrandPrimaryHex;
+                }
+
+                if (txtBrandHoverHex != null)
+                {
+                    txtBrandHoverHex.Value = settings.BrandHoverHex;
+                }
+
+                UpdateColorPreviews();
 
                 currentLogoPath = settings.CompanyLogoFilePath == null ? "" : settings.CompanyLogoFilePath;
                 pendingLogoSourcePath = "";
@@ -835,7 +1135,9 @@ namespace OVIA.Desktop
             string current = currentLogoPath == null ? "" : currentLogoPath.Trim();
             string logo = defaultLogoRequested || (pending == "" && current == "") ? "DEFAULT" : (pending != "" ? pending : current);
             string listPageSize = txtListPageSize == null ? "100" : txtListPageSize.Value.Trim();
-            return erp + "|" + logo + "|" + listPageSize;
+            string brandPrimary = txtBrandPrimaryHex == null ? OviaSystemSettingsStore.DefaultBrandPrimaryHex : OviaSystemSettingsStore.NormalizeHexColor(txtBrandPrimaryHex.Value, OviaSystemSettingsStore.DefaultBrandPrimaryHex);
+            string brandHover = txtBrandHoverHex == null ? OviaSystemSettingsStore.DefaultBrandHoverHex : OviaSystemSettingsStore.NormalizeHexColor(txtBrandHoverHex.Value, OviaSystemSettingsStore.DefaultBrandHoverHex);
+            return erp + "|" + logo + "|" + listPageSize + "|" + brandPrimary + "|" + brandHover;
         }
 
         private bool AreSameLogoPath(string left, string right)

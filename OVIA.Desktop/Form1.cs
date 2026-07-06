@@ -307,6 +307,8 @@ namespace OVIA.Desktop
                 return;
             }
 
+            OviaSessionSecurity.SetCurrentLogin(companyId, userId, password);
+
             if (chkSaveId.Checked)
             {
                 SaveLoginInfo(companyId, userId);

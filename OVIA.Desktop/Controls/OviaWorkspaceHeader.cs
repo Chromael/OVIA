@@ -35,7 +35,6 @@ namespace OVIA.Desktop.Controls
         private readonly Color inactiveColor;
         private readonly Color explorerHoverColor;
         private readonly Color explorerDownColor;
-        private readonly Color notificationBadgeColor;
 
         private OviaExplorerIconButton btnBack;
         private OviaExplorerIconButton btnForward;
@@ -64,7 +63,6 @@ namespace OVIA.Desktop.Controls
             inactiveColor = Color.FromArgb(175, 181, 190);
             explorerHoverColor = Color.FromArgb(229, 233, 238);
             explorerDownColor = Color.FromArgb(218, 224, 232);
-            notificationBadgeColor = Color.FromArgb(37, 99, 235);
 
             this.Height = HeaderHeight;
             this.BackColor = surfaceColor;
@@ -270,7 +268,7 @@ namespace OVIA.Desktop.Controls
             btnNotification = CreateExplorerButton("\uF2A3", "알림");
             // U+F2A3 종 아이콘은 같은 버튼 영역 안에서 뒤로/앞으로/위로가기 아이콘과 시각 크기를 맞춘다.
             btnNotification.Font = OVIA.Desktop.OviaIconFont.Create(15F, FontStyle.Regular);
-            btnNotification.BadgeBackColor = notificationBadgeColor;
+            btnNotification.BadgeBackColor = OviaFluentTheme.NotificationBadgeBack;
             btnNotification.BadgeFont = OviaFluentTheme.FontData(7.2F, FontStyle.Bold);
             btnNotification.Click += Notification_Click;
             Controls.Add(btnNotification);
@@ -439,6 +437,7 @@ namespace OVIA.Desktop.Controls
                 return;
             }
 
+            btnNotification.BadgeBackColor = OviaFluentTheme.NotificationBadgeBack;
             btnNotification.BadgeText = count > 99 ? "99+" : count.ToString();
             btnNotification.BadgeVisible = true;
             btnNotification.Invalidate();

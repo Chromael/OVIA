@@ -197,8 +197,16 @@ namespace OVIA.Desktop
             shipping.Click += delegate { ToggleShippingDropDown(shipping); };
             left += shipping.Width + gap;
 
-            OviaMenuButton erp = AddMenu(commandBar, "ERP \uE70D", "\uE774", left, 96, selectedMenu == "ERP", null);
-            erp.Click += delegate { ToggleErpDropDown(erp); };
+            OviaMenuButton erp = AddMenu(commandBar, "ERP", "\uE774", left, 82, selectedMenu == "ERP", delegate(Control source)
+            {
+                if (currentSettingsDropDown != null && !currentSettingsDropDown.IsDisposed && currentSettingsDropDown.Visible)
+                {
+                    currentSettingsDropDown.CloseImmediate();
+                    currentSettingsDropDown = null;
+                }
+
+                OpenErpInDefaultBrowser(source);
+            });
             left += erp.Width + gap;
 
             OviaMenuButton master = AddMenu(commandBar, "기준정보 \uE70D", "\uE8EC", left, 112, selectedMenu == "MASTER", null);
@@ -246,20 +254,6 @@ namespace OVIA.Desktop
             {
                 AddWorkspacePageItem(menu, menuButton, "송장관리", "\uE7C3", "SHIPPING_INVOICE_MANAGE", "메인  ›  출하/송장  ›  송장관리", "송장관리", "SHIPPING", "송장 조회, 발행, 수정, 납품표, 인수증, 검수양식 출력과 차량/운전자 선택을 처리합니다.", "송장 발행과 수정, 출력은 송장관리 화면 내부 버튼으로 통합합니다.");
                 AddWorkspacePageItem(menu, menuButton, "출하실적등록", "\uE9D9", "SHIPPING_RESULT_REGISTER", "메인  ›  출하/송장  ›  출하실적등록", "출하실적등록", "SHIPPING", "출하 실적 조회, 실적 등록, 거래처별 실적 양식 생성, ERP 전송을 처리합니다.", "대한제강, 동인철강, 스틸코리아 같은 업체별 양식은 화면 내부 템플릿 선택 방식으로 통합합니다.");
-            });
-        }
-
-        private static void ToggleErpDropDown(Control menuButton)
-        {
-            ToggleDropDown(menuButton, delegate(OviaAnimatedDropDownMenu menu)
-            {
-                menu.AddItem("ERP 바로가기", "\uE774", delegate
-                {
-                    menu.CloseImmediate();
-                    currentSettingsDropDown = null;
-                    OpenErpInDefaultBrowser(menuButton);
-                });
-                AddWorkspacePageItem(menu, menuButton, "ERP 동기화 상태", "\uE895", "ERP_SYNC_STATUS", "메인  ›  ERP  ›  ERP 동기화 상태", "ERP 동기화 상태", "ERP", "OVIA와 ERP의 동기화 오류, 마지막 전송 시각, 재시도 상태를 확인합니다.", "웹 ERP 본 기능은 브라우저에서 처리하고 OVIA Desktop은 연동 상태를 확인합니다.");
             });
         }
 

@@ -19,13 +19,13 @@ namespace OVIA.Desktop
         public static readonly Color NavigationBackground = Color.FromArgb(248, 249, 251);
         public static readonly Color NavigationSelected = Color.FromArgb(234, 247, 255);
         public static readonly Color NavigationHover = Color.FromArgb(246, 247, 249);
-        public static readonly Color NavigationTextActive = Color.FromArgb(37, 99, 235);
+        public static Color NavigationTextActive { get { return Accent; } }
         public static readonly Color NavigationText = Color.FromArgb(45, 55, 72);
         public static readonly Color CardBackground = Color.White;
         public static readonly Color CardBorder = Color.FromArgb(218, 225, 236);
         public static readonly Color CardShadow = Color.FromArgb(235, 239, 245);
         public static readonly Color ControlBorder = Color.FromArgb(209, 213, 219);
-        public static readonly Color ControlBorderFocus = Color.FromArgb(91, 95, 239);
+        public static Color ControlBorderFocus { get { return Accent; } }
         public static readonly Color CommonInputBackground = Color.FromArgb(251, 251, 251);
         public static readonly Color CommonInputBackgroundHover = Color.White;
         public static readonly Color CommonInputBorder = Color.FromArgb(228, 228, 228);
@@ -39,20 +39,27 @@ namespace OVIA.Desktop
         public static readonly Color TextSecondary = Color.FromArgb(55, 65, 81);
         public static readonly Color TextTertiary = Color.FromArgb(85, 96, 112);
         public static readonly Color TextMuted = Color.FromArgb(107, 114, 128);
-        public static readonly Color Accent = Color.FromArgb(37, 99, 235);
-        public static readonly Color AccentHover = Color.FromArgb(29, 78, 216);
-        public static readonly Color AccentLight = Color.FromArgb(239, 246, 255);
-        public static readonly Color AccentSoft = Color.FromArgb(248, 250, 255);
-        public static readonly Color DashboardPrimary = Color.FromArgb(37, 99, 235);
-        public static readonly Color DashboardPrimaryDark = Color.FromArgb(30, 64, 175);
-        public static readonly Color DashboardPrimaryLight = Color.FromArgb(239, 246, 255);
-        public static readonly Color ChartBlue1 = Color.FromArgb(37, 99, 235);
-        public static readonly Color ChartBlue2 = Color.FromArgb(59, 130, 246);
-        public static readonly Color ChartBlue3 = Color.FromArgb(96, 165, 250);
-        public static readonly Color ChartBlue4 = Color.FromArgb(147, 197, 253);
+        public static Color Accent { get { return OviaSystemSettingsStore.GetBrandPrimaryColor(); } }
+        public static Color AccentHover { get { return OviaSystemSettingsStore.GetBrandHoverColor(); } }
+        public static Color AccentLight { get { return BlendWithWhite(Accent, 0.92F); } }
+        public static Color AccentSoft { get { return BlendWithWhite(Accent, 0.96F); } }
+        public static Color DashboardPrimary { get { return Accent; } }
+        public static Color DashboardPrimaryDark { get { return AccentHover; } }
+        public static Color DashboardPrimaryLight { get { return AccentLight; } }
+        public static Color ChartBlue1 { get { return Accent; } }
+        public static Color ChartBlue2 { get { return BlendWithWhite(Accent, 0.18F); } }
+        public static Color ChartBlue3 { get { return BlendWithWhite(Accent, 0.35F); } }
+        public static Color ChartBlue4 { get { return BlendWithWhite(Accent, 0.55F); } }
         public static readonly Color ChartNeutral = Color.FromArgb(203, 213, 225);
-        public static readonly Color Blue = Color.FromArgb(37, 99, 235);
-        public static readonly Color BlueLight = Color.FromArgb(239, 246, 255);
+        public static Color Blue { get { return Accent; } }
+        public static Color BlueLight { get { return AccentLight; } }
+        public static Color NotificationBadgeBack { get { return Accent; } }
+        public static Color CheckBoxCheckedBack { get { return Accent; } }
+        public static Color CheckBoxCheckedBorder { get { return Accent; } }
+        public static Color PagingActiveBack { get { return Accent; } }
+        public static Color PagingActiveBorder { get { return Accent; } }
+        public static Color PrimaryActionBack { get { return Accent; } }
+        public static Color PrimaryActionHoverBack { get { return AccentHover; } }
         public static readonly Color Success = Color.FromArgb(22, 163, 74);
         public static readonly Color SuccessLight = Color.FromArgb(236, 253, 245);
         public static readonly Color Warning = Color.FromArgb(245, 158, 11);
@@ -75,9 +82,9 @@ namespace OVIA.Desktop
         public const int CheckBoxSize = 15;
         public const int CheckBoxRadius = 3;
 
-        public static readonly Color ButtonPrimaryBack = Accent;
-        public static readonly Color ButtonPrimaryBackHover = AccentHover;
-        public static readonly Color ButtonPrimaryBorder = Accent;
+        public static Color ButtonPrimaryBack { get { return Accent; } }
+        public static Color ButtonPrimaryBackHover { get { return AccentHover; } }
+        public static Color ButtonPrimaryBorder { get { return Accent; } }
         public static readonly Color ButtonPrimaryText = Color.White;
 
         public static readonly Color ButtonNeutralBack = Color.White;
@@ -89,6 +96,24 @@ namespace OVIA.Desktop
         public static readonly Color ButtonDangerBackHover = DangerLight;
         public static readonly Color ButtonDangerBorder = Color.FromArgb(239, 68, 68);
         public static readonly Color ButtonDangerText = Danger;
+
+
+        public static Color BlendWithWhite(Color color, float whiteAmount)
+        {
+            if (whiteAmount < 0F)
+            {
+                whiteAmount = 0F;
+            }
+            else if (whiteAmount > 1F)
+            {
+                whiteAmount = 1F;
+            }
+
+            int r = (int)Math.Round(color.R + (255 - color.R) * whiteAmount);
+            int g = (int)Math.Round(color.G + (255 - color.G) * whiteAmount);
+            int b = (int)Math.Round(color.B + (255 - color.B) * whiteAmount);
+            return Color.FromArgb(r, g, b);
+        }
 
 
         public static Color[] ChartPalette()

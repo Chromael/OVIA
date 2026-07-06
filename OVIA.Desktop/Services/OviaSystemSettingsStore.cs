@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Text;
 
@@ -10,11 +12,19 @@ namespace OVIA.Desktop
         public string CompanyLogoFilePath = "";
         public string VersionText = "";
         public int ListPageSize = 100;
+        public string BrandPrimaryHex = OviaSystemSettingsStore.DefaultBrandPrimaryHex;
+        public string BrandHoverHex = OviaSystemSettingsStore.DefaultBrandHoverHex;
     }
 
     public static class OviaSystemSettingsStore
     {
         private const string SettingsFileName = "system_settings.dat";
+        public const string DefaultBrandPrimaryHex = "#2563EB";
+        public const string DefaultBrandHoverHex = "#1D4ED8";
+
+        private static readonly object SyncRoot = new object();
+        private static bool cacheLoaded = false;
+        private static OviaSystemSettings cachedSettings = null;
 
         public static bool IsSuperAdminUser(string userId)
         {
@@ -39,6 +49,23 @@ namespace OVIA.Desktop
         }
 
         public static OviaSystemSettings Load()
+        {
+            lock (SyncRoot)
+            {
+                if (cacheLoaded && cachedSettings != null)
+                {
+                    return Clone(cachedSettings);
+                }
+
+                OviaSystemSettings settings = ReadSettingsFile();
+                NormalizeSettings(settings);
+                cachedSettings = Clone(settings);
+                cacheLoaded = true;
+                return Clone(settings);
+            }
+        }
+
+        private static OviaSystemSettings ReadSettingsFile()
         {
             OviaSystemSettings settings = new OviaSystemSettings();
             string path = GetSettingsFilePath();
@@ -82,11 +109,69 @@ namespace OVIA.Desktop
                     {
                         settings.ListPageSize = NormalizeListPageSize(value);
                     }
+                    else if (key.Equals("BrandPrimaryHex", StringComparison.OrdinalIgnoreCase))
+                    {
+                        settings.BrandPrimaryHex = NormalizeHexColor(value, DefaultBrandPrimaryHex);
+                    }
+                    else if (key.Equals("BrandHoverHex", StringComparison.OrdinalIgnoreCase))
+                    {
+                        settings.BrandHoverHex = NormalizeHexColor(value, DefaultBrandHoverHex);
+                    }
                 }
             }
             catch
             {
                 return new OviaSystemSettings();
+            }
+
+            return settings;
+        }
+
+        public static void Save(OviaSystemSettings settings)
+        {
+            if (settings == null)
+            {
+                settings = new OviaSystemSettings();
+            }
+
+            NormalizeSettings(settings);
+
+            string folder = GetSettingsFolder();
+            Directory.CreateDirectory(folder);
+
+            string[] lines = new string[]
+            {
+                "ErpLoginUrl=" + Encode(settings.ErpLoginUrl),
+                "CompanyLogoFilePath=" + Encode(settings.CompanyLogoFilePath),
+                "VersionText=" + Encode(NormalizeVersionText(settings.VersionText)),
+                "ListPageSize=" + Encode(NormalizeListPageSize(settings.ListPageSize.ToString()).ToString()),
+                "BrandPrimaryHex=" + Encode(NormalizeHexColor(settings.BrandPrimaryHex, DefaultBrandPrimaryHex)),
+                "BrandHoverHex=" + Encode(NormalizeHexColor(settings.BrandHoverHex, DefaultBrandHoverHex))
+            };
+
+            File.WriteAllLines(GetSettingsFilePath(), lines, Encoding.UTF8);
+
+            lock (SyncRoot)
+            {
+                cachedSettings = Clone(settings);
+                cacheLoaded = true;
+            }
+        }
+
+        public static void ClearCache()
+        {
+            lock (SyncRoot)
+            {
+                cachedSettings = null;
+                cacheLoaded = false;
+            }
+        }
+
+        private static void NormalizeSettings(OviaSystemSettings settings)
+        {
+            if (settings == null)
+            {
+                return;
             }
 
             if (settings.ErpLoginUrl == null)
@@ -106,29 +191,25 @@ namespace OVIA.Desktop
 
             settings.VersionText = NormalizeVersionText(settings.VersionText);
             settings.ListPageSize = NormalizeListPageSize(settings.ListPageSize.ToString());
-
-            return settings;
+            settings.BrandPrimaryHex = NormalizeHexColor(settings.BrandPrimaryHex, DefaultBrandPrimaryHex);
+            settings.BrandHoverHex = NormalizeHexColor(settings.BrandHoverHex, DefaultBrandHoverHex);
         }
 
-        public static void Save(OviaSystemSettings settings)
+        private static OviaSystemSettings Clone(OviaSystemSettings source)
         {
-            if (settings == null)
+            if (source == null)
             {
-                settings = new OviaSystemSettings();
+                return new OviaSystemSettings();
             }
 
-            string folder = GetSettingsFolder();
-            Directory.CreateDirectory(folder);
-
-            string[] lines = new string[]
-            {
-                "ErpLoginUrl=" + Encode(settings.ErpLoginUrl),
-                "CompanyLogoFilePath=" + Encode(settings.CompanyLogoFilePath),
-                "VersionText=" + Encode(NormalizeVersionText(settings.VersionText)),
-                "ListPageSize=" + Encode(NormalizeListPageSize(settings.ListPageSize.ToString()).ToString())
-            };
-
-            File.WriteAllLines(GetSettingsFilePath(), lines, Encoding.UTF8);
+            OviaSystemSettings clone = new OviaSystemSettings();
+            clone.ErpLoginUrl = source.ErpLoginUrl == null ? "" : source.ErpLoginUrl;
+            clone.CompanyLogoFilePath = source.CompanyLogoFilePath == null ? "" : source.CompanyLogoFilePath;
+            clone.VersionText = source.VersionText == null ? "" : source.VersionText;
+            clone.ListPageSize = source.ListPageSize;
+            clone.BrandPrimaryHex = NormalizeHexColor(source.BrandPrimaryHex, DefaultBrandPrimaryHex);
+            clone.BrandHoverHex = NormalizeHexColor(source.BrandHoverHex, DefaultBrandHoverHex);
+            return clone;
         }
 
         public static string CopyCompanyLogoToStore(string sourcePath)
@@ -188,7 +269,6 @@ namespace OVIA.Desktop
             return "";
         }
 
-
         public static string GetConfiguredVersionText()
         {
             OviaSystemSettings settings = Load();
@@ -230,6 +310,96 @@ namespace OVIA.Desktop
             }
 
             return size;
+        }
+
+        public static Color GetBrandPrimaryColor()
+        {
+            return HexToColor(Load().BrandPrimaryHex, Color.FromArgb(37, 99, 235));
+        }
+
+        public static Color GetBrandHoverColor()
+        {
+            return HexToColor(Load().BrandHoverHex, Color.FromArgb(29, 78, 216));
+        }
+
+        public static bool TryNormalizeHexColor(string value, out string normalizedHex)
+        {
+            normalizedHex = "";
+            string raw = value == null ? "" : value.Trim();
+
+            if (raw == "")
+            {
+                return false;
+            }
+
+            if (raw.StartsWith("#"))
+            {
+                raw = raw.Substring(1);
+            }
+
+            if (raw.Length != 6)
+            {
+                return false;
+            }
+
+            int i;
+            for (i = 0; i < raw.Length; i++)
+            {
+                char c = raw[i];
+                bool isHex = (c >= '0' && c <= '9')
+                    || (c >= 'a' && c <= 'f')
+                    || (c >= 'A' && c <= 'F');
+
+                if (!isHex)
+                {
+                    return false;
+                }
+            }
+
+            normalizedHex = "#" + raw.ToUpperInvariant();
+            return true;
+        }
+
+        public static string NormalizeHexColor(string value, string fallback)
+        {
+            string normalized;
+            if (TryNormalizeHexColor(value, out normalized))
+            {
+                return normalized;
+            }
+
+            if (TryNormalizeHexColor(fallback, out normalized))
+            {
+                return normalized;
+            }
+
+            return DefaultBrandPrimaryHex;
+        }
+
+        public static Color HexToColor(string value, Color fallback)
+        {
+            string normalized;
+            if (!TryNormalizeHexColor(value, out normalized))
+            {
+                return fallback;
+            }
+
+            try
+            {
+                int r = int.Parse(normalized.Substring(1, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                int g = int.Parse(normalized.Substring(3, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                int b = int.Parse(normalized.Substring(5, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                return Color.FromArgb(r, g, b);
+            }
+            catch
+            {
+                return fallback;
+            }
+        }
+
+        public static string ColorToHex(Color color)
+        {
+            return "#" + color.R.ToString("X2") + color.G.ToString("X2") + color.B.ToString("X2");
         }
 
         public static string NormalizeVersionText(string value)

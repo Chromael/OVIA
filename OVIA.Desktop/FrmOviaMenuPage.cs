@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Windows.Forms;
 using OVIA.Desktop.Controls;
@@ -247,7 +247,7 @@ namespace OVIA.Desktop
 
             if (normalized == "ERP")
             {
-                workspace.NavigateToWorkspaceInfoPage("ERP", "메인  ›  ERP", "ERP", "ERP", "웹 ERP 연결과 동기화 상태를 확인합니다.", "ERP 바로가기 또는 ERP 동기화 상태를 드롭다운 메뉴에서 선택합니다.");
+                workspace.NavigateToWorkspaceInfoPage("ERP", "메인  ›  ERP", "ERP", "ERP", "시스템 설정에 저장된 ERP 연결 주소를 기본 웹 브라우저로 엽니다.", "ERP는 2차 드롭다운 없이 1차 메뉴 클릭으로 바로 이동하는 단일 메뉴입니다.");
                 return;
             }
 

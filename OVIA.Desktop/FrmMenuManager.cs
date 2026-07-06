@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Text;
 using System.Windows.Forms;
@@ -33,6 +34,8 @@ namespace OVIA.Desktop
         private List<OviaMenuSetting> rows = new List<OviaMenuSetting>();
         private bool isDirty;
         private bool isLoading;
+        private int hoveredHelpButtonRowIndex = -1;
+        private int hoveredHelpButtonColumnIndex = -1;
 
         public FrmMenuManager(string companyId, string userId)
         {
@@ -163,6 +166,9 @@ namespace OVIA.Desktop
             grid.CurrentCellDirtyStateChanged += Grid_CurrentCellDirtyStateChanged;
             grid.CellDoubleClick += Grid_CellDoubleClick;
             grid.CellFormatting += Grid_CellFormatting;
+            grid.CellPainting += Grid_CellPainting;
+            grid.CellMouseEnter += Grid_CellMouseEnter;
+            grid.CellMouseLeave += Grid_CellMouseLeave;
             OviaFluentTheme.ApplyDataGrid(grid);
 
             DataGridViewTextBoxColumn levelCol = new DataGridViewTextBoxColumn();
@@ -215,7 +221,7 @@ namespace OVIA.Desktop
             editCol.FillWeight = 90;
             grid.Columns.Add(editCol);
 
-            grid.CellContentClick += Grid_CellContentClick;
+            grid.CellClick += Grid_CellClick;
             parent.Controls.Add(grid);
         }
 
@@ -227,7 +233,8 @@ namespace OVIA.Desktop
             btnEditHelp.Click += delegate { EditSelectedHelp(); };
             parent.Controls.Add(btnEditHelp);
 
-            btnReset = CreateButton("기본값 복원", 194, 580, 120);
+            btnReset = CreateButton("기본값 복원", 0, 580, 120);
+            btnReset.Left = btnEditHelp.Right + 10;
             btnReset.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             btnReset.Enabled = canEdit;
             btnReset.Click += Reset_Click;
@@ -244,6 +251,8 @@ namespace OVIA.Desktop
 
             btnClose = CreateButton("닫기", 1038, 580, 110);
             btnClose.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            btnClose.Left = ClientSize.Width - 32 - btnClose.Width;
+            btnSave.Left = btnClose.Left - 10 - btnSave.Width;
             btnClose.Click += delegate { Close(); };
             parent.Controls.Add(btnClose);
         }
@@ -339,6 +348,145 @@ namespace OVIA.Desktop
             }
         }
 
+        private void Grid_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (grid == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            string columnName = grid.Columns[e.ColumnIndex].Name;
+            if (columnName == "EditHelp")
+            {
+                PaintHelpInputButton(e);
+                return;
+            }
+
+            if (columnName != "Enabled" && columnName != "SuperAdminOnly")
+            {
+                return;
+            }
+
+            e.Paint(e.CellBounds, DataGridViewPaintParts.Background | DataGridViewPaintParts.Border | DataGridViewPaintParts.SelectionBackground);
+
+            bool isChecked = false;
+            if (e.Value != null && e.Value != DBNull.Value)
+            {
+                bool.TryParse(e.Value.ToString(), out isChecked);
+            }
+
+            int boxSize = OviaFluentTheme.CheckBoxSize;
+            Rectangle boxRect = new Rectangle(
+                e.CellBounds.Left + (e.CellBounds.Width - boxSize) / 2,
+                e.CellBounds.Top + (e.CellBounds.Height - boxSize) / 2,
+                boxSize,
+                boxSize);
+
+            Color borderColor = isChecked ? OviaFluentTheme.CheckBoxCheckedBorder : OviaFluentTheme.ControlBorder;
+            Color backColor = isChecked ? OviaFluentTheme.CheckBoxCheckedBack : Color.White;
+
+            using (GraphicsPath path = CreateRoundRectPath(new Rectangle(boxRect.X, boxRect.Y, boxRect.Width - 1, boxRect.Height - 1), OviaFluentTheme.CheckBoxRadius))
+            using (SolidBrush brush = new SolidBrush(backColor))
+            using (Pen borderPen = new Pen(borderColor, 1F))
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                e.Graphics.FillPath(brush, path);
+                e.Graphics.DrawPath(borderPen, path);
+            }
+
+            if (isChecked)
+            {
+                using (Pen checkPen = new Pen(Color.White, 1.8F))
+                {
+                    checkPen.StartCap = LineCap.Round;
+                    checkPen.EndCap = LineCap.Round;
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    e.Graphics.DrawLines(checkPen, new PointF[]
+                    {
+                        new PointF(boxRect.Left + 3.5F, boxRect.Top + 7.5F),
+                        new PointF(boxRect.Left + 6.5F, boxRect.Top + 10.5F),
+                        new PointF(boxRect.Left + 11.5F, boxRect.Top + 4.5F)
+                    });
+                }
+            }
+
+            e.Handled = true;
+        }
+
+        private void PaintHelpInputButton(DataGridViewCellPaintingEventArgs e)
+        {
+            bool selected = (e.State & DataGridViewElementStates.Selected) == DataGridViewElementStates.Selected;
+            Color cellBack = selected ? grid.DefaultCellStyle.SelectionBackColor : e.CellStyle.BackColor;
+            if (cellBack == Color.Empty)
+            {
+                cellBack = Color.White;
+            }
+
+            using (SolidBrush backBrush = new SolidBrush(cellBack))
+            {
+                e.Graphics.FillRectangle(backBrush, e.CellBounds);
+            }
+
+            using (Pen linePen = new Pen(OviaFluentTheme.CardBorder, 1))
+            {
+                e.Graphics.DrawLine(linePen, e.CellBounds.Left, e.CellBounds.Bottom - 1, e.CellBounds.Right, e.CellBounds.Bottom - 1);
+            }
+
+            int buttonWidth = Math.Min(84, Math.Max(74, e.CellBounds.Width - 14));
+            int buttonHeight = 23;
+            Rectangle buttonRect = new Rectangle(
+                e.CellBounds.Left + Math.Max(4, (e.CellBounds.Width - buttonWidth) / 2),
+                e.CellBounds.Top + Math.Max(3, (e.CellBounds.Height - buttonHeight) / 2),
+                buttonWidth,
+                buttonHeight);
+
+            bool hovered = e.RowIndex == hoveredHelpButtonRowIndex && e.ColumnIndex == hoveredHelpButtonColumnIndex;
+            Color fill = canEdit ? (hovered ? OviaFluentTheme.PrimaryActionHoverBack : Color.White) : Color.FromArgb(226, 229, 234);
+            Color border = canEdit ? (hovered ? OviaFluentTheme.PrimaryActionHoverBack : OviaFluentTheme.ControlBorder) : Color.FromArgb(205, 210, 218);
+            Color fore = canEdit ? (hovered ? Color.White : TextDark) : TextSub;
+
+            using (GraphicsPath path = CreateRoundRectPath(new Rectangle(buttonRect.X, buttonRect.Y, buttonRect.Width - 1, buttonRect.Height - 1), 4))
+            using (SolidBrush brush = new SolidBrush(fill))
+            using (Pen pen = new Pen(border, 1))
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                e.Graphics.FillPath(brush, path);
+                e.Graphics.DrawPath(pen, path);
+            }
+
+            TextRenderer.DrawText(
+                e.Graphics,
+                "도움말 입력",
+                OviaFluentTheme.FontData(8F, FontStyle.Regular),
+                buttonRect,
+                fore,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+
+            e.Handled = true;
+        }
+
+        private static GraphicsPath CreateRoundRectPath(Rectangle rect, int radius)
+        {
+            GraphicsPath path = new GraphicsPath();
+            if (radius <= 0)
+            {
+                path.AddRectangle(rect);
+                path.CloseFigure();
+                return path;
+            }
+
+            int diameter = radius * 2;
+            if (diameter > rect.Width) diameter = rect.Width;
+            if (diameter > rect.Height) diameter = rect.Height;
+
+            path.AddArc(rect.Left, rect.Top, diameter, diameter, 180, 90);
+            path.AddArc(rect.Right - diameter, rect.Top, diameter, diameter, 270, 90);
+            path.AddArc(rect.Right - diameter, rect.Bottom - diameter, diameter, diameter, 0, 90);
+            path.AddArc(rect.Left, rect.Bottom - diameter, diameter, diameter, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+
         private void Grid_CurrentCellDirtyStateChanged(object sender, EventArgs e)
         {
             if (grid != null && grid.IsCurrentCellDirty)
@@ -367,7 +515,46 @@ namespace OVIA.Desktop
             UpdateStatus("저장하지 않은 메뉴관리 변경사항이 있습니다.");
         }
 
-        private void Grid_CellContentClick(object sender, DataGridViewCellEventArgs e)
+        private void Grid_CellMouseEnter(object sender, DataGridViewCellEventArgs e)
+        {
+            if (grid == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            if (grid.Columns[e.ColumnIndex].Name != "EditHelp")
+            {
+                return;
+            }
+
+            hoveredHelpButtonRowIndex = e.RowIndex;
+            hoveredHelpButtonColumnIndex = e.ColumnIndex;
+            grid.Cursor = canEdit ? Cursors.Hand : Cursors.Default;
+            grid.InvalidateCell(e.ColumnIndex, e.RowIndex);
+        }
+
+        private void Grid_CellMouseLeave(object sender, DataGridViewCellEventArgs e)
+        {
+            if (grid == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            if (e.RowIndex == hoveredHelpButtonRowIndex && e.ColumnIndex == hoveredHelpButtonColumnIndex)
+            {
+                int oldRow = hoveredHelpButtonRowIndex;
+                int oldCol = hoveredHelpButtonColumnIndex;
+                hoveredHelpButtonRowIndex = -1;
+                hoveredHelpButtonColumnIndex = -1;
+                grid.Cursor = Cursors.Default;
+                if (oldRow >= 0 && oldCol >= 0)
+                {
+                    grid.InvalidateCell(oldCol, oldRow);
+                }
+            }
+        }
+
+        private void Grid_CellClick(object sender, DataGridViewCellEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0)
             {
@@ -382,7 +569,13 @@ namespace OVIA.Desktop
 
         private void Grid_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
         {
-            if (e.RowIndex >= 0)
+            if (e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            string columnName = grid.Columns[e.ColumnIndex].Name;
+            if (columnName == "HelpText")
             {
                 EditRowHelp(e.RowIndex);
             }
@@ -502,17 +695,25 @@ namespace OVIA.Desktop
             }
 
             int buttonY = Math.Max(0, ClientSize.Height - 112);
-            if (btnEditHelp != null) btnEditHelp.Top = buttonY;
-            if (btnReset != null) btnReset.Top = buttonY;
-            if (btnSave != null)
+            if (btnEditHelp != null)
             {
-                btnSave.Top = buttonY;
-                btnSave.Left = Math.Max(32, ClientSize.Width - 280);
+                btnEditHelp.Top = buttonY;
+                btnEditHelp.Left = 32;
+            }
+            if (btnReset != null)
+            {
+                btnReset.Top = buttonY;
+                btnReset.Left = btnEditHelp == null ? 32 : btnEditHelp.Right + 10;
             }
             if (btnClose != null)
             {
                 btnClose.Top = buttonY;
-                btnClose.Left = Math.Max(32, ClientSize.Width - 144);
+                btnClose.Left = Math.Max(32, ClientSize.Width - 32 - btnClose.Width);
+            }
+            if (btnSave != null)
+            {
+                btnSave.Top = buttonY;
+                btnSave.Left = btnClose == null ? Math.Max(32, ClientSize.Width - 32 - btnSave.Width) : Math.Max(32, btnClose.Left - 10 - btnSave.Width);
             }
             if (lblStatus != null)
             {
@@ -622,6 +823,11 @@ namespace OVIA.Desktop
                     }
 
                     string key = Decode(parts[0]);
+                    if (IsObsoleteMenuKey(key))
+                    {
+                        continue;
+                    }
+
                     OviaMenuSetting setting;
                     if (!map.TryGetValue(key, out setting))
                     {
@@ -648,6 +854,12 @@ namespace OVIA.Desktop
             }
 
             return defaults;
+        }
+
+        private static bool IsObsoleteMenuKey(string key)
+        {
+            return string.Equals(key, "ERP_SHORTCUT", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(key, "ERP_SYNC_STATUS", StringComparison.OrdinalIgnoreCase);
         }
 
         public static void Save(List<OviaMenuSetting> settings)
@@ -758,9 +970,7 @@ namespace OVIA.Desktop
             Add(list, "SHIPPING_INVOICE_MANAGE", "송장관리", 2, false, "송장 조회, 발행, 수정, 납품표, 인수증, 검수양식 출력과 차량/운전자 선택을 처리합니다.");
             Add(list, "SHIPPING_RESULT_REGISTER", "출하실적등록", 2, false, "출하 실적 조회, 실적 등록, 거래처별 실적 양식 생성, ERP 전송을 처리합니다.");
 
-            Add(list, "ERP", "ERP", 1, false, "시스템 설정에 저장된 ERP 주소를 기본 웹 브라우저로 열고, 추후 ERP 동기화 상태를 확인합니다.");
-            Add(list, "ERP_SHORTCUT", "ERP 바로가기", 2, false, "시스템 설정에 저장된 ERP URL을 사용자 PC 기본 웹 브라우저로 실행합니다.");
-            Add(list, "ERP_SYNC_STATUS", "ERP 동기화 상태", 2, false, "OVIA와 ERP의 동기화 오류, 마지막 전송 시각, 재시도 상태를 확인합니다.");
+            Add(list, "ERP", "ERP", 1, false, "시스템 설정에 저장된 ERP 주소를 기본 웹 브라우저로 여는 단일 1차 메뉴입니다. ERP는 2차 드롭다운 메뉴를 사용하지 않습니다.");
 
             Add(list, "MASTER_DATA", "기준정보", 1, false, "거래처, 철근메이커, 자재/규격, 형상코드, 차량, 작업자, 기계, 위치 같은 업무 기준 데이터를 관리합니다.");
             Add(list, "MASTER_COMPANY", "거래처 관리", 2, false, "거래처, 가공사, 납품처 기준 데이터를 관리합니다.");

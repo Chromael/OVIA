@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -611,6 +611,7 @@ namespace OVIA.Desktop
             grid.ReadOnly = true;
             grid.CellClick += Grid_CellClick;
             grid.CellDoubleClick += Grid_CellDoubleClick;
+            grid.CellFormatting += Grid_CellFormatting;
             grid.ColumnHeaderMouseClick += Grid_ColumnHeaderMouseClick;
 
             grid.EnableHeadersVisualStyles = false;
@@ -736,11 +737,11 @@ namespace OVIA.Desktop
         {
             allProjects.Clear();
 
-            allProjects.Add(new OviaProjectRow("1538", "2026_공장판매", "셀먼", "진행", "2026-04-28", "2026-05-20", "임대표", "최근 추출 테스트"));
-            allProjects.Add(new OviaProjectRow("1606", "광양 홍숭 수성복합 신축공사", "현대건설", "진행", "2026-04-15", "2026-05-18", "김팀장", ""));
-            allProjects.Add(new OviaProjectRow("1618", "나주 봉황 참송 이앤씨", "나주현장", "진행", "2026-05-01", "2026-05-14", "관리자", ""));
+            allProjects.Add(new OviaProjectRow("1538", "2026_공장판매", "셀먼", "진행중", "2026-04-28", "2026-05-20", "임대표", "최근 추출 테스트"));
+            allProjects.Add(new OviaProjectRow("1606", "광양 홍숭 수성복합 신축공사", "현대건설", "진행중", "2026-04-15", "2026-05-18", "김팀장", ""));
+            allProjects.Add(new OviaProjectRow("1618", "나주 봉황 참송 이앤씨", "나주현장", "진행중", "2026-05-01", "2026-05-14", "관리자", ""));
             allProjects.Add(new OviaProjectRow("1523", "고창 프로젝트", "거래처A", "완료", "2026-03-02", "2026-04-10", "관리자", "완료공사"));
-            allProjects.Add(new OviaProjectRow("1637", "광주 상무 오피스텔", "거래처B", "진행", "2026-05-11", "2026-05-19", "관리자", ""));
+            allProjects.Add(new OviaProjectRow("1637", "광주 상무 오피스텔", "거래처B", "진행중", "2026-05-11", "2026-05-19", "관리자", ""));
         }
 
         private void BindProjects()
@@ -1088,14 +1089,38 @@ namespace OVIA.Desktop
 
         private void Grid_CellClick(object sender, DataGridViewCellEventArgs e)
         {
-            if (e.RowIndex < 0 || e.ColumnIndex < 0)
+            // 공사 상세 이동은 더블클릭으로만 처리한다.
+            // 원클릭은 행 선택만 수행해 사용자가 실수로 공사별 BarList로 이동하지 않도록 한다.
+        }
+
+        private void Grid_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
+        {
+            if (grid == null || e.RowIndex < 0 || e.ColumnIndex < 0)
             {
                 return;
             }
 
-            if (grid.Columns[e.ColumnIndex].HeaderText == "공사명")
+            DataGridViewColumn column = grid.Columns[e.ColumnIndex];
+            if (column == null || column.Name != "상태")
             {
-                OpenSelectedProject();
+                return;
+            }
+
+            string status = e.Value == null ? "" : e.Value.ToString().Trim();
+            if (status == "")
+            {
+                return;
+            }
+
+            if (status == "진행중" || status == "진행")
+            {
+                e.CellStyle.ForeColor = OviaFluentTheme.Accent;
+                e.CellStyle.SelectionForeColor = OviaFluentTheme.Accent;
+            }
+            else if (status == "완료")
+            {
+                e.CellStyle.ForeColor = OviaFluentTheme.TextMuted;
+                e.CellStyle.SelectionForeColor = OviaFluentTheme.TextMuted;
             }
         }
 

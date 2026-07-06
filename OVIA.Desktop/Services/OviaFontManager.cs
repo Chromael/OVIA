@@ -11,6 +11,7 @@ namespace OVIA.Desktop
     /// OVIA 폰트 역할 관리자.
     /// - Brand/Title/Button: Pretendard 우선 사용
     /// - System/Data/Input/Status: Windows 기본 UI 폰트(Malgun Gothic → Segoe UI → Arial) 사용
+    /// - SUIT 폰트는 OVIA에서 사용하지 않으며, Assets\Fonts에 남아 있어도 로드 대상에서 제외한다.
     ///
     /// </summary>
     public static class OviaFontManager
@@ -22,6 +23,11 @@ namespace OVIA.Desktop
         private static readonly string[] PretendardKeywords = new[]
         {
             "Pretendard"
+        };
+
+        private static readonly string[] BlockedFontFileKeywords = new[]
+        {
+            "SUIT"
         };
 
         private static readonly string[] InstalledBrandFontNames = new[]
@@ -236,7 +242,12 @@ namespace OVIA.Desktop
         private static void TryAddPretendardFontFile(string filePath)
         {
             string fileName = Path.GetFileName(filePath);
-            if (fileName == null || fileName.IndexOf("Pretendard", StringComparison.OrdinalIgnoreCase) < 0)
+            if (fileName == null || IsBlockedFontFile(fileName))
+            {
+                return;
+            }
+
+            if (fileName.IndexOf("Pretendard", StringComparison.OrdinalIgnoreCase) < 0)
             {
                 return;
             }
@@ -249,6 +260,19 @@ namespace OVIA.Desktop
             {
                 // 폰트 파일이 손상되었거나 지원되지 않는 경우 앱 실행을 막지 않고 fallback 한다.
             }
+        }
+
+        private static bool IsBlockedFontFile(string fileName)
+        {
+            foreach (string keyword in BlockedFontFileKeywords)
+            {
+                if (fileName.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static Font TryCreatePrivatePretendardFont(float size, FontStyle style, GraphicsUnit unit)

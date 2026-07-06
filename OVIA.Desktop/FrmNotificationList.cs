@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -467,6 +467,17 @@ namespace OVIA.Desktop
             }
 
             UpdateSelectAllButtonText();
+            InvalidateCheckColumn();
+        }
+
+        private void InvalidateCheckColumn()
+        {
+            if (grid == null || !grid.Columns.Contains("Check"))
+            {
+                return;
+            }
+
+            grid.InvalidateColumn(grid.Columns["Check"].Index);
         }
 
         private bool AreAllVisibleRowsChecked()
@@ -525,7 +536,14 @@ namespace OVIA.Desktop
                 return;
             }
 
-            if (grid.Columns[e.ColumnIndex].Name != "Confirm")
+            string columnName = grid.Columns[e.ColumnIndex].Name;
+            if (columnName == "Check")
+            {
+                PaintNotificationCheckBox(e);
+                return;
+            }
+
+            if (columnName != "Confirm")
             {
                 return;
             }
@@ -572,6 +590,65 @@ namespace OVIA.Desktop
                 buttonRect,
                 fore,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+
+            e.Handled = true;
+        }
+
+        private void PaintNotificationCheckBox(DataGridViewCellPaintingEventArgs e)
+        {
+            bool selected = (e.State & DataGridViewElementStates.Selected) == DataGridViewElementStates.Selected;
+            Color cellBack = selected ? grid.DefaultCellStyle.SelectionBackColor : Color.White;
+
+            using (SolidBrush backBrush = new SolidBrush(cellBack))
+            {
+                e.Graphics.FillRectangle(backBrush, e.CellBounds);
+            }
+
+            using (Pen linePen = new Pen(OviaFluentTheme.CardBorder, 1))
+            {
+                e.Graphics.DrawLine(linePen, e.CellBounds.Left, e.CellBounds.Bottom - 1, e.CellBounds.Right, e.CellBounds.Bottom - 1);
+            }
+
+            bool isChecked = false;
+            if (e.Value != null && e.Value != DBNull.Value)
+            {
+                bool.TryParse(e.Value.ToString(), out isChecked);
+            }
+
+            int boxSize = OviaFluentTheme.CheckBoxSize;
+            Rectangle boxRect = new Rectangle(
+                e.CellBounds.Left + (e.CellBounds.Width - boxSize) / 2,
+                e.CellBounds.Top + (e.CellBounds.Height - boxSize) / 2,
+                boxSize,
+                boxSize);
+
+            Color borderColor = isChecked ? OviaFluentTheme.CheckBoxCheckedBorder : OviaFluentTheme.ControlBorder;
+            Color backColor = isChecked ? OviaFluentTheme.CheckBoxCheckedBack : Color.White;
+
+            using (GraphicsPath path = CreateRoundRectPath(new Rectangle(boxRect.X, boxRect.Y, boxRect.Width - 1, boxRect.Height - 1), OviaFluentTheme.CheckBoxRadius))
+            using (SolidBrush brush = new SolidBrush(backColor))
+            using (Pen borderPen = new Pen(borderColor, 1F))
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                e.Graphics.FillPath(brush, path);
+                e.Graphics.DrawPath(borderPen, path);
+            }
+
+            if (isChecked)
+            {
+                using (Pen checkPen = new Pen(Color.White, 1.8F))
+                {
+                    checkPen.StartCap = LineCap.Round;
+                    checkPen.EndCap = LineCap.Round;
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    e.Graphics.DrawLines(checkPen, new PointF[]
+                    {
+                        new PointF(boxRect.Left + 3.5F, boxRect.Top + 7.5F),
+                        new PointF(boxRect.Left + 6.5F, boxRect.Top + 10.5F),
+                        new PointF(boxRect.Left + 11.5F, boxRect.Top + 4.5F)
+                    });
+                }
+            }
 
             e.Handled = true;
         }
@@ -641,6 +718,7 @@ namespace OVIA.Desktop
             if (e.RowIndex >= 0 && e.ColumnIndex >= 0 && grid.Columns[e.ColumnIndex].Name == "Check")
             {
                 UpdateSelectAllButtonText();
+                grid.InvalidateCell(e.ColumnIndex, e.RowIndex);
             }
         }
 
