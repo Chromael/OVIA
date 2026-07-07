@@ -113,7 +113,7 @@ namespace OVIA.Desktop
                     e.Graphics.DrawLine(pen, 0, control.Height - 1, control.Width, control.Height - 1);
                 }
             };
-            OviaWorkspaceCommandBar.Populate(commandBar, "MAIN");
+            OviaWorkspaceCommandBar.Populate(commandBar, "MAIN", companyId, userId);
             parent.Controls.Add(commandBar);
         }
 
@@ -131,7 +131,7 @@ namespace OVIA.Desktop
             parent.Controls.Add(lblTitle);
 
             lblDesc = new Label();
-            lblDesc.Text = OviaSystemSettingsStore.IsSuperAdminUser(userId)
+            lblDesc.Text = OviaSystemSettingsStore.IsSystemAdministrator(companyId, userId)
                 ? "최고관리자는 모든 사용자의 최근 7일 작업 알림을 확인할 수 있습니다."
                 : "최근 7일 동안 내가 저장하거나 삭제한 작업 알림을 확인할 수 있습니다.";
             lblDesc.AutoSize = false;
@@ -146,7 +146,7 @@ namespace OVIA.Desktop
 
         private void BuildToolbar(Control parent)
         {
-            btnToggleSelectAll = CreateButton("전체 선택", 34, 122, 110, OviaButtonRole.Neutral);
+            btnToggleSelectAll = CreateButton("전체 선택", 0, 116, 110, OviaButtonRole.Neutral);
             btnToggleSelectAll.Click += ToggleSelectAll_Click;
             parent.Controls.Add(btnToggleSelectAll);
 
@@ -160,8 +160,8 @@ namespace OVIA.Desktop
         private void BuildGrid(Control parent)
         {
             grid = new DataGridView();
-            grid.Location = new Point(34, 170);
-            grid.Size = new Size(1112, 432);
+            grid.Location = new Point(0, 164);
+            grid.Size = new Size(1180, 432);
             grid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             grid.AllowUserToAddRows = false;
             grid.AllowUserToDeleteRows = false;
@@ -262,8 +262,8 @@ namespace OVIA.Desktop
         private void BuildPager(Control parent)
         {
             pagerPanel = new Panel();
-            pagerPanel.Location = new Point(34, 612);
-            pagerPanel.Size = new Size(1112, 38);
+            pagerPanel.Location = new Point(0, 612);
+            pagerPanel.Size = new Size(1180, 38);
             pagerPanel.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             pagerPanel.BackColor = SurfaceColor;
             parent.Controls.Add(pagerPanel);
@@ -274,8 +274,8 @@ namespace OVIA.Desktop
             lblStatus = new Label();
             lblStatus.Text = "알림을 불러오는 중입니다.";
             lblStatus.AutoSize = false;
-            lblStatus.Location = new Point(34, 658);
-            lblStatus.Size = new Size(1040, 30);
+            lblStatus.Location = new Point(0, 692);
+            lblStatus.Size = new Size(1180, 28);
             lblStatus.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             lblStatus.TextAlign = ContentAlignment.MiddleLeft;
             lblStatus.Font = OviaFluentTheme.FontStatus(8.8F, FontStyle.Regular);
@@ -809,25 +809,46 @@ namespace OVIA.Desktop
 
         public void ApplyWorkspaceLayout()
         {
-            int width = Math.Max(1, ClientSize.Width - 68);
-            int gridHeight = Math.Max(240, ClientSize.Height - 288);
+            const int toolbarTop = 116;
+            const int gridTop = 164;
+            const int contentInset = 25;
+            const int statusHeight = 28;
+            const int pagerHeight = 38;
+            const int pagerGapAboveStatus = 30;
+            const int buttonGap = 10;
+
+            int width = Math.Max(1, ClientSize.Width);
+            int statusTop = Math.Max(gridTop + 260, ClientSize.Height - statusHeight);
+            int pagerTop = Math.Max(gridTop + 220, statusTop - pagerGapAboveStatus - pagerHeight);
+            int gridHeight = Math.Max(240, pagerTop - gridTop - 10);
+
+            if (btnToggleSelectAll != null)
+            {
+                btnToggleSelectAll.Location = new Point(contentInset, toolbarTop + contentInset);
+            }
+            if (btnConfirmSelected != null && btnToggleSelectAll != null)
+            {
+                btnConfirmSelected.Location = new Point(btnToggleSelectAll.Right + buttonGap, toolbarTop + contentInset);
+            }
 
             if (grid != null)
             {
-                grid.Size = new Size(width, gridHeight);
+                grid.Location = new Point(contentInset, gridTop + contentInset);
+                grid.Size = new Size(Math.Max(1, width - contentInset), Math.Max(1, gridHeight - contentInset));
             }
 
-            int pagerTop = ClientSize.Height - 108;
             if (pagerPanel != null)
             {
-                pagerPanel.Location = new Point(34, pagerTop);
-                pagerPanel.Width = width;
+                pagerPanel.Location = new Point(contentInset, pagerTop);
+                pagerPanel.Width = Math.Max(1, width - contentInset);
             }
 
             if (lblStatus != null)
             {
-                lblStatus.Location = new Point(34, ClientSize.Height - 64);
-                lblStatus.Width = width;
+                lblStatus.Location = new Point(0, statusTop);
+                lblStatus.Size = new Size(width, statusHeight);
+                lblStatus.TextAlign = ContentAlignment.MiddleLeft;
+                lblStatus.Padding = new Padding(16, 0, 0, 0);
             }
         }
 

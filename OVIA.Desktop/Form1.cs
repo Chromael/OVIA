@@ -245,6 +245,9 @@ namespace OVIA.Desktop
             btnLogin.Click			+= BtnLogin_Click;
             card.Controls.Add(btnLogin);
 
+            // 로그인 입력창에서 Enter 키를 누르면 로그인 버튼 클릭과 동일하게 처리한다.
+            // OviaButton은 WinForms 기본 Button이 아니므로 AcceptButton 대신 ProcessCmdKey에서 처리한다.
+
             Panel line				= new Panel();
             line.Location			= new Point(55, 487);
             line.Size				= new Size(390, 1);
@@ -289,7 +292,23 @@ namespace OVIA.Desktop
             return input;
         }
 
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.Enter)
+            {
+                ExecuteLogin();
+                return true;
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
         private void BtnLogin_Click(object sender, EventArgs e)
+        {
+            ExecuteLogin();
+        }
+
+        private void ExecuteLogin()
         {
             string companyId		= txtCompanyId.Value.Trim();
             string userId			= txtUserId.Value.Trim();

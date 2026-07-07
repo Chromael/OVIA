@@ -1110,7 +1110,7 @@ namespace OVIA.Desktop
             commandBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             commandBar.BackColor = Color.White;
             commandBar.Paint += CommandBar_Paint;
-            OviaWorkspaceCommandBar.Populate(commandBar, "BARLIST");
+            OviaWorkspaceCommandBar.Populate(commandBar, "BARLIST", companyId, userId);
             parent.Controls.Add(commandBar);
         }
 

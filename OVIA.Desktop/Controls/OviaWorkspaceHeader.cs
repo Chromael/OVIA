@@ -997,7 +997,7 @@ namespace OVIA.Desktop.Controls
             if (segment == "출하/송장") return "SHIPPING_INVOICE";
             if (segment == "ERP") return "ERP";
             if (segment == "기준정보") return "MASTER_DATA";
-            if (segment == "환경설정") return "SETTINGS";
+            if (segment == "시스템관리") return "SETTINGS";
             if (segment == "BarList 항목 매핑") return "BARLIST_MAPPING";
             if (segment == "이형철근 단위중량표") return "REBAR_UNIT_WEIGHT";
             if (segment == "시스템 설정") return "SYSTEM_SETTINGS";

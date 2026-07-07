@@ -62,7 +62,7 @@ namespace OVIA.Desktop
         {
             this.companyId = companyId == null ? "" : companyId;
             this.userId = userId == null ? "" : userId;
-            this.canEdit = OviaSystemSettingsStore.IsSuperAdminUser(this.userId);
+            this.canEdit = OviaSystemSettingsStore.IsSystemAdministrator(this.companyId, this.userId);
 
             BuildUI();
             LoadSettingsToUi();
@@ -100,7 +100,7 @@ namespace OVIA.Desktop
         {
             OviaWorkspaceHeader.AddTo(
                 parent,
-                "메인  ›  환경설정  ›  시스템 설정",
+                "메인  ›  시스템관리  ›  시스템 설정",
                 delegate { this.Close(); },
                 delegate { this.Close(); },
                 delegate { LoadSettingsToUi(); },
@@ -138,7 +138,7 @@ namespace OVIA.Desktop
             commandBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             commandBar.BackColor = Color.White;
             commandBar.Paint += CommandBar_Paint;
-            OviaWorkspaceCommandBar.Populate(commandBar, "SETTINGS");
+            OviaWorkspaceCommandBar.Populate(commandBar, "SETTINGS", companyId, userId);
             parent.Controls.Add(commandBar);
         }
 
@@ -171,7 +171,7 @@ namespace OVIA.Desktop
             parent.Controls.Add(titleLabel);
 
             descLabel = new Label();
-            descLabel.Text = "ERP 연결 주소와 회사 로고처럼 OVIA 전체에 적용되는 기본값을 관리합니다. 이 화면의 저장 권한은 최고관리자에게만 부여됩니다.";
+            descLabel.Text = "ERP 연결 주소와 회사 로고처럼 OVIA 전체에 적용되는 기본값을 관리합니다. 이 화면의 저장 권한은 셀먼 시스템 관리자에게만 부여됩니다.";
             descLabel.AutoSize = false;
             descLabel.Location = new Point(35, 166);
             descLabel.Size = new Size(980, 24);
@@ -185,8 +185,8 @@ namespace OVIA.Desktop
         private void BuildContent(Control parent)
         {
             contentPanel = new Panel();
-            contentPanel.Location = new Point(32, 124);
-            contentPanel.Size = new Size(1116, 472);
+            contentPanel.Location = new Point(0, 104);
+            contentPanel.Size = new Size(1180, 472);
             contentPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             contentPanel.BackColor = SurfaceColor;
             contentPanel.AutoScroll = true;
@@ -196,13 +196,13 @@ namespace OVIA.Desktop
             BuildLogoSection(contentPanel);
             BuildListSection(contentPanel);
             BuildColorSection(contentPanel);
-            contentPanel.AutoScrollMinSize = new Size(0, 760);
+            contentPanel.AutoScrollMinSize = new Size(0, 810);
         }
 
         private void BuildErpSection(Control parent)
         {
             erpSection = new Panel();
-            erpSection.Location = new Point(0, 0);
+            erpSection.Location = new Point(25, 25);
             erpSection.Size = new Size(1088, 142);
             erpSection.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             erpSection.BackColor = SurfaceColor;
@@ -218,7 +218,7 @@ namespace OVIA.Desktop
             erpSection.Controls.Add(txtErpUrl);
 
             Label helper = new Label();
-            helper.Text = "저장된 ERP 주소는 추후 ERP 구축 시 로그인된 OVIA 사용자 정보와 연동하여 자동 로그인 진입 경로로 사용됩니다.";
+            helper.Text = "저장된 ERP 주소는 WebView2로 불러올 웹 ERP 기준 주소입니다. ERP 주소가 변경되면 시스템관리자가 이 값을 수정한 뒤 설치파일 재배포 또는 OVIA 실행 시 자동 업데이트 방식으로 반영할 수 있습니다.";
             helper.AutoSize = false;
             helper.Location = new Point(2, 96);
             helper.Size = new Size(980, 24);
@@ -239,7 +239,7 @@ namespace OVIA.Desktop
         private void BuildLogoSection(Control parent)
         {
             logoSection = new Panel();
-            logoSection.Location = new Point(0, 158);
+            logoSection.Location = new Point(25, 183);
             logoSection.Size = new Size(1088, 218);
             logoSection.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             logoSection.BackColor = SurfaceColor;
@@ -313,7 +313,7 @@ namespace OVIA.Desktop
         private void BuildListSection(Control parent)
         {
             listSection = new Panel();
-            listSection.Location = new Point(0, 400);
+            listSection.Location = new Point(25, 425);
             listSection.Size = new Size(1088, 142);
             listSection.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             listSection.BackColor = SurfaceColor;
@@ -350,7 +350,7 @@ namespace OVIA.Desktop
         private void BuildColorSection(Control parent)
         {
             colorSection = new Panel();
-            colorSection.Location = new Point(0, 566);
+            colorSection.Location = new Point(25, 591);
             colorSection.Size = new Size(1088, 176);
             colorSection.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             colorSection.BackColor = SurfaceColor;
@@ -608,8 +608,18 @@ namespace OVIA.Desktop
 
         public void ApplyWorkspaceLayout()
         {
-            int contentWidth = Math.Max(1, this.ClientSize.Width - 64);
-            int contentHeight = Math.Max(220, this.ClientSize.Height - 236);
+            const int contentTop = 104;
+            const int innerLeft = 25;
+            const int innerRight = 25;
+            const int statusHeight = 28;
+            const int buttonGapAboveStatus = 30;
+            const int rightButtonMargin = 25;
+
+            int statusTop = Math.Max(contentTop + 260, this.ClientSize.Height - statusHeight);
+            int buttonTop = btnSave == null ? Math.Max(contentTop + 220, statusTop - buttonGapAboveStatus - OviaFluentTheme.ButtonHeight) : Math.Max(contentTop + 220, statusTop - buttonGapAboveStatus - btnSave.Height);
+            int contentWidth = Math.Max(1, this.ClientSize.Width);
+            int contentHeight = Math.Max(220, buttonTop - contentTop - 12);
+            int sectionWidth = Math.Max(360, contentWidth - innerLeft - innerRight - SystemInformation.VerticalScrollBarWidth);
 
             if (descLabel != null)
             {
@@ -618,43 +628,52 @@ namespace OVIA.Desktop
 
             if (contentPanel != null)
             {
+                contentPanel.Location = new Point(0, contentTop);
                 contentPanel.Size = new Size(contentWidth, contentHeight);
             }
 
             if (erpSection != null)
             {
-                erpSection.Width = Math.Max(1, contentWidth - 18);
+                erpSection.Left = innerLeft;
+                erpSection.Top = innerLeft;
+                erpSection.Width = sectionWidth;
             }
 
             if (logoSection != null)
             {
-                logoSection.Width = Math.Max(1, contentWidth - 18);
+                logoSection.Left = innerLeft;
+                logoSection.Top = innerLeft + 158;
+                logoSection.Width = sectionWidth;
             }
 
             if (listSection != null)
             {
-                listSection.Width = Math.Max(1, contentWidth - 18);
+                listSection.Left = innerLeft;
+                listSection.Top = innerLeft + 400;
+                listSection.Width = sectionWidth;
             }
 
             if (colorSection != null)
             {
-                colorSection.Width = Math.Max(1, contentWidth - 18);
+                colorSection.Left = innerLeft;
+                colorSection.Top = innerLeft + 566;
+                colorSection.Width = sectionWidth;
             }
 
             if (contentPanel != null)
             {
-                contentPanel.AutoScrollMinSize = new Size(0, 760);
+                contentPanel.AutoScrollMinSize = new Size(Math.Max(0, sectionWidth + innerLeft + innerRight), 810);
             }
 
             if (txtErpUrl != null)
             {
-                txtErpUrl.Width = Math.Max(520, contentWidth - 38);
+                txtErpUrl.Width = Math.Max(520, sectionWidth - 18);
             }
 
             if (txtLogoPath != null)
             {
                 int buttonArea = 318;
-                txtLogoPath.Width = Math.Max(420, contentWidth - buttonArea - 38);
+                txtLogoPath.Width = Math.Max(420, sectionWidth - buttonArea - 18);
             }
 
             if (btnBrowseLogo != null && txtLogoPath != null)
@@ -669,13 +688,15 @@ namespace OVIA.Desktop
 
             if (lblStatus != null)
             {
-                lblStatus.Location = new Point(32, Math.Max(610, this.ClientSize.Height - 102));
-                lblStatus.Width = Math.Max(1, this.ClientSize.Width - 230);
+                lblStatus.Location = new Point(0, statusTop);
+                lblStatus.Size = new Size(Math.Max(1, this.ClientSize.Width), statusHeight);
+                lblStatus.TextAlign = ContentAlignment.MiddleLeft;
+                lblStatus.Padding = new Padding(16, 0, 0, 0);
             }
 
             if (btnSave != null)
             {
-                btnSave.Location = new Point(Math.Max(32, this.ClientSize.Width - 162), Math.Max(610, this.ClientSize.Height - 104));
+                btnSave.Location = new Point(Math.Max(0, this.ClientSize.Width - rightButtonMargin - btnSave.Width), buttonTop);
             }
         }
 
@@ -727,7 +748,7 @@ namespace OVIA.Desktop
                 if (!canEdit)
                 {
                     SetReadOnlyMode();
-                    UpdateStatus("시스템 설정은 최고관리자만 저장할 수 있습니다. 현재 화면은 보기 전용입니다.");
+                    UpdateStatus("시스템 설정은 셀먼 시스템 관리자만 저장할 수 있습니다. 현재 화면은 보기 전용입니다.");
                 }
                 else
                 {
@@ -998,7 +1019,7 @@ namespace OVIA.Desktop
                 );
 
                 UpdateStatus("시스템 설정을 저장했습니다. 저장 위치: " + OviaSystemSettingsStore.GetSettingsFilePath());
-                OviaNotificationStore.AddWorkLog(companyId, userId, "시스템 설정 저장", "메인  ›  환경설정  ›  시스템 설정");
+                OviaNotificationStore.AddWorkLog(companyId, userId, "시스템 설정 저장", "메인  ›  시스템관리  ›  시스템 설정");
             }
             catch (Exception ex)
             {
@@ -1173,7 +1194,7 @@ namespace OVIA.Desktop
             }
 
             MessageBox.Show(
-                "시스템 설정은 최고관리자만 수정할 수 있습니다.\r\n\r\n현재 사용자 ID: " + userId,
+                "시스템 설정은 셀먼 시스템 관리자만 수정할 수 있습니다.\r\n\r\n현재 사용자 ID: " + userId,
                 "OVIA 권한 확인",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning

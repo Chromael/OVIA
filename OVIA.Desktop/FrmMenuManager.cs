@@ -41,7 +41,7 @@ namespace OVIA.Desktop
         {
             this.companyId = companyId == null ? string.Empty : companyId;
             this.userId = userId == null ? string.Empty : userId;
-            this.canEdit = OviaSystemSettingsStore.IsSuperAdminUser(this.userId);
+            this.canEdit = OviaSystemSettingsStore.IsSystemAdministrator(this.companyId, this.userId);
 
             BuildUI();
             LoadRowsToGrid(OviaMenuHelpStore.Load());
@@ -88,7 +88,7 @@ namespace OVIA.Desktop
         {
             OviaWorkspaceHeader.AddTo(
                 parent,
-                "메인  ›  환경설정  ›  메뉴관리",
+                "메인  ›  시스템관리  ›  메뉴관리",
                 delegate { Close(); },
                 delegate { Close(); },
                 delegate { LoadRowsToGrid(OviaMenuHelpStore.Load()); },
@@ -120,7 +120,7 @@ namespace OVIA.Desktop
             commandBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             commandBar.BackColor = Color.White;
             commandBar.Paint += CommandBar_Paint;
-            OviaWorkspaceCommandBar.Populate(commandBar, "SETTINGS");
+            OviaWorkspaceCommandBar.Populate(commandBar, "SETTINGS", companyId, userId);
             parent.Controls.Add(commandBar);
         }
 
@@ -142,8 +142,8 @@ namespace OVIA.Desktop
         private void BuildGrid(Control parent)
         {
             grid = new DataGridView();
-            grid.Location = new Point(32, 124);
-            grid.Size = new Size(1116, 430);
+            grid.Location = new Point(0, 104);
+            grid.Size = new Size(1180, 430);
             grid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             grid.AllowUserToAddRows = false;
             grid.AllowUserToDeleteRows = false;
@@ -227,7 +227,7 @@ namespace OVIA.Desktop
 
         private void BuildButtons(Control parent)
         {
-            btnEditHelp = CreateButton("선택 도움말 입력", 32, 580, 150);
+            btnEditHelp = CreateButton("선택 도움말 입력", 0, 580, 150);
             btnEditHelp.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             btnEditHelp.Enabled = canEdit;
             btnEditHelp.Click += delegate { EditSelectedHelp(); };
@@ -261,8 +261,8 @@ namespace OVIA.Desktop
         {
             lblStatus = new Label();
             lblStatus.AutoSize = false;
-            lblStatus.Location = new Point(32, 638);
-            lblStatus.Size = new Size(1116, 42);
+            lblStatus.Location = new Point(0, 692);
+            lblStatus.Size = new Size(1180, 28);
             lblStatus.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             lblStatus.Font = OviaFluentTheme.FontStatus(8.7F, FontStyle.Regular);
             lblStatus.ForeColor = TextSub;
@@ -663,7 +663,7 @@ namespace OVIA.Desktop
             isDirty = false;
             UpdateSaveButtonVisibility();
             UpdateStatus("메뉴관리 설정이 저장되었습니다.");
-            OviaNotificationStore.AddWorkLog(companyId, userId, "메뉴관리 설정 저장", "메인  ›  환경설정  ›  메뉴관리");
+            OviaNotificationStore.AddWorkLog(companyId, userId, "메뉴관리 설정 저장", "메인  ›  시스템관리  ›  메뉴관리");
         }
 
         private void UpdateSaveButtonVisibility()
@@ -687,38 +687,45 @@ namespace OVIA.Desktop
 
         public void ApplyWorkspaceLayout()
         {
-            int width = Math.Max(1, ClientSize.Width - 64);
+            const int contentTop = 104;
+            const int contentInset = 25;
+            const int statusHeight = 28;
+            const int bottomButtonGap = 30;
+            const int buttonGap = 10;
+            const int rightMargin = 25;
+
+            int width = Math.Max(1, ClientSize.Width);
+            int statusTop = Math.Max(contentTop + 260, ClientSize.Height - statusHeight);
+            int buttonY = Math.Max(contentTop + 220, statusTop - bottomButtonGap - OviaFluentTheme.ButtonHeight);
             if (grid != null)
             {
-                grid.Width = width;
-                grid.Height = Math.Max(220, ClientSize.Height - 292);
+                grid.Location = new Point(contentInset, contentTop + contentInset);
+                grid.Width = Math.Max(1, width - contentInset);
+                grid.Height = Math.Max(220, buttonY - grid.Top - contentInset);
             }
 
-            int buttonY = Math.Max(0, ClientSize.Height - 112);
             if (btnEditHelp != null)
             {
-                btnEditHelp.Top = buttonY;
-                btnEditHelp.Left = 32;
+                btnEditHelp.Location = new Point(contentInset, buttonY);
             }
             if (btnReset != null)
             {
-                btnReset.Top = buttonY;
-                btnReset.Left = btnEditHelp == null ? 32 : btnEditHelp.Right + 10;
+                btnReset.Location = new Point(btnEditHelp == null ? 0 : btnEditHelp.Right + buttonGap, buttonY);
             }
             if (btnClose != null)
             {
-                btnClose.Top = buttonY;
-                btnClose.Left = Math.Max(32, ClientSize.Width - 32 - btnClose.Width);
+                btnClose.Location = new Point(Math.Max(0, ClientSize.Width - rightMargin - btnClose.Width), buttonY);
             }
             if (btnSave != null)
             {
-                btnSave.Top = buttonY;
-                btnSave.Left = btnClose == null ? Math.Max(32, ClientSize.Width - 32 - btnSave.Width) : Math.Max(32, btnClose.Left - 10 - btnSave.Width);
+                btnSave.Location = new Point(btnClose == null ? Math.Max(0, ClientSize.Width - rightMargin - btnSave.Width) : Math.Max(0, btnClose.Left - buttonGap - btnSave.Width), buttonY);
             }
             if (lblStatus != null)
             {
-                lblStatus.Top = Math.Max(0, ClientSize.Height - 58);
-                lblStatus.Width = width;
+                lblStatus.Location = new Point(0, statusTop);
+                lblStatus.Size = new Size(width, statusHeight);
+                lblStatus.TextAlign = ContentAlignment.MiddleLeft;
+                lblStatus.Padding = new Padding(16, 0, 0, 0);
             }
         }
 
@@ -946,8 +953,9 @@ namespace OVIA.Desktop
             List<OviaMenuSetting> list = new List<OviaMenuSetting>();
             Add(list, "MAIN", "메인", 1, false, "OVIA 전체 업무 현황, AutoCAD 상태, 최근 BarList 작업, 공사 현황, 공지사항을 확인하는 대시보드입니다.");
             Add(list, "NOTIFICATIONS", "알림", 2, false, "작업 내역 및 알림은 최대 7일간 보관되며, 7일 후 자동 삭제됩니다. 임의로 삭제할 수 없습니다.");
-            Add(list, "PROJECT_MANAGER", "공사관리", 1, false, "공사 목록을 검색하고 공사 등록, 수정, 완료공사 포함 조회를 처리합니다. 공사별 BarList, 생산오더, 송장, 태그 업무는 공사 상세 콘텐츠에서 연결됩니다.");
-            Add(list, "PROJECT_BARLIST_LIST", "공사별 BarList", 2, false, "선택한 공사에 저장된 BarList 목록을 조회하고 신규 등록, 수정, 다른 공사 BarList 불러오기 흐름으로 이동합니다.");
+            Add(list, "PROJECT_MANAGER", "공사목록", 2, false, "공사관리 2차 메뉴의 공사목록입니다. 기존 WinForms 공사관리 화면을 유지하며 공사 검색, 수정, 완료공사 포함 조회를 처리합니다.");
+            Add(list, "PROJECT_REGISTER", "공사등록", 2, false, "공사관리 2차 메뉴의 공사등록입니다. Web ERP 안의 공사등록 페이지를 WebView2로 불러오며, Web ERP에서 등록된 공사는 공사목록에 표시되는 구조로 전환합니다.");
+            Add(list, "PROJECT_BARLIST_LIST", "공사별 BarList", 3, false, "선택한 공사에 저장된 BarList 목록을 조회하고 신규 등록, 수정, 다른 공사 BarList 불러오기 흐름으로 이동합니다.");
             Add(list, "BARLIST", "BarList", 3, false, "CAD 도면 또는 Excel에서 BarList를 가져와 검토하고 저장하는 화면입니다. 형상, 수량, 길이, 중량 데이터를 확인합니다.");
 
             Add(list, "OPERATIONS", "운영현황", 1, false, "전체 BarList, 생산오더, 입출고, 재고, 송장, 태그/QR, 미처리 작업을 통합 조회하는 메뉴입니다.");
@@ -981,7 +989,8 @@ namespace OVIA.Desktop
             Add(list, "MASTER_WORKER_TEAM", "작업자/작업반 관리", 2, false, "작업자와 작업반 기준 정보를 관리합니다.");
             Add(list, "MASTER_MACHINE_LOCATION", "기계/위치 관리", 2, false, "기계, 설비, 위치, 창고 기준 데이터를 관리합니다.");
 
-            Add(list, "SETTINGS", "환경설정", 1, false, "OVIA 시스템 동작, BarList 매핑, 단위중량표, 출력 양식, QR/바코드 양식, 프린터, 백업, 버전정보를 관리합니다.");
+            Add(list, "SETTINGS", "시스템관리", 1, true, "OVIA 시스템 동작, BarList 매핑, 단위중량표, 출력 양식, QR/바코드 양식, 프린터, 백업, 버전정보를 관리합니다.");
+            Add(list, "LEGACY_MAIN_DASHBOARD", "기존 메인대시보드", 2, true, "WebView2 전환 전 메인에서 사용하던 WinForms 대시보드 카드, 차트, 최근 작업 현황을 보관하는 시스템관리용 화면입니다.");
             Add(list, "SYSTEM_SETTINGS", "시스템 설정", 2, true, "ERP 연결 주소, 회사 로고, 리스트 출력 수처럼 OVIA 전체에 적용되는 기본값을 관리합니다. 리스트 출력 수는 알림, 공사관리, 공사별 BarList 등 리스트 형식 화면의 한 페이지 표시 기준으로 사용됩니다.");
             Add(list, "BARLIST_MAPPING", "BarList 항목 매핑", 2, true, "CAD 도면마다 다른 철근재료표 헤더명을 OVIA 기본 헤더로 치환합니다. 매핑 텍스트는 셀 단위로 추가/수정할 수 있으며, 매핑 열은 드래그로 순서를 바꿀 수 있습니다.");
             Add(list, "REBAR_UNIT_WEIGHT", "이형철근 단위중량표", 2, true, "규격과 단위무게 기준으로 1톤 단위 조견표와 총길이/중량 계산 기준을 관리합니다. 최고관리자만 수정할 수 있습니다.");

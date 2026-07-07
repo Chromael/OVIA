@@ -14,6 +14,8 @@ namespace OVIA.Desktop
 
         void NavigateToMain();
         void NavigateToProjectManager();
+        void NavigateToProjectRegisterWebErp();
+        void NavigateToLegacyMainDashboard();
         void NavigateToProjectBarListList(string projectNo, string projectName, string clientName, string projectStatus);
         void NavigateToBarList(string projectNo, string projectName, string clientName, string projectStatus, string initialFilePath);
         void NavigateToBarListMapping();
@@ -165,6 +167,11 @@ namespace OVIA.Desktop
 
         public static void Populate(Control commandBar, string selectedMenu)
         {
+            Populate(commandBar, selectedMenu, string.Empty, string.Empty);
+        }
+
+        public static void Populate(Control commandBar, string selectedMenu, string currentCompanyId, string currentUserId)
+        {
             if (commandBar == null)
             {
                 return;
@@ -172,17 +179,13 @@ namespace OVIA.Desktop
 
             commandBar.Controls.Clear();
 
+            bool canViewSystemManagement = OviaSystemSettingsStore.IsSystemAdministrator(currentCompanyId, currentUserId);
+
             int left = 30;
             const int gap = 8;
 
-            OviaMenuButton project = AddMenu(commandBar, "공사관리", "\uE74C", left, 112, selectedMenu == "PROJECT", delegate(Control source)
-            {
-                IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(source);
-                if (navigator != null)
-                {
-                    navigator.NavigateToProjectManager();
-                }
-            });
+            OviaMenuButton project = AddMenu(commandBar, "공사관리 \uE70D", "\uE74C", left, 124, selectedMenu == "PROJECT", null);
+            project.Click += delegate { ToggleProjectDropDown(project); };
             left += project.Width + gap;
 
             OviaMenuButton operations = AddMenu(commandBar, "운영현황 \uE70D", "\uE9D2", left, 118, selectedMenu == "OPERATIONS", null);
@@ -213,13 +216,47 @@ namespace OVIA.Desktop
             master.Click += delegate { ToggleMasterDataDropDown(master); };
             left += master.Width + gap;
 
-            OviaMenuButton settings = AddMenu(commandBar, "환경설정 \uE70D", "\uE713", left, 130, selectedMenu == "SETTINGS", null);
-            settings.Click += delegate
+            if (canViewSystemManagement)
             {
-                ToggleSettingsDropDown(settings);
-            };
+                OviaMenuButton settings = AddMenu(commandBar, "시스템관리 \uE70D", "\uE713", left, 132, selectedMenu == "SETTINGS", null);
+                settings.Click += delegate
+                {
+                    ToggleSettingsDropDown(settings);
+                };
+                left += settings.Width + gap;
+            }
 
             AddAutoCadStatusIndicator(commandBar);
+        }
+
+        private static void ToggleProjectDropDown(Control menuButton)
+        {
+            ToggleDropDown(menuButton, delegate(OviaAnimatedDropDownMenu menu)
+            {
+                menu.AddItem("공사목록", "\uE8A5", delegate
+                {
+                    IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(menuButton);
+                    menu.CloseImmediate();
+                    currentSettingsDropDown = null;
+
+                    if (navigator != null)
+                    {
+                        navigator.NavigateToProjectManager();
+                    }
+                });
+
+                menu.AddItem("공사등록", "\uE710", delegate
+                {
+                    IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(menuButton);
+                    menu.CloseImmediate();
+                    currentSettingsDropDown = null;
+
+                    if (navigator != null)
+                    {
+                        navigator.NavigateToProjectRegisterWebErp();
+                    }
+                });
+            });
         }
 
         private static void ToggleOperationsDropDown(Control menuButton)
@@ -263,12 +300,21 @@ namespace OVIA.Desktop
             {
                 AddWorkspacePageItem(menu, menuButton, "거래처 관리", "\uE77B", "MASTER_COMPANY", "메인  ›  기준정보  ›  거래처 관리", "거래처 관리", "MASTER", "거래처, 가공사, 납품처 기준 데이터를 관리합니다.", "기준정보는 업무 마스터 데이터만 관리하고 ERP와 동기화될 예정입니다.");
                 AddWorkspacePageItem(menu, menuButton, "철근메이커 관리", "\uE8EC", "MASTER_REBAR_MAKER", "메인  ›  기준정보  ›  철근메이커 관리", "철근메이커 관리", "MASTER", "철근메이커와 브랜드 기준 데이터를 관리합니다.", "입고, BarList, 송장 데이터와 연결됩니다.");
-                AddWorkspacePageItem(menu, menuButton, "자재/규격 관리", "\uE8D5", "MASTER_MATERIAL_SPEC", "메인  ›  기준정보  ›  자재/규격 관리", "자재/규격 관리", "MASTER", "자재 코드와 철근 규격 기준 데이터를 관리합니다.", "단위중량표는 환경설정의 별도 핵심 계산 기준으로 유지합니다.");
+                AddWorkspacePageItem(menu, menuButton, "자재/규격 관리", "\uE8D5", "MASTER_MATERIAL_SPEC", "메인  ›  기준정보  ›  자재/규격 관리", "자재/규격 관리", "MASTER", "자재 코드와 철근 규격 기준 데이터를 관리합니다.", "단위중량표는 시스템관리의 별도 핵심 계산 기준으로 유지합니다.");
                 AddWorkspacePageItem(menu, menuButton, "형상코드 관리", "\uE8A5", "MASTER_SHAPE_CODE", "메인  ›  기준정보  ›  형상코드 관리", "형상코드 관리", "MASTER", "형상 코드, 사용자 형상, 미리보기 기준 데이터를 관리합니다.", "OVIA BarList 형상 렌더링과 연결되는 기준 데이터입니다.");
                 AddWorkspacePageItem(menu, menuButton, "차량/운전자 관리", "\uE804", "MASTER_CAR_DRIVER", "메인  ›  기준정보  ›  차량/운전자 관리", "차량/운전자 관리", "MASTER", "차량번호, 기사, 운전자 정보를 관리합니다.", "송장 발행과 출하 실적등록에 연결됩니다.");
                 AddWorkspacePageItem(menu, menuButton, "작업자/작업반 관리", "\uE716", "MASTER_WORKER_TEAM", "메인  ›  기준정보  ›  작업자/작업반 관리", "작업자/작업반 관리", "MASTER", "작업자와 작업반 기준 정보를 관리합니다.", "생산오더와 작업지시 흐름에 연결됩니다.");
                 AddWorkspacePageItem(menu, menuButton, "기계/위치 관리", "\uE950", "MASTER_MACHINE_LOCATION", "메인  ›  기준정보  ›  기계/위치 관리", "기계/위치 관리", "MASTER", "기계, 설비, 위치, 창고 기준 데이터를 관리합니다.", "생산, 입고, 재고 흐름과 연결될 예정입니다.");
             });
+        }
+
+        public static void CloseOpenDropDown()
+        {
+            if (currentSettingsDropDown != null && !currentSettingsDropDown.IsDisposed && currentSettingsDropDown.Visible)
+            {
+                currentSettingsDropDown.CloseAnimated();
+                currentSettingsDropDown = null;
+            }
         }
 
         private static void ToggleDropDown(Control menuButton, Action<OviaAnimatedDropDownMenu> buildItems)
@@ -323,6 +369,18 @@ namespace OVIA.Desktop
         {
             ToggleDropDown(settingsButton, delegate(OviaAnimatedDropDownMenu menu)
             {
+                menu.AddItem("기존 메인대시보드", "\uE9D2", delegate
+                {
+                    IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(settingsButton);
+                    menu.CloseImmediate();
+                    currentSettingsDropDown = null;
+
+                    if (navigator != null)
+                    {
+                        navigator.NavigateToLegacyMainDashboard();
+                    }
+                });
+
                 menu.AddItem("시스템 설정", "\uE713", delegate
                 {
                     IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(settingsButton);
@@ -359,11 +417,11 @@ namespace OVIA.Desktop
                     }
                 });
 
-                AddWorkspacePageItem(menu, settingsButton, "가져오기 양식 설정", "\uE8B7", "IMPORT_TEMPLATE", "메인  ›  환경설정  ›  가져오기 양식 설정", "가져오기 양식 설정", "SETTINGS", "SSBAR, Tekla, Excel, DBF, BAR 등 외부 데이터 가져오기 템플릿을 관리합니다.", "외부 파일 가져오기 방식은 환경설정에서 템플릿으로 통합 관리합니다.");
-                AddWorkspacePageItem(menu, settingsButton, "출력 양식 설정", "\uE749", "PRINT_TEMPLATE", "메인  ›  환경설정  ›  출력 양식 설정", "출력 양식 설정", "SETTINGS", "송장, 납품표, 인수증, 검수양식, BarList 출력 템플릿을 관리합니다.", "SSBAR의 업체별 출력 메뉴는 OVIA에서 출력 양식 설정과 템플릿 선택 방식으로 통합합니다.");
-                AddWorkspacePageItem(menu, settingsButton, "QR/바코드 양식 설정", "\uE8B3", "QR_BARCODE_TEMPLATE", "메인  ›  환경설정  ›  QR/바코드 양식 설정", "QR/바코드 양식 설정", "SETTINGS", "QR 데이터 구조, 바코드 종류, 태그 양식 연결 기준을 관리합니다.", "QR/바코드 양식은 기준정보가 아니라 시스템 출력 동작 설정으로 관리합니다.");
-                AddWorkspacePageItem(menu, settingsButton, "프린터 설정", "\uE749", "PRINTER_SETTINGS", "메인  ›  환경설정  ›  프린터 설정", "프린터 설정", "SETTINGS", "라벨 프린터, 송장 프린터, 일반 프린터, 용지, 여백, 테스트 출력을 관리합니다.", "프린터 설정은 사용자 PC별 로컬 환경과 연결되는 OVIA Desktop 핵심 설정입니다.");
-                AddWorkspacePageItem(menu, settingsButton, "백업/복원", "\uE74E", "BACKUP_RESTORE", "메인  ›  환경설정  ›  백업/복원", "백업/복원", "SETTINGS", "로컬 데이터, 설정, 공사 데이터를 백업하거나 복원합니다.", "백업/복원은 운영 안전장치로 후속 개발에서 실제 ZIP 백업 생성과 복원 기능을 연결합니다.");
+                AddWorkspacePageItem(menu, settingsButton, "가져오기 양식 설정", "\uE8B7", "IMPORT_TEMPLATE", "메인  ›  시스템관리  ›  가져오기 양식 설정", "가져오기 양식 설정", "SETTINGS", "SSBAR, Tekla, Excel, DBF, BAR 등 외부 데이터 가져오기 템플릿을 관리합니다.", "외부 파일 가져오기 방식은 시스템관리에서 템플릿으로 통합 관리합니다.");
+                AddWorkspacePageItem(menu, settingsButton, "출력 양식 설정", "\uE749", "PRINT_TEMPLATE", "메인  ›  시스템관리  ›  출력 양식 설정", "출력 양식 설정", "SETTINGS", "송장, 납품표, 인수증, 검수양식, BarList 출력 템플릿을 관리합니다.", "SSBAR의 업체별 출력 메뉴는 OVIA에서 출력 양식 설정과 템플릿 선택 방식으로 통합합니다.");
+                AddWorkspacePageItem(menu, settingsButton, "QR/바코드 양식 설정", "\uE8B3", "QR_BARCODE_TEMPLATE", "메인  ›  시스템관리  ›  QR/바코드 양식 설정", "QR/바코드 양식 설정", "SETTINGS", "QR 데이터 구조, 바코드 종류, 태그 양식 연결 기준을 관리합니다.", "QR/바코드 양식은 기준정보가 아니라 시스템 출력 동작 설정으로 관리합니다.");
+                AddWorkspacePageItem(menu, settingsButton, "프린터 설정", "\uE749", "PRINTER_SETTINGS", "메인  ›  시스템관리  ›  프린터 설정", "프린터 설정", "SETTINGS", "라벨 프린터, 송장 프린터, 일반 프린터, 용지, 여백, 테스트 출력을 관리합니다.", "프린터 설정은 사용자 PC별 로컬 환경과 연결되는 OVIA Desktop 핵심 설정입니다.");
+                AddWorkspacePageItem(menu, settingsButton, "백업/복원", "\uE74E", "BACKUP_RESTORE", "메인  ›  시스템관리  ›  백업/복원", "백업/복원", "SETTINGS", "로컬 데이터, 설정, 공사 데이터를 백업하거나 복원합니다.", "백업/복원은 운영 안전장치로 후속 개발에서 실제 ZIP 백업 생성과 복원 기능을 연결합니다.");
 
                 menu.AddItem("메뉴관리", "\uE8A4", delegate
                 {
@@ -394,7 +452,7 @@ namespace OVIA.Desktop
             if (erpUrl == "")
             {
                 MessageBox.Show(
-                    "ERP 연결 주소가 아직 설정되지 않았습니다.\r\n\r\n환경설정 > 시스템 설정에서 ERP 연결 주소를 먼저 저장해주세요.",
+                    "ERP 연결 주소가 아직 설정되지 않았습니다.\r\n\r\n시스템관리 > 시스템 설정에서 ERP 연결 주소를 먼저 저장해주세요.",
                     "OVIA ERP",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information
@@ -408,7 +466,7 @@ namespace OVIA.Desktop
             if (browserUrl == "")
             {
                 MessageBox.Show(
-                    "ERP 연결 주소 형식이 올바르지 않습니다.\r\n\r\n환경설정 > 시스템 설정에서 ERP 로그인페이지 URL을 다시 확인해주세요.\r\n\r\n입력값: " + erpUrl,
+                    "ERP 연결 주소 형식이 올바르지 않습니다.\r\n\r\n시스템관리 > 시스템 설정에서 ERP 로그인페이지 URL을 다시 확인해주세요.\r\n\r\n입력값: " + erpUrl,
                     "OVIA ERP",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning
@@ -500,8 +558,9 @@ namespace OVIA.Desktop
         private static void ShowVersionInfo(Control source)
         {
             IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(source);
+            string companyId = navigator == null ? "" : navigator.CurrentCompanyId;
             string userId = navigator == null ? "" : navigator.CurrentUserId;
-            bool canEdit = OviaSystemSettingsStore.IsSuperAdminUser(userId);
+            bool canEdit = OviaSystemSettingsStore.IsSystemAdministrator(companyId, userId);
             string displayVersion = OviaSystemSettingsStore.GetDisplayVersionText();
 
             if (!canEdit)
@@ -1334,8 +1393,49 @@ namespace OVIA.Desktop
 
         public void NavigateToProjectManager()
         {
-            this.Text = "OVIA 공사관리";
+            this.Text = "OVIA 공사목록";
             ShowScreen(new FrmProjectManager(companyId, userId));
+        }
+
+        public void NavigateToProjectRegisterWebErp()
+        {
+            this.Text = "OVIA 공사등록";
+            ShowScreen(new FrmOviaWebErpPage(
+                companyId,
+                userId,
+                "PROJECT_REGISTER",
+                "공사등록",
+                "메인  ›  공사관리  ›  공사등록",
+                "PROJECT",
+                "projects/register",
+                "ERP 공사등록 페이지를 WebView2로 불러옵니다. Web ERP에서 공사를 등록하면 공사목록에 표시되는 구조로 전환합니다."
+            ));
+        }
+
+        public void NavigateToLegacyMainDashboard()
+        {
+            if (!OviaSystemSettingsStore.IsSystemAdministrator(companyId, userId))
+            {
+                MessageBox.Show(
+                    "기존 메인대시보드는 시스템관리자만 접근할 수 있습니다.",
+                    "OVIA 권한 확인",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                return;
+            }
+
+            this.Text = "OVIA 기존 메인대시보드";
+            ShowScreen(new FrmOviaMenuPage(
+                companyId,
+                userId,
+                "LEGACY_MAIN_DASHBOARD",
+                "기존 메인대시보드",
+                "메인  ›  시스템관리  ›  기존 메인대시보드",
+                "SETTINGS",
+                "WebView2 전환 전 메인에서 사용하던 대시보드 화면입니다.",
+                "기존 메인대시보드는 메인 창의 시스템관리 메뉴에서 확인하는 것을 기준으로 합니다. WebView2 전환 완료 후 정리 여부를 결정합니다."
+            ));
         }
 
         public void NavigateToProjectBarListList(string projectNo, string projectName, string clientName, string projectStatus)
@@ -1365,7 +1465,7 @@ namespace OVIA.Desktop
 
         public void NavigateToSystemSettings()
         {
-            if (!OviaSystemSettingsStore.IsSuperAdminUser(userId))
+            if (!OviaSystemSettingsStore.IsSystemAdministrator(companyId, userId))
             {
                 MessageBox.Show(
                     "시스템 설정은 최고관리자만 접근할 수 있습니다.\r\n\r\n현재 사용자 ID: " + userId,
@@ -1383,7 +1483,7 @@ namespace OVIA.Desktop
 
         public void NavigateToMenuManager()
         {
-            if (!OviaSystemSettingsStore.IsSuperAdminUser(userId))
+            if (!OviaSystemSettingsStore.IsSystemAdministrator(companyId, userId))
             {
                 MessageBox.Show(
                     "메뉴관리는 최고관리자만 접근할 수 있습니다.\r\n\r\n현재 사용자 ID: " + userId,

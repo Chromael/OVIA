@@ -18,6 +18,9 @@ namespace OVIA.Desktop
     {
         private const int WM_NCLBUTTONDOWN = 0xA1;
         private const int HTCAPTION = 0x2;
+        private const int DashboardWebViewTop = 34;
+        private const int DashboardWebViewHeight = 360;
+        private const int DashboardWebViewBottomGap = 34;
 
         [DllImport("user32.dll")]
         private static extern bool ReleaseCapture();
@@ -170,7 +173,7 @@ namespace OVIA.Desktop
             top.Padding = Padding.Empty;
             top.BackColor = Color.White;
             top.Paint += CommandBar_Paint;
-            OviaWorkspaceCommandBar.Populate(top, "MAIN");
+            OviaWorkspaceCommandBar.Populate(top, "MAIN", companyId, userId);
             parent.Controls.Add(top, 0, 0);
         }
 
@@ -247,6 +250,38 @@ namespace OVIA.Desktop
 
         private void BuildDashboardMainContent(Control parent)
         {
+            Panel content = CreateDashboardWebViewContent(parent);
+
+            BuildDashboardHero(content);
+            BuildDashboardWebViewFullPage(content);
+
+            parent.Resize += delegate
+            {
+                content.Size = new Size(Math.Max(1, parent.ClientSize.Width), Math.Max(1, parent.ClientSize.Height - 98));
+            };
+        }
+
+        private void BuildLegacyDashboardMainContent(Control parent)
+        {
+            Panel content = CreateDashboardScrollContent(parent);
+
+            BuildDashboardHero(content);
+
+            int dashboardContentTop = DashboardWebViewTop;
+            BuildDashboardSummaryCards(content, dashboardContentTop);
+            BuildDashboardCharts(content, dashboardContentTop);
+            BuildDashboardDetailPanels(content, dashboardContentTop);
+
+            content.AutoScrollMinSize = new Size(0, dashboardContentTop + 812);
+
+            parent.Resize += delegate
+            {
+                content.Size = new Size(Math.Max(1, parent.ClientSize.Width), Math.Max(1, parent.ClientSize.Height - 98));
+            };
+        }
+
+        private Panel CreateDashboardScrollContent(Control parent)
+        {
             Panel content = new Panel();
             content.Location = new Point(0, 98);
             content.Size = new Size(Math.Max(1, parent.ClientSize.Width), Math.Max(1, parent.ClientSize.Height - 98));
@@ -254,16 +289,93 @@ namespace OVIA.Desktop
             content.AutoScroll = true;
             content.BackColor = SurfaceColor;
             parent.Controls.Add(content);
+            return content;
+        }
 
-            BuildDashboardHero(content);
-            BuildDashboardSummaryCards(content);
-            BuildDashboardCharts(content);
-            BuildDashboardDetailPanels(content);
+        private Panel CreateDashboardWebViewContent(Control parent)
+        {
+            Panel content = new Panel();
+            content.Location = new Point(0, 98);
+            content.Size = new Size(Math.Max(1, parent.ClientSize.Width), Math.Max(1, parent.ClientSize.Height - 98));
+            content.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+            content.AutoScroll = false;
+            content.Margin = Padding.Empty;
+            content.Padding = Padding.Empty;
+            content.BackColor = Color.White;
+            parent.Controls.Add(content);
+            return content;
+        }
+
+        private void BuildDashboardWebViewFullPage(Panel parent)
+        {
+            parent.AutoScroll = false;
+            parent.Margin = Padding.Empty;
+            parent.Padding = Padding.Empty;
+            parent.BackColor = Color.White;
+
+            OviaWebViewHost webViewHost = new OviaWebViewHost();
+            webViewHost.Dock = DockStyle.Fill;
+            webViewHost.Margin = Padding.Empty;
+            webViewHost.Padding = Padding.Empty;
+            webViewHost.BorderStyle = BorderStyle.None;
+            webViewHost.BackColor = Color.White;
+            webViewHost.InitialUrl = GetDashboardWebViewUrl();
+            webViewHost.AutoResizeToDocumentHeight = false;
+            webViewHost.ForwardMouseWheelToParentScroll = false;
+            parent.Controls.Add(webViewHost);
+        }
+
+        private int GetDashboardWebViewInitialCardHeight(Control parent)
+        {
+            if (parent == null)
+            {
+                return 620;
+            }
+
+            return Math.Max(620, parent.ClientSize.Height - DashboardWebViewTop - 28);
+        }
+
+        private int BuildDashboardWebViewPreview(Control parent)
+        {
+            OviaModernCard webCard = new OviaModernCard();
+            webCard.Location = new Point(34, DashboardWebViewTop);
+            webCard.Size = new Size(Math.Max(1, parent.ClientSize.Width - 68), DashboardWebViewHeight);
+            webCard.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            webCard.BackColor = SurfaceColor;
+            webCard.SurfaceColor = SurfaceColor;
+            webCard.AccentColor = Color.Transparent;
+            webCard.HeaderDividerY = 0;
+            webCard.Padding = new Padding(14);
+            parent.Controls.Add(webCard);
+
+            OviaWebViewHost webViewHost = new OviaWebViewHost();
+            webViewHost.Dock = DockStyle.Fill;
+            webViewHost.InitialUrl = GetDashboardWebViewUrl();
+            webCard.Controls.Add(webViewHost);
 
             parent.Resize += delegate
             {
-                content.Size = new Size(Math.Max(1, parent.ClientSize.Width), Math.Max(1, parent.ClientSize.Height - 98));
+                webCard.Width = Math.Max(1, parent.ClientSize.Width - 68);
             };
+
+            return DashboardWebViewTop + DashboardWebViewHeight + DashboardWebViewBottomGap;
+        }
+
+        private string GetDashboardWebViewUrl()
+        {
+            try
+            {
+                OviaSystemSettings settings = OviaSystemSettingsStore.Load();
+                if (settings != null && !string.IsNullOrWhiteSpace(settings.ErpLoginUrl))
+                {
+                    return OviaWebViewHost.NormalizeUrl(settings.ErpLoginUrl);
+                }
+            }
+            catch
+            {
+            }
+
+            return "https://celmon.com";
         }
 
         private void BuildDashboardHero(Control parent)
@@ -273,10 +385,10 @@ namespace OVIA.Desktop
             lblLastRefresh = null;
         }
 
-        private void BuildDashboardSummaryCards(Control parent)
+        private void BuildDashboardSummaryCards(Control parent, int topY)
         {
             TableLayoutPanel cards = new TableLayoutPanel();
-            cards.Location = new Point(34, 48);
+            cards.Location = new Point(34, topY);
             cards.Size = new Size(Math.Max(1, parent.ClientSize.Width - 68), 208);
             cards.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             cards.ColumnCount = 5;
@@ -536,10 +648,10 @@ namespace OVIA.Desktop
             return card;
         }
 
-        private void BuildDashboardCharts(Control parent)
+        private void BuildDashboardCharts(Control parent, int dashboardContentTop)
         {
             TableLayoutPanel charts = new TableLayoutPanel();
-            charts.Location = new Point(34, 286);
+            charts.Location = new Point(34, dashboardContentTop + 238);
             charts.Size = new Size(Math.Max(1, parent.ClientSize.Width - 68), 250);
             charts.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             charts.ColumnCount = 3;
@@ -675,10 +787,10 @@ namespace OVIA.Desktop
             return tile;
         }
 
-        private void BuildDashboardDetailPanels(Control parent)
+        private void BuildDashboardDetailPanels(Control parent, int dashboardContentTop)
         {
             TableLayoutPanel detail = new TableLayoutPanel();
-            detail.Location = new Point(34, 562);
+            detail.Location = new Point(34, dashboardContentTop + 514);
             detail.Size = new Size(Math.Max(1, parent.ClientSize.Width - 68), 264);
             detail.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             detail.ColumnCount = 3;
@@ -1199,6 +1311,39 @@ namespace OVIA.Desktop
             UpdateAutoCadRunStatus();
         }
 
+        private void ShowLegacyDashboard()
+        {
+            if (!CloseCurrentScreenForNavigation())
+            {
+                return;
+            }
+
+            this.Text = "OVIA 기존 메인대시보드";
+            workspacePanel.Controls.Clear();
+            currentScreen = null;
+
+            Panel dashboard = new Panel();
+            dashboard.Dock = DockStyle.Fill;
+            dashboard.BackColor = SurfaceColor;
+            workspacePanel.Controls.Add(dashboard);
+
+            OviaWorkspaceHeader.AddTo(
+                dashboard,
+                "메인  ›  시스템관리  ›  기존 메인대시보드",
+                delegate { ShowDashboard(); },
+                null,
+                delegate { ShowDashboard(); },
+                delegate { RequestLogout(); },
+                false,
+                false
+            );
+
+            BuildDashboardCommandBar(dashboard, "SETTINGS");
+            BuildLegacyDashboardMainContent(dashboard);
+            UpdateBottomStatusWithRefresh();
+            UpdateAutoCadRunStatus();
+        }
+
         private void BuildDashboardExplorerHeader(Control parent)
         {
             OviaWorkspaceHeader.AddTo(
@@ -1242,13 +1387,18 @@ namespace OVIA.Desktop
 
         private void BuildDashboardCommandBar(Control parent)
         {
+            BuildDashboardCommandBar(parent, "MAIN");
+        }
+
+        private void BuildDashboardCommandBar(Control parent, string selectedMenu)
+        {
             Panel commandBar = new Panel();
             commandBar.Location = new Point(0, 48);
             commandBar.Size = new Size(Math.Max(1, parent.ClientSize.Width), 50);
             commandBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             commandBar.BackColor = Color.White;
             commandBar.Paint += CommandBar_Paint;
-            OviaWorkspaceCommandBar.Populate(commandBar, "MAIN");
+            OviaWorkspaceCommandBar.Populate(commandBar, selectedMenu, companyId, userId);
             parent.Controls.Add(commandBar);
         }
 
@@ -1547,9 +1697,39 @@ namespace OVIA.Desktop
             NavigateToRebarUnitWeightTable();
         }
 
+        public void NavigateToLegacyMainDashboard()
+        {
+            if (!IsSystemAdminUser())
+            {
+                MessageBox.Show(
+                    "기존 메인대시보드는 시스템관리자만 접근할 수 있습니다.",
+                    "OVIA 권한 확인",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                return;
+            }
+
+            ShowLegacyDashboard();
+        }
+
         public void NavigateToProjectManager()
         {
             ShowWorkspaceScreen(new FrmProjectManager(companyId, userId), "OVIA 공사관리", "공사관리 화면입니다.");
+        }
+
+        public void NavigateToProjectRegisterWebErp()
+        {
+            ShowWorkspaceScreen(new FrmOviaWebErpPage(
+                companyId,
+                userId,
+                "PROJECT_REGISTER",
+                "공사등록",
+                "메인  ›  공사관리  ›  공사등록",
+                "PROJECT",
+                "projects/register",
+                "ERP 공사등록 페이지를 WebView2로 불러옵니다. Web ERP에서 공사를 등록하면 공사목록에 표시되는 구조로 전환합니다."
+            ), "OVIA 공사등록", "공사등록 Web ERP 페이지를 불러왔습니다.");
         }
 
         public void NavigateToProjectBarListList(string projectNo, string projectName, string clientName, string projectStatus)
@@ -1576,7 +1756,7 @@ namespace OVIA.Desktop
 
         public void NavigateToSystemSettings()
         {
-            if (!OviaSystemSettingsStore.IsSuperAdminUser(userId))
+            if (!OviaSystemSettingsStore.IsSystemAdministrator(companyId, userId))
             {
                 MessageBox.Show(
                     "시스템 설정은 최고관리자만 접근할 수 있습니다.\r\n\r\n현재 사용자 ID: " + userId,
@@ -1593,7 +1773,7 @@ namespace OVIA.Desktop
 
         public void NavigateToMenuManager()
         {
-            if (!OviaSystemSettingsStore.IsSuperAdminUser(userId))
+            if (!OviaSystemSettingsStore.IsSystemAdministrator(companyId, userId))
             {
                 MessageBox.Show(
                     "메뉴관리는 최고관리자만 접근할 수 있습니다.\r\n\r\n현재 사용자 ID: " + userId,
@@ -1922,8 +2102,7 @@ namespace OVIA.Desktop
 
         private bool IsSystemAdminUser()
         {
-            string value = userId == null ? "" : userId.Trim().ToLowerInvariant();
-            return OviaSystemSettingsStore.IsSuperAdminUser(userId) || value == "관리자";
+            return OviaSystemSettingsStore.IsSystemAdministrator(companyId, userId);
         }
 
         private void ExtractReady_Click(object sender, EventArgs e)

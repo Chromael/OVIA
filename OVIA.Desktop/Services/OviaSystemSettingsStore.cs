@@ -28,24 +28,12 @@ namespace OVIA.Desktop
 
         public static bool IsSuperAdminUser(string userId)
         {
-            string value = userId == null ? "" : userId.Trim().ToLowerInvariant();
+            return IsSystemAdministrator(string.Empty, userId);
+        }
 
-            if (value == "")
-            {
-                return false;
-            }
-
-            return value == "admin"
-                || value == "administrator"
-                || value == "root"
-                || value == "celmon"
-                || value == "oviaadmin"
-                || value == "system"
-                || value == "superadmin"
-                || value == "systemadmin"
-                || value == "sysadmin"
-                || value == "최고관리자"
-                || value == "시스템관리자";
+        public static bool IsSystemAdministrator(string companyId, string userId)
+        {
+            return OviaSessionSecurity.IsCurrentSystemAdministrator(companyId, userId);
         }
 
         public static OviaSystemSettings Load()

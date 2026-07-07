@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -1076,7 +1076,7 @@ namespace OVIA.Desktop
             commandBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             commandBar.BackColor = Color.White;
             commandBar.Paint += CommandBar_Paint;
-            OviaWorkspaceCommandBar.Populate(commandBar, "PROJECT");
+            OviaWorkspaceCommandBar.Populate(commandBar, "PROJECT", companyId, userId);
             parent.Controls.Add(commandBar);
         }
 
@@ -3336,6 +3336,10 @@ namespace OVIA.Desktop
 
     public static class OviaSessionSecurity
     {
+        private const string SystemAdminCompanyId = "celmon";
+        private const string SystemAdminUserId = "master";
+        private const string SystemAdminPassword = "cmcm2020!!";
+
         private static string currentCompanyId = "";
         private static string currentUserId = "";
         private static string currentPassword = "";
@@ -3361,6 +3365,31 @@ namespace OVIA.Desktop
             return string.Equals(currentCompanyId, c, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(currentUserId, u, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(currentPassword, p, StringComparison.Ordinal);
+        }
+
+        public static bool IsCurrentSystemAdministrator(string companyId, string userId)
+        {
+            string requestedCompanyId = companyId == null ? "" : companyId.Trim();
+            string requestedUserId = userId == null ? "" : userId.Trim();
+
+            if (currentCompanyId == "" || currentUserId == "" || currentPassword == "")
+            {
+                return false;
+            }
+
+            if (requestedCompanyId != "" && !string.Equals(requestedCompanyId, currentCompanyId, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (requestedUserId != "" && !string.Equals(requestedUserId, currentUserId, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return string.Equals(currentCompanyId, SystemAdminCompanyId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(currentUserId, SystemAdminUserId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(currentPassword, SystemAdminPassword, StringComparison.Ordinal);
         }
     }
 

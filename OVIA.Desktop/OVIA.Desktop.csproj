@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
@@ -67,6 +67,9 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2592.51" />
+  </ItemGroup>
+  <ItemGroup>
     <Compile Include="Models\RebarShapeCommand.cs" />
     <Compile Include="Models\RebarShapeInfo.cs" />
     <Compile Include="Services\RebarShapeRepository.cs" />
@@ -75,6 +78,7 @@
     <Compile Include="Services\OviaEnvironmentChecker.cs" />
     <Compile Include="Services\OviaFontManager.cs" />
     <Compile Include="Services\OviaSystemIconManager.cs" />
+    <Compile Include="Services\OviaWebView2RuntimeChecker.cs" />
     <Compile Include="Services\OviaSystemSettingsStore.cs" />
     <Compile Include="Services\OviaWindowCaptionTheme.cs" />
     <Compile Include="Services\OviaNotificationStore.cs" />
@@ -85,6 +89,9 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="Controls\OviaInputControls.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Controls\OviaWebViewHost.cs">
       <SubType>UserControl</SubType>
     </Compile>
     <Compile Include="Controls\OviaWorkspaceHeader.cs">
@@ -118,6 +125,9 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="FrmOviaMenuPage.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="FrmOviaWebErpPage.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="FrmNotificationList.cs">

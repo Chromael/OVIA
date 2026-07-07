@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -36,6 +36,8 @@ namespace OVIA.Desktop
         public string DotNetVersionText = "";
         public bool IsDotNet472OrHigher = false;
         public bool IsDotNet48OrHigher = false;
+        public bool IsWebView2RuntimeAvailable = false;
+        public string WebView2RuntimeVersionText = "";
         public bool IsAutoCadRunning = false;
         public bool CanWriteOviaWorkFolder = false;
         public string OviaWorkFolder = "";
@@ -209,6 +211,15 @@ namespace OVIA.Desktop
             text.AppendLine("권장 기준 4.8 이상: " + (IsDotNet48OrHigher ? "충족" : "주의"));
             text.AppendLine();
 
+            text.AppendLine("[WebView2 Runtime]");
+            text.AppendLine("감지 상태: " + (IsWebView2RuntimeAvailable ? "감지됨" : "미감지"));
+            if (IsWebView2RuntimeAvailable && WebView2RuntimeVersionText != "")
+            {
+                text.AppendLine("버전: " + WebView2RuntimeVersionText);
+            }
+            text.AppendLine("용도: OVIA Desktop 내부 Web ERP 화면 표시");
+            text.AppendLine();
+
             text.AppendLine("[AutoCAD]");
             text.AppendLine("실행 상태: " + (IsAutoCadRunning ? "acad.exe 실행 중" : "실행 안 됨"));
 
@@ -299,10 +310,12 @@ namespace OVIA.Desktop
 
             FillWindowsInfo(report);
             FillDotNetInfo(report);
+            FillWebView2Info(report);
             FillAutoCadInfo(report);
             FillStorageInfo(report);
             EvaluateWindows(report);
             EvaluateDotNet(report);
+            EvaluateWebView2(report);
             EvaluateAutoCad(report);
             EvaluateStorage(report);
             UpdateOverallStatus(report);
@@ -367,6 +380,13 @@ namespace OVIA.Desktop
             report.DotNetVersionText = GetDotNetVersionText(report.DotNetRelease);
             report.IsDotNet472OrHigher = report.DotNetRelease >= DotNet472ReleaseMinimum;
             report.IsDotNet48OrHigher = report.DotNetRelease >= DotNet48ReleaseMinimum;
+        }
+
+        private static void FillWebView2Info(OviaEnvironmentReport report)
+        {
+            OviaWebView2RuntimeInfo runtime = OviaWebView2RuntimeChecker.GetRuntimeInfo();
+            report.IsWebView2RuntimeAvailable = runtime != null && runtime.IsAvailable;
+            report.WebView2RuntimeVersionText = runtime == null || runtime.VersionText == null ? "" : runtime.VersionText;
         }
 
         private static void FillAutoCadInfo(OviaEnvironmentReport report)
@@ -496,6 +516,20 @@ namespace OVIA.Desktop
                     ".NET Framework 4.8 미만 환경입니다.",
                     "OVIA Desktop은 4.7.2 기준으로 실행 가능하지만 배포 환경은 4.8 이상을 권장합니다.",
                     ".NET Framework 4.8 이상 설치를 권장합니다."
+                );
+            }
+        }
+
+        private static void EvaluateWebView2(OviaEnvironmentReport report)
+        {
+            if (!report.IsWebView2RuntimeAvailable)
+            {
+                AddIssue(
+                    report,
+                    OviaEnvironmentStatus.Warning,
+                    "WebView2 Runtime이 감지되지 않았습니다.",
+                    "OVIA가 Web ERP 화면을 내부 WebView2로 표시하려면 Microsoft Edge WebView2 Runtime이 필요합니다.",
+                    "OVIA 설치 프로그램에서 WebView2 Runtime 존재 여부를 확인하고, 없으면 Evergreen Runtime 설치를 연결해야 합니다."
                 );
             }
         }

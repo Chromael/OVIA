@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Text;
 using OVIA.Desktop;
 
@@ -140,6 +140,8 @@ namespace OVIA.PreflightCheck
             AppendJsonProperty(json, "dotNetVersionText", report.DotNetVersionText, true);
             AppendJsonProperty(json, "isDotNet472OrHigher", report.IsDotNet472OrHigher ? "true" : "false", false);
             AppendJsonProperty(json, "isDotNet48OrHigher", report.IsDotNet48OrHigher ? "true" : "false", false);
+            AppendJsonProperty(json, "isWebView2RuntimeAvailable", report.IsWebView2RuntimeAvailable ? "true" : "false", false);
+            AppendJsonProperty(json, "webView2RuntimeVersionText", report.WebView2RuntimeVersionText, true);
             AppendJsonProperty(json, "isAutoCadRunning", report.IsAutoCadRunning ? "true" : "false", false);
             AppendJsonProperty(json, "canWriteOviaWorkFolder", report.CanWriteOviaWorkFolder ? "true" : "false", false);
             AppendJsonProperty(json, "oviaWorkFolder", report.OviaWorkFolder, true);

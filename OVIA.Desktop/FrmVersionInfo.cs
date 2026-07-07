@@ -27,7 +27,7 @@ namespace OVIA.Desktop
         {
             this.companyId = companyId == null ? "" : companyId;
             this.userId = userId == null ? "" : userId;
-            this.canEdit = OviaSystemSettingsStore.IsSuperAdminUser(this.userId);
+            this.canEdit = OviaSystemSettingsStore.IsSystemAdministrator(this.companyId, this.userId);
 
             BuildUI();
             LoadVersionToUi();
@@ -66,7 +66,7 @@ namespace OVIA.Desktop
         {
             OviaWorkspaceHeader.AddTo(
                 parent,
-                "메인  ›  환경설정  ›  버전정보",
+                "메인  ›  시스템관리  ›  버전정보",
                 delegate { this.Close(); },
                 delegate { this.Close(); },
                 delegate { if (ConfirmDiscardUnsavedChanges()) LoadVersionToUi(); },
@@ -105,7 +105,7 @@ namespace OVIA.Desktop
             commandBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             commandBar.BackColor = Color.White;
             commandBar.Paint += CommandBar_Paint;
-            OviaWorkspaceCommandBar.Populate(commandBar, "SETTINGS");
+            OviaWorkspaceCommandBar.Populate(commandBar, "SETTINGS", companyId, userId);
             parent.Controls.Add(commandBar);
         }
 

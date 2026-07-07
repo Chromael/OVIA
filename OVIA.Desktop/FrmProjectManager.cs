@@ -58,7 +58,7 @@ namespace OVIA.Desktop
 
             OviaFluentTheme.ApplyForm(this);
 
-            this.Text = "OVIA 공사관리";
+            this.Text = "OVIA 공사목록";
             this.Font = OviaFluentTheme.FontKorean(10F, FontStyle.Regular);
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.Sizable;
@@ -200,7 +200,7 @@ namespace OVIA.Desktop
 
         private void BuildHeader(Control parent)
         {
-            BuildExplorerHeader(parent, "메인  ›  공사관리");
+            BuildExplorerHeader(parent, "메인  ›  공사관리  ›  공사목록");
         }
 
         private void BuildExplorerHeader(Control parent, string pathText)
@@ -714,7 +714,7 @@ namespace OVIA.Desktop
             commandBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             commandBar.BackColor = Color.White;
             commandBar.Paint += CommandBar_Paint;
-            OviaWorkspaceCommandBar.Populate(commandBar, "PROJECT");
+            OviaWorkspaceCommandBar.Populate(commandBar, "PROJECT", companyId, userId);
             parent.Controls.Add(commandBar);
         }
 

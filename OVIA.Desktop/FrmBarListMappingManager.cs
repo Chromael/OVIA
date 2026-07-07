@@ -20,6 +20,10 @@ namespace OVIA.Desktop
 
         private DataGridView grid;
         private Label lblStatus;
+        private Button btnAddColumn;
+        private Button btnClearCell;
+        private Button btnReset;
+        private Button btnClose;
         private Button btnSave;
         private ToolTip windowToolTip;
         private ContextMenuStrip columnMenu;
@@ -88,12 +92,12 @@ namespace OVIA.Desktop
             windowToolTip.ReshowDelay = 100;
             windowToolTip.ShowAlways = true;
 
-            BuildExplorerHeader(this, "메인  ›  환경설정  ›  BarList 항목 매핑");
+            BuildExplorerHeader(this, "메인  ›  시스템관리  ›  BarList 항목 매핑");
             BuildCommandBar(this);
 
             grid = new DataGridView();
-            grid.Location = new Point(32, 124);
-            grid.Size = new Size(1116, 430);
+            grid.Location = new Point(0, 104);
+            grid.Size = new Size(1180, 430);
             grid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             grid.AllowUserToAddRows = false;
             grid.AllowUserToDeleteRows = false;
@@ -138,22 +142,22 @@ namespace OVIA.Desktop
             const int leftMargin = 32;
             const int rightMargin = 32;
 
-            Button btnAddColumn = CreateButton("매핑 열 추가", leftMargin, buttonTop);
+            btnAddColumn = CreateButton("매핑 열 추가", 0, buttonTop);
             btnAddColumn.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             btnAddColumn.Click += AddAliasColumn_Click;
             this.Controls.Add(btnAddColumn);
 
-            Button btnClearCell = CreateButton("선택 셀 비우기", btnAddColumn.Right + buttonGap, buttonTop);
+            btnClearCell = CreateButton("선택 셀 비우기", btnAddColumn.Right + buttonGap, buttonTop);
             btnClearCell.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             btnClearCell.Click += ClearSelectedCell_Click;
             this.Controls.Add(btnClearCell);
 
-            Button btnReset = CreateButton("기본값 복원", btnClearCell.Right + buttonGap, buttonTop);
+            btnReset = CreateButton("기본값 복원", btnClearCell.Right + buttonGap, buttonTop);
             btnReset.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             btnReset.Click += ResetDefault_Click;
             this.Controls.Add(btnReset);
 
-            Button btnClose = CreateButton("닫기", this.ClientSize.Width - rightMargin - OviaFluentTheme.MeasureButtonWidth("닫기"), buttonTop);
+            btnClose = CreateButton("닫기", this.ClientSize.Width - rightMargin - OviaFluentTheme.MeasureButtonWidth("닫기"), buttonTop);
             btnClose.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             btnClose.Click += delegate { this.Close(); };
             this.Controls.Add(btnClose);
@@ -168,12 +172,12 @@ namespace OVIA.Desktop
             lblStatus = new Label();
             lblStatus.Text = "매핑 설정을 불러오는 중입니다.";
             lblStatus.AutoSize = false;
-            lblStatus.Size = new Size(1116, 40);
+            lblStatus.Size = new Size(1180, 28);
             lblStatus.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             lblStatus.Font = OviaFluentTheme.FontStatus(8.7F, FontStyle.Regular);
             lblStatus.ForeColor = TextSub;
             lblStatus.BackColor = SurfaceColor;
-            lblStatus.Location = new Point(32, 654);
+            lblStatus.Location = new Point(0, 692);
             this.Controls.Add(lblStatus);
 
             this.ResumeLayout(false);
@@ -181,15 +185,36 @@ namespace OVIA.Desktop
 
         public void ApplyWorkspaceLayout()
         {
+            const int contentTop = 104;
+            const int contentInset = 25;
+            const int statusHeight = 28;
+            const int bottomButtonGap = 30;
+            const int buttonGap = 10;
+            const int rightMargin = 25;
+
+            int width = Math.Max(1, this.ClientSize.Width);
+            int statusTop = Math.Max(contentTop + 260, this.ClientSize.Height - statusHeight);
+            int buttonY = Math.Max(contentTop + 220, statusTop - bottomButtonGap - OviaFluentTheme.ButtonHeight);
+
             if (grid != null)
             {
-                grid.Width = Math.Max(1, this.ClientSize.Width - 64);
-                grid.Height = Math.Max(160, this.ClientSize.Height - 260);
+                grid.Location = new Point(contentInset, contentTop + contentInset);
+                grid.Width = Math.Max(1, width - contentInset);
+                grid.Height = Math.Max(160, buttonY - grid.Top - contentInset);
             }
+
+            if (btnAddColumn != null) btnAddColumn.Location = new Point(contentInset, buttonY);
+            if (btnClearCell != null && btnAddColumn != null) btnClearCell.Location = new Point(btnAddColumn.Right + buttonGap, buttonY);
+            if (btnReset != null && btnClearCell != null) btnReset.Location = new Point(btnClearCell.Right + buttonGap, buttonY);
+            if (btnClose != null) btnClose.Location = new Point(Math.Max(0, this.ClientSize.Width - rightMargin - btnClose.Width), buttonY);
+            if (btnSave != null && btnClose != null) btnSave.Location = new Point(Math.Max(0, btnClose.Left - buttonGap - btnSave.Width), buttonY);
 
             if (lblStatus != null)
             {
-                lblStatus.Width = Math.Max(1, this.ClientSize.Width - 64);
+                lblStatus.Location = new Point(0, statusTop);
+                lblStatus.Size = new Size(width, statusHeight);
+                lblStatus.TextAlign = ContentAlignment.MiddleLeft;
+                lblStatus.Padding = new Padding(16, 0, 0, 0);
             }
         }
 
@@ -242,7 +267,7 @@ namespace OVIA.Desktop
             commandBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             commandBar.BackColor = Color.White;
             commandBar.Paint += CommandBar_Paint;
-            OviaWorkspaceCommandBar.Populate(commandBar, "SETTINGS");
+            OviaWorkspaceCommandBar.Populate(commandBar, "SETTINGS", companyId, userId);
             parent.Controls.Add(commandBar);
         }
 
@@ -275,10 +300,10 @@ namespace OVIA.Desktop
             breadcrumb.Size = new Size(880, 22);
             breadcrumb.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             breadcrumb.Links.Add(0, "메인".Length, "MAIN");
-            int settingsStart = breadcrumb.Text.IndexOf("환경설정");
+            int settingsStart = breadcrumb.Text.IndexOf("시스템관리");
             if (settingsStart >= 0)
             {
-                breadcrumb.Links.Add(settingsStart, "환경설정".Length, "SETTINGS");
+                breadcrumb.Links.Add(settingsStart, "시스템관리".Length, "SETTINGS");
             }
             breadcrumb.LinkClicked += Breadcrumb_LinkClicked;
             breadcrumb.MouseClick += delegate(object sender, MouseEventArgs e)
@@ -710,7 +735,7 @@ namespace OVIA.Desktop
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information
                 );
-                OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 항목 매핑 저장", "메인  ›  환경설정  ›  BarList 항목 매핑");
+                OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 항목 매핑 저장", "메인  ›  시스템관리  ›  BarList 항목 매핑");
             }
             catch (Exception ex)
             {
@@ -1106,7 +1131,7 @@ namespace OVIA.Desktop
             UpdateSaveButtonVisibility();
             lblStatus.Text = "선택한 매핑 열 전체를 삭제했습니다. 저장하기 전까지 실제 설정에는 반영되지 않습니다.";
             lblStatus.ForeColor = TextSub;
-            OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 매핑 열 삭제", "메인  ›  환경설정  ›  BarList 항목 매핑");
+            OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 매핑 열 삭제", "메인  ›  시스템관리  ›  BarList 항목 매핑");
         }
 
         private bool IsAliasColumn(int columnIndex)
@@ -1158,7 +1183,7 @@ namespace OVIA.Desktop
 
             lblStatus.Text = "선택한 매핑 셀의 내용을 삭제했습니다.";
             lblStatus.ForeColor = TextSub;
-            OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 매핑 셀 삭제", "메인  ›  환경설정  ›  BarList 항목 매핑");
+            OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 매핑 셀 삭제", "메인  ›  시스템관리  ›  BarList 항목 매핑");
         }
 
         private void ShiftAliasCellsLeft(int rowIndex, int columnIndex)

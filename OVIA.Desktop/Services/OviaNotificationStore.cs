@@ -80,7 +80,7 @@ namespace OVIA.Desktop
             lock (syncRoot)
             {
                 List<OviaNotificationEntry> entries = LoadAllInternal(true);
-                bool isAdmin = OviaSystemSettingsStore.IsSuperAdminUser(userId);
+                bool isAdmin = OviaSystemSettingsStore.IsSystemAdministrator(companyId, userId);
                 string currentCompany = Safe(companyId);
                 string currentUser = Safe(userId);
                 List<OviaNotificationEntry> result = new List<OviaNotificationEntry>();

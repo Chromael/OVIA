@@ -58,7 +58,7 @@ namespace OVIA.Desktop
         {
             this.companyId = companyId == null ? "" : companyId;
             this.userId = userId == null ? "" : userId;
-            this.canEdit = OviaRebarUnitWeightStore.IsSuperAdminUser(this.userId);
+            this.canEdit = OviaSystemSettingsStore.IsSystemAdministrator(this.companyId, this.userId);
 
             BuildUI();
             LoadRowsToGrid(OviaRebarUnitWeightStore.LoadRows());
@@ -97,7 +97,7 @@ namespace OVIA.Desktop
         {
             OviaWorkspaceHeader.AddTo(
                 parent,
-                "메인  ›  환경설정  ›  이형철근 단위중량표",
+                "메인  ›  시스템관리  ›  이형철근 단위중량표",
                 delegate { this.Close(); },
                 delegate { this.Close(); },
                 delegate { LoadRowsToGrid(OviaRebarUnitWeightStore.LoadRows()); },
@@ -130,7 +130,7 @@ namespace OVIA.Desktop
             commandBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             commandBar.BackColor = Color.White;
             commandBar.Paint += CommandBar_Paint;
-            OviaWorkspaceCommandBar.Populate(commandBar, "SETTINGS");
+            OviaWorkspaceCommandBar.Populate(commandBar, "SETTINGS", companyId, userId);
             parent.Controls.Add(commandBar);
         }
 
@@ -201,8 +201,8 @@ namespace OVIA.Desktop
         private void BuildGrid(Control parent)
         {
             grid = new DataGridView();
-            grid.Location = new Point(32, 124);
-            grid.Size = new Size(1216, 492);
+            grid.Location = new Point(0, 104);
+            grid.Size = new Size(1280, 492);
             grid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             grid.AllowUserToAddRows = false;
             grid.AllowUserToDeleteRows = false;
@@ -322,12 +322,12 @@ namespace OVIA.Desktop
         {
             lblStatus = new Label();
             lblStatus.AutoSize = false;
-            lblStatus.Size = new Size(1216, 44);
+            lblStatus.Size = new Size(1280, 28);
             lblStatus.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             lblStatus.Font = OviaFluentTheme.FontStatus(8.7F, FontStyle.Regular);
             lblStatus.ForeColor = TextSub;
             lblStatus.BackColor = SurfaceColor;
-            lblStatus.Location = new Point(32, 696);
+            lblStatus.Location = new Point(0, 732);
             parent.Controls.Add(lblStatus);
         }
 
@@ -1059,7 +1059,7 @@ namespace OVIA.Desktop
             selectedSpecStartRow = -1;
             MarkDirtyIfChanged();
             UpdateStatus("선택한 규격이 삭제되었습니다. 저장하기를 눌러 반영하세요.");
-            OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량 규격 삭제", "메인  ›  환경설정  ›  이형철근 단위중량표");
+            OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량 규격 삭제", "메인  ›  시스템관리  ›  이형철근 단위중량표");
         }
 
         private void Reset_Click(object sender, EventArgs e)
@@ -1129,7 +1129,7 @@ namespace OVIA.Desktop
                 cleanSignature = BuildGridSignature();
                 isDirty = false;
                 UpdateStatus("이형철근 단위중량표 저장 완료. 이후 BarList 계산 기준에 반영됩니다.");
-                OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량표 저장", "메인  ›  환경설정  ›  이형철근 단위중량표");
+                OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량표 저장", "메인  ›  시스템관리  ›  이형철근 단위중량표");
             }
             catch (Exception ex)
             {
@@ -1346,11 +1346,21 @@ namespace OVIA.Desktop
 
         public void ApplyWorkspaceLayout()
         {
-            int width = Math.Max(1, this.ClientSize.Width - 64);
+            const int contentTop = 104;
+            const int contentInset = 25;
+            const int statusHeight = 28;
+            const int bottomButtonGap = 30;
+            const int buttonGap = 10;
+            const int rightMargin = 25;
+
+            int width = Math.Max(1, this.ClientSize.Width);
+            int statusTop = Math.Max(contentTop + 280, this.ClientSize.Height - statusHeight);
+            int buttonY = Math.Max(contentTop + 220, statusTop - bottomButtonGap - OviaFluentTheme.ButtonHeight);
 
             if (tableHeaderPanel != null)
             {
-                tableHeaderPanel.Width = width;
+                tableHeaderPanel.Location = new Point(contentInset, contentTop + contentInset);
+                tableHeaderPanel.Width = Math.Max(1, width - contentInset);
             }
 
             if (tableBasisLabel != null && tableHeaderPanel != null)
@@ -1361,29 +1371,38 @@ namespace OVIA.Desktop
 
             if (grid != null)
             {
-                grid.Width = width;
-                grid.Height = Math.Max(220, this.ClientSize.Height - 268);
+                grid.Location = new Point(contentInset, contentTop + contentInset);
+                grid.Width = Math.Max(1, width - contentInset);
+                grid.Height = Math.Max(220, buttonY - grid.Top - contentInset);
             }
 
-            int buttonY = Math.Max(0, this.ClientSize.Height - 118);
-            if (btnAdd != null) btnAdd.Top = buttonY;
-            if (btnDelete != null) btnDelete.Top = buttonY;
-            if (btnReset != null) btnReset.Top = buttonY;
-            if (btnSave != null)
+            if (btnAdd != null)
             {
-                btnSave.Top = buttonY;
-                btnSave.Left = Math.Max(32, this.ClientSize.Width - 280);
+                btnAdd.Location = new Point(contentInset, buttonY);
+            }
+            if (btnDelete != null && btnAdd != null)
+            {
+                btnDelete.Location = new Point(btnAdd.Right + buttonGap, buttonY);
+            }
+            if (btnReset != null && btnDelete != null)
+            {
+                btnReset.Location = new Point(btnDelete.Right + buttonGap, buttonY);
             }
             if (btnClose != null)
             {
-                btnClose.Top = buttonY;
-                btnClose.Left = Math.Max(32, this.ClientSize.Width - 144);
+                btnClose.Location = new Point(Math.Max(0, this.ClientSize.Width - rightMargin - btnClose.Width), buttonY);
+            }
+            if (btnSave != null && btnClose != null)
+            {
+                btnSave.Location = new Point(Math.Max(0, btnClose.Left - buttonGap - btnSave.Width), buttonY);
             }
 
             if (lblStatus != null)
             {
-                lblStatus.Width = width;
-                lblStatus.Top = Math.Max(0, this.ClientSize.Height - 64);
+                lblStatus.Location = new Point(0, statusTop);
+                lblStatus.Size = new Size(width, statusHeight);
+                lblStatus.TextAlign = ContentAlignment.MiddleLeft;
+                lblStatus.Padding = new Padding(16, 0, 0, 0);
             }
         }
 
