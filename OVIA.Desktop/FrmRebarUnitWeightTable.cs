@@ -22,6 +22,8 @@ namespace OVIA.Desktop
         private readonly Color HeaderBack = Color.White;
         private readonly Color HeaderBorder = OviaFluentTheme.CardBorder;
 
+        private Panel contentScrollPanel;
+        private Panel bottomButtonPanel;
         private Panel tableHeaderPanel;
         private Label tableTitleLabel;
         private Label tableBasisLabel;
@@ -36,6 +38,10 @@ namespace OVIA.Desktop
         private bool isLoading = false;
         private bool suppressDirtyEvent = false;
         private string cleanSignature = "";
+
+        private bool isApplyingGridLayout = false;
+        private bool isApplyingWorkspaceBounds = false;
+        private readonly Dictionary<string, int> userColumnWidths = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
 
         public string WorkspaceHelpKey { get { return "REBAR_UNIT_WEIGHT"; } }
@@ -78,10 +84,11 @@ namespace OVIA.Desktop
             this.MinimizeBox = true;
             this.MaximizeBox = true;
             this.ClientSize = new Size(1280, 760);
-            this.MinimumSize = new Size(1060, 640);
+            this.MinimumSize = Size.Empty;
             this.BackColor = SurfaceColor;
             this.AutoValidate = AutoValidate.Disable;
             this.FormClosing += FrmRebarUnitWeightTable_FormClosing;
+            Resize += WorkspaceContent_Resize;
 
             BuildExplorerHeader(this);
             BuildCommandBar(this);
@@ -93,11 +100,38 @@ namespace OVIA.Desktop
             ApplyWorkspaceLayout();
         }
 
+
+        private void Grid_ForwardMouseWheelToContentScrollPanel(object sender, MouseEventArgs e)
+        {
+            ScrollContentPanelByMouseWheel(e);
+        }
+
+        private void ScrollContentPanelByMouseWheel(MouseEventArgs e)
+        {
+            if (contentScrollPanel == null || e == null)
+            {
+                return;
+            }
+
+            int currentX = -contentScrollPanel.AutoScrollPosition.X;
+            int currentY = contentScrollPanel.VerticalScroll.Value;
+            int wheelLines = SystemInformation.MouseWheelScrollLines <= 0 ? 3 : SystemInformation.MouseWheelScrollLines;
+            int rowStep = grid == null ? 24 : Math.Max(18, grid.RowTemplate.Height);
+            int step = Math.Max(24, wheelLines * rowStep);
+            int maxY = Math.Max(0, contentScrollPanel.VerticalScroll.Maximum - contentScrollPanel.ClientSize.Height);
+            int nextY = e.Delta > 0 ? currentY - step : currentY + step;
+
+            if (nextY < 0) nextY = 0;
+            if (nextY > maxY) nextY = maxY;
+
+            contentScrollPanel.AutoScrollPosition = new Point(currentX, nextY);
+        }
+
         private void BuildExplorerHeader(Control parent)
         {
             OviaWorkspaceHeader.AddTo(
                 parent,
-                "메인  ›  시스템관리  ›  이형철근 단위중량표",
+                OviaMenuHelpStore.GetWorkspacePath("REBAR_UNIT_WEIGHT", "메인  ›  환경설정  ›  이형철근 단위중량표"),
                 delegate { this.Close(); },
                 delegate { this.Close(); },
                 delegate { LoadRowsToGrid(OviaRebarUnitWeightStore.LoadRows()); },
@@ -200,10 +234,23 @@ namespace OVIA.Desktop
 
         private void BuildGrid(Control parent)
         {
+            contentScrollPanel = new Panel();
+            contentScrollPanel.Location = new Point(0, 98);
+            contentScrollPanel.Size = new Size(1280, 492);
+            contentScrollPanel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+            contentScrollPanel.BackColor = SurfaceColor;
+            contentScrollPanel.Margin = Padding.Empty;
+            contentScrollPanel.Padding = Padding.Empty;
+            contentScrollPanel.AutoScrollMargin = Size.Empty;
+            contentScrollPanel.AutoScroll = false;
+            parent.Controls.Add(contentScrollPanel);
+
             grid = new DataGridView();
-            grid.Location = new Point(0, 104);
+            grid.Location = Point.Empty;
             grid.Size = new Size(1280, 492);
-            grid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            grid.Anchor = AnchorStyles.None;
+            grid.Dock = DockStyle.Fill;
+            grid.ScrollBars = ScrollBars.Both;
             grid.AllowUserToAddRows = false;
             grid.AllowUserToDeleteRows = false;
             grid.MultiSelect = true;
@@ -212,7 +259,7 @@ namespace OVIA.Desktop
             grid.GridColor = Color.FromArgb(229, 234, 240);
             grid.EditMode = canEdit ? DataGridViewEditMode.EditOnKeystrokeOrF2 : DataGridViewEditMode.EditProgrammatically;
             grid.RowHeadersVisible = false;
-            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
             grid.BackgroundColor = Color.White;
             grid.BorderStyle = BorderStyle.FixedSingle;
             grid.EnableHeadersVisualStyles = false;
@@ -227,6 +274,9 @@ namespace OVIA.Desktop
             grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(255, 248, 205);
             grid.DefaultCellStyle.SelectionForeColor = TextDark;
             grid.RowTemplate.Height = 32;
+            grid.AllowUserToResizeColumns = true;
+            grid.AllowUserToResizeRows = true;
+            grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
             grid.CellBeginEdit += Grid_CellBeginEdit;
             grid.CellEndEdit += Grid_CellEndEdit;
             grid.CellValueChanged += Grid_CellValueChanged;
@@ -238,8 +288,13 @@ namespace OVIA.Desktop
             grid.KeyDown += Grid_KeyDown;
             grid.EditingControlShowing += Grid_EditingControlShowing;
             grid.DataError += Grid_DataError;
+            grid.ColumnWidthChanged += Grid_ColumnWidthChanged;
+            grid.RowHeightChanged += Grid_RowHeightChanged;
+            grid.RowsAdded += Grid_RowsAdded;
+            grid.RowsRemoved += Grid_RowsRemoved;
+            // DataGridView 자체 세로 스크롤을 사용한다. 외부 Panel AutoScroll 전달은 가로/세로 중복 스크롤의 원인이므로 사용하지 않는다.
             OviaFluentTheme.ApplyDataGrid(grid);
-            parent.Controls.Add(grid);
+            contentScrollPanel.Controls.Add(grid);
 
             BuildGridColumns();
         }
@@ -272,6 +327,9 @@ namespace OVIA.Desktop
             DataGridViewTextBoxColumn col = new DataGridViewTextBoxColumn();
             col.Name = name;
             col.HeaderText = headerText;
+            col.Width = Math.Max(minWidth, (int)Math.Round(fillWeight));
+            col.Tag = col.Width;
+            col.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
             col.FillWeight = fillWeight;
             col.MinimumWidth = minWidth;
             col.SortMode = DataGridViewColumnSortMode.NotSortable;
@@ -281,41 +339,51 @@ namespace OVIA.Desktop
 
         private void BuildButtons(Control parent)
         {
-            const int buttonTop = 642;
+            int buttonTop = 0;
+            int initialButtonPanelHeight = Math.Max(1, Math.Min(50, OviaFluentTheme.ButtonHeight));
             const int buttonGap = 10;
-            const int leftMargin = 32;
-            const int rightMargin = 32;
+            const int leftMargin = 25;
+            const int rightMargin = 25;
+
+            bottomButtonPanel = new Panel();
+            bottomButtonPanel.Location = new Point(0, 642);
+            bottomButtonPanel.Size = new Size(1280, initialButtonPanelHeight);
+            bottomButtonPanel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            bottomButtonPanel.BackColor = SurfaceColor;
+            bottomButtonPanel.Margin = Padding.Empty;
+            bottomButtonPanel.Padding = Padding.Empty;
+            parent.Controls.Add(bottomButtonPanel);
 
             btnAdd = CreateButton("규격 추가", leftMargin, buttonTop);
-            btnAdd.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
+            btnAdd.Anchor = AnchorStyles.Top | AnchorStyles.Left;
             btnAdd.Enabled = canEdit;
             btnAdd.Click += Add_Click;
-            parent.Controls.Add(btnAdd);
+            bottomButtonPanel.Controls.Add(btnAdd);
 
             btnDelete = CreateButton("선택 규격 삭제", btnAdd.Right + buttonGap, buttonTop);
-            btnDelete.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
+            btnDelete.Anchor = AnchorStyles.Top | AnchorStyles.Left;
             btnDelete.Enabled = canEdit;
             btnDelete.Click += Delete_Click;
-            parent.Controls.Add(btnDelete);
+            bottomButtonPanel.Controls.Add(btnDelete);
 
             btnReset = CreateButton("기본값 복원", btnDelete.Right + buttonGap, buttonTop);
-            btnReset.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
+            btnReset.Anchor = AnchorStyles.Top | AnchorStyles.Left;
             btnReset.Enabled = canEdit;
             btnReset.Click += Reset_Click;
-            parent.Controls.Add(btnReset);
+            bottomButtonPanel.Controls.Add(btnReset);
 
             btnClose = CreateButton("닫기", this.ClientSize.Width - rightMargin - OviaFluentTheme.MeasureButtonWidth("닫기"), buttonTop);
-            btnClose.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            btnClose.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnClose.CausesValidation = false;
             btnClose.Click += delegate { this.Close(); };
-            parent.Controls.Add(btnClose);
+            bottomButtonPanel.Controls.Add(btnClose);
 
             btnSave = CreateButton("저장하기", btnClose.Left - buttonGap - OviaFluentTheme.MeasureButtonWidth("저장하기"), buttonTop);
-            btnSave.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            btnSave.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnSave.Enabled = false;
             btnSave.Visible = false;
             btnSave.Click += Save_Click;
-            parent.Controls.Add(btnSave);
+            bottomButtonPanel.Controls.Add(btnSave);
         }
 
         private void BuildStatus(Control parent)
@@ -323,10 +391,11 @@ namespace OVIA.Desktop
             lblStatus = new Label();
             lblStatus.AutoSize = false;
             lblStatus.Size = new Size(1280, 28);
-            lblStatus.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+            lblStatus.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             lblStatus.Font = OviaFluentTheme.FontStatus(8.7F, FontStyle.Regular);
             lblStatus.ForeColor = TextSub;
             lblStatus.BackColor = SurfaceColor;
+            lblStatus.Visible = false;
             lblStatus.Location = new Point(0, 732);
             parent.Controls.Add(lblStatus);
         }
@@ -378,6 +447,7 @@ namespace OVIA.Desktop
             UpdateSaveButtonVisibility();
             suppressDirtyEvent = false;
             UpdateStatus(canEdit ? "이형철근 단위중량표를 불러왔습니다. 최고관리자는 규격/단위무게만 수정할 수 있으며 조견표 값은 자동 계산됩니다." : "이형철근 단위중량표 보기 전용입니다. 최고관리자만 수정할 수 있습니다.");
+            ApplyWorkspaceLayout();
         }
 
         private void RunAfterHandleReady(MethodInvoker action)
@@ -1059,7 +1129,7 @@ namespace OVIA.Desktop
             selectedSpecStartRow = -1;
             MarkDirtyIfChanged();
             UpdateStatus("선택한 규격이 삭제되었습니다. 저장하기를 눌러 반영하세요.");
-            OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량 규격 삭제", "메인  ›  시스템관리  ›  이형철근 단위중량표");
+            OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량 규격 삭제", OviaMenuHelpStore.GetWorkspacePath("REBAR_UNIT_WEIGHT", "메인  ›  환경설정  ›  이형철근 단위중량표"));
         }
 
         private void Reset_Click(object sender, EventArgs e)
@@ -1129,7 +1199,7 @@ namespace OVIA.Desktop
                 cleanSignature = BuildGridSignature();
                 isDirty = false;
                 UpdateStatus("이형철근 단위중량표 저장 완료. 이후 BarList 계산 기준에 반영됩니다.");
-                OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량표 저장", "메인  ›  시스템관리  ›  이형철근 단위중량표");
+                OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량표 저장", OviaMenuHelpStore.GetWorkspacePath("REBAR_UNIT_WEIGHT", "메인  ›  환경설정  ›  이형철근 단위중량표"));
             }
             catch (Exception ex)
             {
@@ -1344,66 +1414,421 @@ namespace OVIA.Desktop
             return "이형철근 단위중량표";
         }
 
+        private void WorkspaceContent_Resize(object sender, EventArgs e)
+        {
+            ApplyWorkspaceLayout();
+        }
+
+
+        private Size GetWorkspaceClientSize()
+        {
+            Control parent = this.Parent;
+
+            if (parent != null && !parent.IsDisposed)
+            {
+                Rectangle parentBounds = parent.ClientRectangle;
+
+                if (parentBounds.Width > 0 && parentBounds.Height > 0)
+                {
+                    if (this.Dock != DockStyle.Fill)
+                    {
+                        this.Dock = DockStyle.Fill;
+                    }
+
+                    if (!isApplyingWorkspaceBounds && (this.Location != Point.Empty || this.Size != parentBounds.Size))
+                    {
+                        try
+                        {
+                            isApplyingWorkspaceBounds = true;
+                            this.Location = Point.Empty;
+                            this.Size = parentBounds.Size;
+                        }
+                        finally
+                        {
+                            isApplyingWorkspaceBounds = false;
+                        }
+                    }
+
+                    return parentBounds.Size;
+                }
+            }
+
+            return this.ClientSize;
+        }
+
         public void ApplyWorkspaceLayout()
         {
-            const int contentTop = 104;
-            const int contentInset = 25;
-            const int statusHeight = 28;
-            const int bottomButtonGap = 30;
+            const int menuBottom = 98;
+            const int fixedAreaGap = 12;
+            const int contentHorizontalInset = 25;
+            const int fixedAreaMaxHeight = 50;
             const int buttonGap = 10;
             const int rightMargin = 25;
 
-            int width = Math.Max(1, this.ClientSize.Width);
-            int statusTop = Math.Max(contentTop + 280, this.ClientSize.Height - statusHeight);
-            int buttonY = Math.Max(contentTop + 220, statusTop - bottomButtonGap - OviaFluentTheme.ButtonHeight);
+            Size layoutSize = GetWorkspaceClientSize();
+            int width = Math.Max(1, layoutSize.Width);
+            int height = Math.Max(1, layoutSize.Height);
+            int buttonVisualHeight = btnAdd == null ? OviaFluentTheme.ButtonHeight : btnAdd.Height;
+            int fixedAreaTop = menuBottom + fixedAreaGap;
+            int fixedAreaHeight = Math.Max(1, Math.Min(fixedAreaMaxHeight, buttonVisualHeight));
+            int scrollTop = fixedAreaTop + fixedAreaHeight + fixedAreaGap;
+
+            if (scrollTop >= height)
+            {
+                scrollTop = Math.Max(menuBottom, height - 1);
+            }
+
+            int contentHeight = Math.Max(1, height - scrollTop);
+            int buttonTopInPanel = 0;
+
+            if (bottomButtonPanel != null)
+            {
+                bottomButtonPanel.Location = new Point(0, fixedAreaTop);
+                bottomButtonPanel.Size = new Size(width, fixedAreaHeight);
+                bottomButtonPanel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+                bottomButtonPanel.Margin = Padding.Empty;
+                bottomButtonPanel.Padding = Padding.Empty;
+                bottomButtonPanel.Visible = true;
+                bottomButtonPanel.BringToFront();
+            }
 
             if (tableHeaderPanel != null)
             {
-                tableHeaderPanel.Location = new Point(contentInset, contentTop + contentInset);
-                tableHeaderPanel.Width = Math.Max(1, width - contentInset);
+                tableHeaderPanel.Visible = false;
             }
 
-            if (tableBasisLabel != null && tableHeaderPanel != null)
+            if (contentScrollPanel != null)
             {
-                tableBasisLabel.Left = Math.Max(430, tableHeaderPanel.Width - 570);
-                tableBasisLabel.Width = 560;
+                contentScrollPanel.SuspendLayout();
+                contentScrollPanel.AutoScroll = false;
+                contentScrollPanel.AutoScrollMinSize = Size.Empty;
+                contentScrollPanel.Location = new Point(0, scrollTop);
+                contentScrollPanel.Size = new Size(width, contentHeight);
+                contentScrollPanel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+                contentScrollPanel.Padding = Padding.Empty;
+                contentScrollPanel.Margin = Padding.Empty;
             }
 
             if (grid != null)
             {
-                grid.Location = new Point(contentInset, contentTop + contentInset);
-                grid.Width = Math.Max(1, width - contentInset);
-                grid.Height = Math.Max(220, buttonY - grid.Top - contentInset);
+                grid.SuspendLayout();
+                grid.Dock = DockStyle.Fill;
+                grid.Location = Point.Empty;
+                grid.Size = contentScrollPanel == null ? new Size(width, contentHeight) : contentScrollPanel.ClientSize;
+                grid.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+                grid.Margin = Padding.Empty;
+                grid.ScrollBars = ScrollBars.Both;
+                grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+                FitGridColumnsToContentFrame();
+                grid.ResumeLayout(false);
             }
 
-            if (btnAdd != null)
+            if (contentScrollPanel != null)
             {
-                btnAdd.Location = new Point(contentInset, buttonY);
+                contentScrollPanel.ResumeLayout(false);
             }
-            if (btnDelete != null && btnAdd != null)
-            {
-                btnDelete.Location = new Point(btnAdd.Right + buttonGap, buttonY);
-            }
-            if (btnReset != null && btnDelete != null)
-            {
-                btnReset.Location = new Point(btnDelete.Right + buttonGap, buttonY);
-            }
+
+            if (btnAdd != null) btnAdd.Location = new Point(contentHorizontalInset, buttonTopInPanel);
+            if (btnDelete != null && btnAdd != null) btnDelete.Location = new Point(btnAdd.Right + buttonGap, buttonTopInPanel);
+            if (btnReset != null && btnDelete != null) btnReset.Location = new Point(btnDelete.Right + buttonGap, buttonTopInPanel);
+
             if (btnClose != null)
             {
-                btnClose.Location = new Point(Math.Max(0, this.ClientSize.Width - rightMargin - btnClose.Width), buttonY);
+                int panelWidth = bottomButtonPanel == null ? width : Math.Max(1, bottomButtonPanel.ClientSize.Width);
+                btnClose.Location = new Point(Math.Max(0, panelWidth - rightMargin - btnClose.Width), buttonTopInPanel);
             }
             if (btnSave != null && btnClose != null)
             {
-                btnSave.Location = new Point(Math.Max(0, btnClose.Left - buttonGap - btnSave.Width), buttonY);
+                btnSave.Location = new Point(Math.Max(0, btnClose.Left - buttonGap - btnSave.Width), buttonTopInPanel);
             }
 
             if (lblStatus != null)
             {
-                lblStatus.Location = new Point(0, statusTop);
-                lblStatus.Size = new Size(width, statusHeight);
+                lblStatus.Visible = false;
+                lblStatus.Location = new Point(0, height);
+                lblStatus.Size = new Size(width, 0);
                 lblStatus.TextAlign = ContentAlignment.MiddleLeft;
-                lblStatus.Padding = new Padding(16, 0, 0, 0);
+                lblStatus.Padding = Padding.Empty;
+                lblStatus.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             }
+        }
+
+        private string GetGridColumnKey(DataGridViewColumn column)
+        {
+            if (column == null)
+            {
+                return string.Empty;
+            }
+
+            if (!string.IsNullOrEmpty(column.Name))
+            {
+                return column.Name;
+            }
+
+            return column.Index.ToString();
+        }
+
+        private int MeasureGridTextWidth(string text, Font font)
+        {
+            string value = string.IsNullOrEmpty(text) ? " " : text;
+            Font useFont = font == null ? this.Font : font;
+            try
+            {
+                return TextRenderer.MeasureText(value, useFont, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding).Width;
+            }
+            catch
+            {
+                return Math.Max(24, value.Length * 9);
+            }
+        }
+
+        private int GetGridColumnBaseWidth(DataGridViewColumn column)
+        {
+            if (column == null)
+            {
+                return 1;
+            }
+
+            string key = GetGridColumnKey(column);
+            int manualWidth;
+            if (!string.IsNullOrEmpty(key) && userColumnWidths.TryGetValue(key, out manualWidth))
+            {
+                return Math.Max(column.MinimumWidth, manualWidth);
+            }
+
+            int preferredWidth = Math.Max(1, column.MinimumWidth);
+            try
+            {
+                preferredWidth = Math.Max(preferredWidth, column.GetPreferredWidth(DataGridViewAutoSizeColumnMode.DisplayedCells, true));
+            }
+            catch
+            {
+            }
+
+            Font headerFont = grid == null ? this.Font : grid.ColumnHeadersDefaultCellStyle.Font;
+            if (headerFont == null && grid != null)
+            {
+                headerFont = grid.Font;
+            }
+
+            int headerWidth = MeasureGridTextWidth(column.HeaderText, headerFont) + 28;
+            return Math.Max(column.MinimumWidth, Math.Max(preferredWidth, headerWidth));
+        }
+
+        private int GetVisibleGridRowsHeight()
+        {
+            if (grid == null)
+            {
+                return 0;
+            }
+
+            int totalHeight = grid.ColumnHeadersVisible ? grid.ColumnHeadersHeight : 0;
+            try
+            {
+                totalHeight += grid.Rows.GetRowsHeight(DataGridViewElementStates.Visible);
+            }
+            catch
+            {
+                int i;
+                for (i = 0; i < grid.Rows.Count; i++)
+                {
+                    if (grid.Rows[i].Visible)
+                    {
+                        totalHeight += grid.Rows[i].Height;
+                    }
+                }
+            }
+
+            return totalHeight;
+        }
+
+        private void FitGridColumnsToContentFrame()
+        {
+            if (grid == null || grid.Columns.Count == 0)
+            {
+                return;
+            }
+
+            bool previousApplying = isApplyingGridLayout;
+            isApplyingGridLayout = true;
+
+            try
+            {
+                if (contentScrollPanel != null && contentScrollPanel.ClientSize.Width > 0 && contentScrollPanel.ClientSize.Height > 0)
+                {
+                    contentScrollPanel.PerformLayout();
+                    Size frameSize = contentScrollPanel.ClientSize;
+                    if (grid.Size != frameSize)
+                    {
+                        grid.Size = frameSize;
+                    }
+                }
+
+                int frameWidth = contentScrollPanel == null ? grid.ClientSize.Width : contentScrollPanel.ClientSize.Width;
+                int frameHeight = contentScrollPanel == null ? grid.ClientSize.Height : contentScrollPanel.ClientSize.Height;
+                int visibleRowsHeight = GetVisibleGridRowsHeight();
+                int verticalScrollReserve = visibleRowsHeight > frameHeight ? SystemInformation.VerticalScrollBarWidth : 0;
+                int availableWidth = Math.Max(1, frameWidth - verticalScrollReserve - 2);
+                int totalBaseWidth = 0;
+                int visibleCount = 0;
+                int i;
+
+                for (i = 0; i < grid.Columns.Count; i++)
+                {
+                    DataGridViewColumn column = grid.Columns[i];
+                    if (column == null || !column.Visible)
+                    {
+                        continue;
+                    }
+
+                    totalBaseWidth += GetGridColumnBaseWidth(column);
+                    visibleCount++;
+                }
+
+                if (visibleCount == 0 || totalBaseWidth <= 0)
+                {
+                    return;
+                }
+
+                grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+                grid.ScrollBars = ScrollBars.Both;
+
+                int extraWidth = Math.Max(0, availableWidth - totalBaseWidth);
+                int remainingExtra = extraWidth;
+                DataGridViewColumn lastVisibleColumn = null;
+
+                for (i = 0; i < grid.Columns.Count; i++)
+                {
+                    DataGridViewColumn column = grid.Columns[i];
+                    if (column == null || !column.Visible)
+                    {
+                        continue;
+                    }
+
+                    int baseWidth = GetGridColumnBaseWidth(column);
+                    int newWidth = baseWidth;
+
+                    if (extraWidth > 0)
+                    {
+                        int addWidth = (int)Math.Floor((double)extraWidth * (double)baseWidth / (double)totalBaseWidth);
+                        newWidth += addWidth;
+                        remainingExtra -= addWidth;
+                    }
+
+                    column.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+                    column.Width = Math.Max(column.MinimumWidth, newWidth);
+                    lastVisibleColumn = column;
+                }
+
+                if (extraWidth > 0 && remainingExtra > 0 && lastVisibleColumn != null)
+                {
+                    lastVisibleColumn.Width = lastVisibleColumn.Width + remainingExtra;
+                }
+
+                grid.PerformLayout();
+                grid.Invalidate();
+            }
+            finally
+            {
+                isApplyingGridLayout = previousApplying;
+            }
+        }
+
+        private void RefreshGridScrollbarsAfterDimensionChange(bool refitColumns)
+        {
+            if (grid == null || grid.IsDisposed)
+            {
+                return;
+            }
+
+            if (refitColumns)
+            {
+                FitGridColumnsToContentFrame();
+            }
+
+            grid.ScrollBars = ScrollBars.None;
+            grid.ScrollBars = ScrollBars.Both;
+            grid.PerformLayout();
+            grid.Invalidate();
+
+            if (IsHandleCreated && !IsDisposed && !Disposing)
+            {
+                try
+                {
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        if (grid == null || grid.IsDisposed)
+                        {
+                            return;
+                        }
+
+                        if (refitColumns)
+                        {
+                            FitGridColumnsToContentFrame();
+                        }
+
+                        grid.ScrollBars = ScrollBars.None;
+                        grid.ScrollBars = ScrollBars.Both;
+                        grid.PerformLayout();
+                        grid.Invalidate();
+                    });
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private void Grid_ColumnWidthChanged(object sender, DataGridViewColumnEventArgs e)
+        {
+            if (isApplyingGridLayout || e == null || e.Column == null)
+            {
+                return;
+            }
+
+            string key = GetGridColumnKey(e.Column);
+            if (!string.IsNullOrEmpty(key))
+            {
+                userColumnWidths[key] = Math.Max(e.Column.MinimumWidth, e.Column.Width);
+            }
+
+            RefreshGridScrollbarsAfterDimensionChange(false);
+        }
+
+        private void Grid_RowHeightChanged(object sender, DataGridViewRowEventArgs e)
+        {
+            RefreshGridScrollbarsAfterDimensionChange(true);
+        }
+
+        private void Grid_RowsAdded(object sender, DataGridViewRowsAddedEventArgs e)
+        {
+            RefreshGridScrollbarsAfterDimensionChange(true);
+        }
+
+        private void Grid_RowsRemoved(object sender, DataGridViewRowsRemovedEventArgs e)
+        {
+            RefreshGridScrollbarsAfterDimensionChange(true);
+        }
+
+        private void ResetGridVerticalScrollToTop()
+        {
+            if (grid == null || grid.Rows.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                grid.FirstDisplayedScrollingRowIndex = 0;
+            }
+            catch
+            {
+            }
+        }
+
+        private int GetGridPreferredContentHeight(int minimumHeight)
+        {
+            return Math.Max(1, minimumHeight);
         }
 
         private void MarkDirtyIfChanged()

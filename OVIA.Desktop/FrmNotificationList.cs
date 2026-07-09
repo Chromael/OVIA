@@ -22,6 +22,7 @@ namespace OVIA.Desktop
         private Panel pagerPanel;
         private Button btnToggleSelectAll;
         private Button btnConfirmSelected;
+        private OviaContentLoadingOverlay contentLoadingOverlay;
         private List<OviaNotificationEntry> allEntries = new List<OviaNotificationEntry>();
         private int pageSize = 100;
         private int currentPage = 1;
@@ -66,9 +67,34 @@ namespace OVIA.Desktop
             BuildGrid(this);
             BuildPager(this);
             BuildStatus(this);
+            BuildContentLoadingOverlay();
 
             ResumeLayout(false);
             ApplyWorkspaceLayout();
+        }
+
+
+        private void BuildContentLoadingOverlay()
+        {
+            contentLoadingOverlay = new OviaContentLoadingOverlay();
+            this.Controls.Add(contentLoadingOverlay);
+            contentLoadingOverlay.BringToFront();
+        }
+
+        private void BeginContentLoading()
+        {
+            if (contentLoadingOverlay != null)
+            {
+                contentLoadingOverlay.BeginLoading();
+            }
+        }
+
+        private void EndContentLoading()
+        {
+            if (contentLoadingOverlay != null)
+            {
+                contentLoadingOverlay.EndLoading();
+            }
         }
 
         private void BuildExplorerHeader(Control parent)
@@ -296,7 +322,10 @@ namespace OVIA.Desktop
 
         private void LoadEntries()
         {
-            pageSize = OviaSystemSettingsStore.GetListPageSize();
+            BeginContentLoading();
+            try
+            {
+                pageSize = OviaSystemSettingsStore.GetListPageSize();
             allEntries = OviaNotificationStore.GetVisibleEntries(companyId, userId);
 
             int maxPage = GetMaxPage();
@@ -311,6 +340,11 @@ namespace OVIA.Desktop
 
             BindCurrentPage();
             RefreshOpenNotificationBadges();
+            }
+            finally
+            {
+                EndContentLoading();
+            }
         }
 
         private void BindCurrentPage()

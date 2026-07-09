@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.WinForms;
@@ -42,11 +43,102 @@ namespace OVIA.Desktop.Controls
         public int MaximumDocumentHeight { get; set; }
         public int LastDocumentHeight { get { return lastDocumentHeight; } }
         public event EventHandler<OviaWebViewDocumentHeightChangedEventArgs> DocumentHeightChanged;
+        public event EventHandler NavigationStateChanged;
 
         public string InitialUrl
         {
             get { return initialUrl; }
             set { initialUrl = NormalizeUrl(value); }
+        }
+
+        public bool CanGoBackInWebView
+        {
+            get
+            {
+                try
+                {
+                    return webView != null && webView.CoreWebView2 != null && webView.CoreWebView2.CanGoBack;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+        }
+
+        public bool CanGoForwardInWebView
+        {
+            get
+            {
+                try
+                {
+                    return webView != null && webView.CoreWebView2 != null && webView.CoreWebView2.CanGoForward;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+        }
+
+        public bool TryGoBackInWebView()
+        {
+            try
+            {
+                if (webView == null || webView.CoreWebView2 == null || !webView.CoreWebView2.CanGoBack)
+                {
+                    return false;
+                }
+
+                ShowLoadingOverlay();
+                webView.CoreWebView2.GoBack();
+                RaiseNavigationStateChanged();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public bool TryGoForwardInWebView()
+        {
+            try
+            {
+                if (webView == null || webView.CoreWebView2 == null || !webView.CoreWebView2.CanGoForward)
+                {
+                    return false;
+                }
+
+                ShowLoadingOverlay();
+                webView.CoreWebView2.GoForward();
+                RaiseNavigationStateChanged();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public bool TryReloadCurrentWebViewPage()
+        {
+            try
+            {
+                if (webView == null || webView.CoreWebView2 == null)
+                {
+                    return false;
+                }
+
+                ShowLoadingOverlay();
+                webView.CoreWebView2.Reload();
+                RaiseNavigationStateChanged();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public OviaWebViewHost()
@@ -116,15 +208,19 @@ namespace OVIA.Desktop.Controls
             };
             messagePanel.Controls.Add(openExternalButton);
 
-            loadingOverlay = new Panel();
-            loadingOverlay.Dock = DockStyle.Fill;
-            loadingOverlay.BackColor = Color.White;
+            loadingOverlay = new OviaTransparentLoadingPanel();
+            loadingOverlay.Dock = DockStyle.None;
+            loadingOverlay.Size = new Size(112, 112);
+            loadingOverlay.BackColor = Color.Transparent;
             loadingOverlay.Visible = false;
+            loadingOverlay.Margin = Padding.Empty;
+            loadingOverlay.Padding = Padding.Empty;
             this.Controls.Add(loadingOverlay);
 
             loadingSymbol = new OviaLoadingSymbolControl();
             loadingSymbol.Size = new Size(112, 112);
             loadingSymbol.BackColor = Color.Transparent;
+            loadingSymbol.Location = Point.Empty;
             loadingOverlay.Controls.Add(loadingSymbol);
 
             this.MouseDown += delegate { NotifyWebViewPointerInteraction(); };
@@ -146,7 +242,7 @@ namespace OVIA.Desktop.Controls
             documentHeightTimer.Tick += DocumentHeightTimer_Tick;
 
             showLoadingTimer = new Timer();
-            showLoadingTimer.Interval = 350;
+            showLoadingTimer.Interval = Math.Max(1, OVIA.Desktop.OviaSystemSettingsStore.GetLoadingDelayMilliseconds());
             showLoadingTimer.Tick += delegate
             {
                 showLoadingTimer.Stop();
@@ -344,11 +440,34 @@ namespace OVIA.Desktop.Controls
             navigationEventsAttached = true;
             webView.CoreWebView2.NavigationStarting += HandleNavigationStarting;
             webView.CoreWebView2.NavigationCompleted += HandleNavigationCompleted;
+            webView.CoreWebView2.SourceChanged += HandleSourceChanged;
+            webView.CoreWebView2.HistoryChanged += HandleHistoryChanged;
+            RaiseNavigationStateChanged();
         }
 
         private void HandleNavigationStarting(object sender, CoreWebView2NavigationStartingEventArgs e)
         {
             ShowLoadingOverlay();
+            RaiseNavigationStateChanged();
+        }
+
+        private void HandleSourceChanged(object sender, CoreWebView2SourceChangedEventArgs e)
+        {
+            RaiseNavigationStateChanged();
+        }
+
+        private void HandleHistoryChanged(object sender, object e)
+        {
+            RaiseNavigationStateChanged();
+        }
+
+        private void RaiseNavigationStateChanged()
+        {
+            EventHandler handler = NavigationStateChanged;
+            if (handler != null)
+            {
+                handler(this, EventArgs.Empty);
+            }
         }
 
         private void NavigateCore(string url)
@@ -364,6 +483,7 @@ namespace OVIA.Desktop.Controls
                 ShowLoadingOverlay();
                 webView.CoreWebView2.Navigate(target);
                 ShowWebView();
+                RaiseNavigationStateChanged();
             }
             catch
             {
@@ -388,6 +508,7 @@ namespace OVIA.Desktop.Controls
                 ShowWebView();
                 ScheduleDocumentHeightMeasurements();
                 BeginHideLoadingOverlay();
+                RaiseNavigationStateChanged();
                 return;
             }
 
@@ -403,6 +524,7 @@ namespace OVIA.Desktop.Controls
             }
 
             ShowWebAccessMessage(currentUrl, statusCode, e.WebErrorStatus.ToString());
+            RaiseNavigationStateChanged();
         }
 
         private string GetCurrentWebViewUrl()
@@ -440,7 +562,7 @@ namespace OVIA.Desktop.Controls
                 "HTTP 상태: " + statusText + "\r\n" +
                 "주소: " + NormalizeUrl(url) + "\r\n\r\n" +
                 "이 메시지는 OVIA 오류가 아니라 웹 서버의 접근 권한/보안 설정 응답입니다.\r\n" +
-                "실제 Web ERP 주소가 준비되면 시스템관리 > 시스템 설정의 ERP 연결 주소에 해당 주소를 입력해서 테스트하세요.";
+                "실제 Web ERP 주소가 준비되면 환경설정 > 시스템 설정의 ERP 연결 주소에 해당 주소를 입력해서 테스트하세요.";
 
             ShowMessage("웹 페이지 접근 실패", body);
         }
@@ -603,18 +725,41 @@ namespace OVIA.Desktop.Controls
 
         private void LayoutLoadingOverlay()
         {
-            if (loadingSymbol == null)
+            if (loadingOverlay == null || loadingSymbol == null)
             {
                 return;
             }
 
-            int x = Math.Max(0, (this.ClientSize.Width - loadingSymbol.Width) / 2);
-            int y = Math.Max(0, (this.ClientSize.Height - loadingSymbol.Height) / 2);
-            loadingSymbol.Location = new Point(x, y);
+            loadingOverlay.Size = loadingSymbol.Size;
+            int x = Math.Max(0, (this.ClientSize.Width - loadingOverlay.Width) / 2);
+            int y = Math.Max(0, (this.ClientSize.Height - loadingOverlay.Height) / 2);
+            loadingOverlay.Location = new Point(x, y);
+            loadingSymbol.Location = Point.Empty;
+        }
+
+        private void ApplyLoadingSettings()
+        {
+            int delay = OVIA.Desktop.OviaSystemSettingsStore.GetLoadingDelayMilliseconds();
+            if (delay < 1)
+            {
+                delay = 1;
+            }
+
+            if (showLoadingTimer != null)
+            {
+                showLoadingTimer.Interval = delay;
+            }
+
+            if (loadingSymbol != null)
+            {
+                loadingSymbol.SetImagePath(OVIA.Desktop.OviaSystemSettingsStore.GetConfiguredLoadingAnimationImagePath());
+            }
         }
 
         private void ShowLoadingOverlay()
         {
+            ApplyLoadingSettings();
+
             if (hideLoadingTimer != null)
             {
                 hideLoadingTimer.Stop();
@@ -822,10 +967,49 @@ namespace OVIA.Desktop.Controls
             return "https://celmon.com";
         }
 
+        private sealed class OviaTransparentLoadingPanel : Panel
+        {
+            public OviaTransparentLoadingPanel()
+            {
+                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
+                BackColor = Color.Transparent;
+            }
+
+            protected override void OnPaintBackground(PaintEventArgs e)
+            {
+                PaintParentBackground(e);
+            }
+
+            private void PaintParentBackground(PaintEventArgs e)
+            {
+                if (Parent == null)
+                {
+                    base.OnPaintBackground(e);
+                    return;
+                }
+
+                GraphicsState state = e.Graphics.Save();
+                try
+                {
+                    e.Graphics.TranslateTransform(-Left, -Top);
+                    using (PaintEventArgs parentArgs = new PaintEventArgs(e.Graphics, new Rectangle(Left, Top, Width, Height)))
+                    {
+                        InvokePaintBackground(Parent, parentArgs);
+                        InvokePaint(Parent, parentArgs);
+                    }
+                }
+                finally
+                {
+                    e.Graphics.Restore(state);
+                }
+            }
+        }
+
         private sealed class OviaLoadingSymbolControl : Control
         {
             private readonly Timer animationTimer;
-            private readonly Image symbolImage;
+            private Image symbolImage;
+            private string symbolImagePath = "";
             private int angle;
 
             public OviaLoadingSymbolControl()
@@ -833,7 +1017,7 @@ namespace OVIA.Desktop.Controls
                 this.SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
                 this.TabStop = false;
                 this.Cursor = Cursors.Default;
-                this.symbolImage = LoadSymbolImage();
+                SetImagePath(OVIA.Desktop.OviaSystemSettingsStore.GetConfiguredLoadingAnimationImagePath());
 
                 animationTimer = new Timer();
                 animationTimer.Interval = 32;
@@ -842,6 +1026,27 @@ namespace OVIA.Desktop.Controls
                     angle = (angle + 6) % 360;
                     this.Invalidate();
                 };
+            }
+
+            public void SetImagePath(string path)
+            {
+                string normalizedPath = path == null ? "" : path.Trim();
+                if (string.Equals(symbolImagePath, normalizedPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                Image old = symbolImage;
+                symbolImage = null;
+                symbolImagePath = normalizedPath;
+
+                if (old != null)
+                {
+                    old.Dispose();
+                }
+
+                symbolImage = LoadSymbolImage(normalizedPath);
+                Invalidate();
             }
 
             public void Start()
@@ -879,9 +1084,37 @@ namespace OVIA.Desktop.Controls
                 base.Dispose(disposing);
             }
 
+            protected override void OnPaintBackground(PaintEventArgs e)
+            {
+                PaintParentBackground(e);
+            }
+
+            private void PaintParentBackground(PaintEventArgs e)
+            {
+                if (Parent == null)
+                {
+                    base.OnPaintBackground(e);
+                    return;
+                }
+
+                GraphicsState state = e.Graphics.Save();
+                try
+                {
+                    e.Graphics.TranslateTransform(-Left, -Top);
+                    using (PaintEventArgs parentArgs = new PaintEventArgs(e.Graphics, new Rectangle(Left, Top, Width, Height)))
+                    {
+                        InvokePaintBackground(Parent, parentArgs);
+                        InvokePaint(Parent, parentArgs);
+                    }
+                }
+                finally
+                {
+                    e.Graphics.Restore(state);
+                }
+            }
+
             protected override void OnPaint(PaintEventArgs e)
             {
-                base.OnPaint(e);
 
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
@@ -911,16 +1144,13 @@ namespace OVIA.Desktop.Controls
                 }
             }
 
-            private static Image LoadSymbolImage()
+            private static Image LoadSymbolImage(string preferredPath)
             {
-                string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
-                string startupPath = Application.StartupPath;
+                string defaultPath = OVIA.Desktop.OviaSystemSettingsStore.GetDefaultLoadingSymbolPath();
                 string[] candidates = new string[]
                 {
-                    Path.Combine(baseDirectory, "Assets", "Icons", "ovia_symbol.png"),
-                    Path.Combine(startupPath, "Assets", "Icons", "ovia_symbol.png"),
-                    Path.Combine(baseDirectory, "ovia_symbol.png"),
-                    Path.Combine(startupPath, "ovia_symbol.png")
+                    preferredPath,
+                    defaultPath
                 };
 
                 for (int i = 0; i < candidates.Length; i++)
@@ -932,7 +1162,397 @@ namespace OVIA.Desktop.Controls
                         {
                             using (Image loaded = Image.FromFile(path))
                             {
-                                return new Bitmap(loaded);
+                                Bitmap bitmap = new Bitmap(loaded.Width, loaded.Height, PixelFormat.Format32bppPArgb);
+                                using (Graphics g = Graphics.FromImage(bitmap))
+                                {
+                                    g.Clear(Color.Transparent);
+                                    g.CompositingMode = CompositingMode.SourceCopy;
+                                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                                    g.DrawImage(loaded, new Rectangle(0, 0, bitmap.Width, bitmap.Height));
+                                }
+
+                                return bitmap;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                return null;
+            }
+        }
+    }
+
+
+
+    public sealed class OviaContentLoadingOverlay : Panel
+    {
+        private readonly OviaContentLoadingSymbolControl loadingSymbol;
+        private readonly Timer showTimer;
+        private Control resizeSubscribedParent;
+        private bool loadingPending;
+        private bool loadingInProgress;
+
+        public OviaContentLoadingOverlay()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
+            Dock = DockStyle.None;
+            Size = new Size(112, 112);
+            BackColor = Color.Transparent;
+            Visible = false;
+            Margin = Padding.Empty;
+            Padding = Padding.Empty;
+
+            loadingSymbol = new OviaContentLoadingSymbolControl();
+            loadingSymbol.Size = new Size(112, 112);
+            loadingSymbol.BackColor = Color.Transparent;
+            loadingSymbol.Location = Point.Empty;
+            Controls.Add(loadingSymbol);
+
+            showTimer = new Timer();
+            showTimer.Interval = Math.Max(1, OVIA.Desktop.OviaSystemSettingsStore.GetLoadingDelayMilliseconds());
+            showTimer.Tick += delegate
+            {
+                showTimer.Stop();
+                if (loadingInProgress && loadingPending)
+                {
+                    ShowOverlayNow();
+                }
+            };
+
+            Resize += delegate { LayoutLoadingSymbol(); };
+        }
+
+        protected override void OnParentChanged(EventArgs e)
+        {
+            if (resizeSubscribedParent != null)
+            {
+                resizeSubscribedParent.Resize -= Parent_Resize;
+                resizeSubscribedParent = null;
+            }
+
+            base.OnParentChanged(e);
+
+            if (Parent != null)
+            {
+                resizeSubscribedParent = Parent;
+                resizeSubscribedParent.Resize += Parent_Resize;
+            }
+
+            LayoutLoadingSymbol();
+        }
+
+        private void Parent_Resize(object sender, EventArgs e)
+        {
+            LayoutLoadingSymbol();
+        }
+
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (resizeSubscribedParent != null)
+                {
+                    resizeSubscribedParent.Resize -= Parent_Resize;
+                    resizeSubscribedParent = null;
+                }
+
+                if (showTimer != null)
+                {
+                    showTimer.Stop();
+                    showTimer.Dispose();
+                }
+
+                if (loadingSymbol != null)
+                {
+                    loadingSymbol.Stop();
+                    loadingSymbol.Dispose();
+                }
+            }
+
+            base.Dispose(disposing);
+        }
+
+        public void BeginLoading()
+        {
+            ApplyLoadingSettings();
+            loadingPending = true;
+            loadingInProgress = true;
+
+            if (showTimer != null)
+            {
+                showTimer.Stop();
+                showTimer.Start();
+                return;
+            }
+
+            ShowOverlayNow();
+        }
+
+        public void EndLoading()
+        {
+            loadingPending = false;
+            loadingInProgress = false;
+
+            if (showTimer != null)
+            {
+                showTimer.Stop();
+            }
+
+            if (loadingSymbol != null)
+            {
+                loadingSymbol.Stop();
+            }
+
+            Visible = false;
+        }
+
+        public void ShowOverlayNow()
+        {
+            if (!loadingInProgress || !loadingPending)
+            {
+                return;
+            }
+
+            LayoutLoadingSymbol();
+            Visible = true;
+            BringToFront();
+
+            if (loadingSymbol != null)
+            {
+                loadingSymbol.Start();
+            }
+        }
+
+        private void ApplyLoadingSettings()
+        {
+            int delay = OVIA.Desktop.OviaSystemSettingsStore.GetLoadingDelayMilliseconds();
+            if (delay < 1)
+            {
+                delay = 1;
+            }
+
+            if (showTimer != null)
+            {
+                showTimer.Interval = delay;
+            }
+
+            if (loadingSymbol != null)
+            {
+                loadingSymbol.SetImagePath(OVIA.Desktop.OviaSystemSettingsStore.GetConfiguredLoadingAnimationImagePath());
+            }
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            if (Parent == null)
+            {
+                base.OnPaintBackground(e);
+                return;
+            }
+
+            GraphicsState state = e.Graphics.Save();
+            try
+            {
+                e.Graphics.TranslateTransform(-Left, -Top);
+                using (PaintEventArgs parentArgs = new PaintEventArgs(e.Graphics, new Rectangle(Left, Top, Width, Height)))
+                {
+                    InvokePaintBackground(Parent, parentArgs);
+                    InvokePaint(Parent, parentArgs);
+                }
+            }
+            finally
+            {
+                e.Graphics.Restore(state);
+            }
+        }
+
+        private void LayoutLoadingSymbol()
+        {
+            if (loadingSymbol == null)
+            {
+                return;
+            }
+
+            Size = loadingSymbol.Size;
+
+            if (Parent != null)
+            {
+                int x = Math.Max(0, (Parent.ClientSize.Width - Width) / 2);
+                int y = Math.Max(0, (Parent.ClientSize.Height - Height) / 2);
+                Location = new Point(x, y);
+            }
+
+            loadingSymbol.Location = Point.Empty;
+        }
+
+        private sealed class OviaContentLoadingSymbolControl : Control
+        {
+            private readonly Timer animationTimer;
+            private Image symbolImage;
+            private string symbolImagePath = "";
+            private int angle;
+
+            public OviaContentLoadingSymbolControl()
+            {
+                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
+                TabStop = false;
+                Cursor = Cursors.Default;
+                SetImagePath(OVIA.Desktop.OviaSystemSettingsStore.GetConfiguredLoadingAnimationImagePath());
+
+                animationTimer = new Timer();
+                animationTimer.Interval = 32;
+                animationTimer.Tick += delegate
+                {
+                    angle = (angle + 6) % 360;
+                    Invalidate();
+                };
+            }
+
+            public void SetImagePath(string path)
+            {
+                string normalizedPath = path == null ? "" : path.Trim();
+                if (string.Equals(symbolImagePath, normalizedPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                Image old = symbolImage;
+                symbolImage = null;
+                symbolImagePath = normalizedPath;
+
+                if (old != null)
+                {
+                    old.Dispose();
+                }
+
+                symbolImage = LoadSymbolImage(normalizedPath);
+                Invalidate();
+            }
+
+            public void Start()
+            {
+                if (animationTimer != null && !animationTimer.Enabled)
+                {
+                    animationTimer.Start();
+                }
+            }
+
+            public void Stop()
+            {
+                if (animationTimer != null)
+                {
+                    animationTimer.Stop();
+                }
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    if (animationTimer != null)
+                    {
+                        animationTimer.Stop();
+                        animationTimer.Dispose();
+                    }
+
+                    if (symbolImage != null)
+                    {
+                        symbolImage.Dispose();
+                    }
+                }
+
+                base.Dispose(disposing);
+            }
+
+            protected override void OnPaintBackground(PaintEventArgs e)
+            {
+                PaintParentBackground(e);
+            }
+
+            private void PaintParentBackground(PaintEventArgs e)
+            {
+                if (Parent == null)
+                {
+                    base.OnPaintBackground(e);
+                    return;
+                }
+
+                GraphicsState state = e.Graphics.Save();
+                try
+                {
+                    e.Graphics.TranslateTransform(-Left, -Top);
+                    using (PaintEventArgs parentArgs = new PaintEventArgs(e.Graphics, new Rectangle(Left, Top, Width, Height)))
+                    {
+                        InvokePaintBackground(Parent, parentArgs);
+                        InvokePaint(Parent, parentArgs);
+                    }
+                }
+                finally
+                {
+                    e.Graphics.Restore(state);
+                }
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+                float cx = ClientSize.Width / 2F;
+                float cy = ClientSize.Height / 2F;
+                float size = Math.Min(ClientSize.Width, ClientSize.Height) * 0.62F;
+
+                if (symbolImage != null)
+                {
+                    GraphicsState state = e.Graphics.Save();
+                    e.Graphics.TranslateTransform(cx, cy);
+                    e.Graphics.RotateTransform(angle);
+                    RectangleF rect = new RectangleF(-size / 2F, -size / 2F, size, size);
+                    e.Graphics.DrawImage(symbolImage, rect);
+                    e.Graphics.Restore(state);
+                    return;
+                }
+
+                using (Pen pen = new Pen(OviaFluentTheme.Accent, 5F))
+                {
+                    pen.StartCap = LineCap.Round;
+                    pen.EndCap = LineCap.Round;
+                    RectangleF arcRect = new RectangleF(cx - size / 2F, cy - size / 2F, size, size);
+                    e.Graphics.DrawArc(pen, arcRect, angle, 270);
+                }
+            }
+
+            private static Image LoadSymbolImage(string preferredPath)
+            {
+                string defaultPath = OVIA.Desktop.OviaSystemSettingsStore.GetDefaultLoadingSymbolPath();
+                string[] candidates = new string[] { preferredPath, defaultPath };
+
+                for (int i = 0; i < candidates.Length; i++)
+                {
+                    string path = candidates[i];
+                    try
+                    {
+                        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                        {
+                            using (Image loaded = Image.FromFile(path))
+                            {
+                                Bitmap bitmap = new Bitmap(loaded.Width, loaded.Height, PixelFormat.Format32bppPArgb);
+                                using (Graphics g = Graphics.FromImage(bitmap))
+                                {
+                                    g.Clear(Color.Transparent);
+                                    g.CompositingMode = CompositingMode.SourceCopy;
+                                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                                    g.DrawImage(loaded, new Rectangle(0, 0, bitmap.Width, bitmap.Height));
+                                }
+
+                                return bitmap;
                             }
                         }
                     }

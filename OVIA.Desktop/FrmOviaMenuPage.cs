@@ -223,7 +223,7 @@ namespace OVIA.Desktop
 
             if (normalized == "SETTINGS")
             {
-                workspace.NavigateToWorkspaceInfoPage("SETTINGS", "메인  ›  시스템관리", "시스템관리", "SETTINGS", "OVIA 시스템 동작과 양식/출력 환경 설정을 관리합니다.", "시스템관리의 세부 설정은 드롭다운 메뉴에서 선택합니다.");
+                workspace.NavigateToWorkspaceInfoPage("SETTINGS", OviaMenuHelpStore.GetWorkspacePath("SETTINGS", "메인  ›  환경설정"), OviaMenuHelpStore.GetMenuName("SETTINGS", "환경설정"), "SETTINGS", "OVIA 시스템 동작과 양식/출력 환경 설정을 관리합니다.", "환경설정의 세부 설정은 드롭다운 메뉴에서 선택합니다.");
                 return;
             }
 

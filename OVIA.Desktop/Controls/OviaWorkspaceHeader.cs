@@ -50,6 +50,7 @@ namespace OVIA.Desktop.Controls
         private bool pathEditMessageFilterInstalled;
 
         public event EventHandler BackClicked;
+        public event EventHandler ForwardClicked;
         public event EventHandler UpClicked;
         public event EventHandler RefreshClicked;
         public event EventHandler NotificationClicked;
@@ -123,6 +124,7 @@ namespace OVIA.Desktop.Controls
             }
 
             parent.Controls.Add(header);
+            header.RefreshNavigationButtonStates();
             header.RefreshNotificationBadge();
 
             parent.Resize += delegate
@@ -175,6 +177,51 @@ namespace OVIA.Desktop.Controls
             set { SetNavigationEnabled(btnUp, value); }
         }
 
+        public void RefreshNavigationButtonStates()
+        {
+            bool canBrowserBack = false;
+            bool canBrowserForward = false;
+            bool canWorkspaceBack = false;
+            bool canWorkspaceForward = false;
+            bool canWorkspaceUp = false;
+
+            try
+            {
+                OVIA.Desktop.IOviaWorkspaceBrowserNavigation browserNavigation = OVIA.Desktop.OviaWorkspaceNavigation.FindBrowserNavigation(this);
+                if (browserNavigation != null)
+                {
+                    canBrowserBack = browserNavigation.CanNavigateBackInBrowser;
+                    canBrowserForward = browserNavigation.CanNavigateForwardInBrowser;
+                }
+            }
+            catch
+            {
+                canBrowserBack = false;
+                canBrowserForward = false;
+            }
+
+            try
+            {
+                OVIA.Desktop.IOviaWorkspaceNavigator navigator = OVIA.Desktop.OviaWorkspaceNavigation.FindNavigator(this);
+                if (navigator != null)
+                {
+                    canWorkspaceBack = navigator.CanNavigateBackInWorkspace;
+                    canWorkspaceForward = navigator.CanNavigateForwardInWorkspace;
+                    canWorkspaceUp = navigator.CanNavigateUpInWorkspace;
+                }
+            }
+            catch
+            {
+                canWorkspaceBack = false;
+                canWorkspaceForward = false;
+                canWorkspaceUp = false;
+            }
+
+            BackEnabled = canBrowserBack || canWorkspaceBack;
+            ForwardEnabled = canBrowserForward || canWorkspaceForward;
+            UpEnabled = canWorkspaceUp;
+        }
+
         private void ApplyBreadcrumbLinks(string text)
         {
             if (breadcrumbLabel != null)
@@ -203,24 +250,89 @@ namespace OVIA.Desktop.Controls
         private void BuildControls()
         {
             btnBack = CreateExplorerButton("\uE72B", "뒤로");
-            btnBack.Click += delegate { Raise(BackClicked); };
+            btnBack.Click += delegate
+            {
+                OVIA.Desktop.IOviaWorkspaceBrowserNavigation browserNavigation = OVIA.Desktop.OviaWorkspaceNavigation.FindBrowserNavigation(this);
+                if (browserNavigation != null && browserNavigation.NavigateBackInBrowser())
+                {
+                    RefreshNavigationButtonStates();
+                    return;
+                }
+
+                OVIA.Desktop.IOviaWorkspaceNavigator navigator = OVIA.Desktop.OviaWorkspaceNavigation.FindNavigator(this);
+                if (navigator != null && navigator.NavigateBackInWorkspace())
+                {
+                    RefreshNavigationButtonStates();
+                    return;
+                }
+
+                Raise(BackClicked);
+                RefreshNavigationButtonStates();
+            };
             Controls.Add(btnBack);
 
             btnForward = CreateExplorerButton("\uE72A", "앞으로");
-            btnForward.Click += delegate { };
+            btnForward.Click += delegate
+            {
+                OVIA.Desktop.IOviaWorkspaceBrowserNavigation browserNavigation = OVIA.Desktop.OviaWorkspaceNavigation.FindBrowserNavigation(this);
+                if (browserNavigation != null && browserNavigation.NavigateForwardInBrowser())
+                {
+                    RefreshNavigationButtonStates();
+                    return;
+                }
+
+                OVIA.Desktop.IOviaWorkspaceNavigator navigator = OVIA.Desktop.OviaWorkspaceNavigation.FindNavigator(this);
+                if (navigator != null && navigator.NavigateForwardInWorkspace())
+                {
+                    RefreshNavigationButtonStates();
+                    return;
+                }
+
+                Raise(ForwardClicked);
+                RefreshNavigationButtonStates();
+            };
             Controls.Add(btnForward);
 
             btnUp = CreateExplorerButton("\uE74A", "위로");
-            btnUp.Click += delegate { Raise(UpClicked); };
+            btnUp.Click += delegate
+            {
+                OVIA.Desktop.IOviaWorkspaceNavigator navigator = OVIA.Desktop.OviaWorkspaceNavigation.FindNavigator(this);
+                if (navigator != null && navigator.NavigateUpInWorkspace())
+                {
+                    RefreshNavigationButtonStates();
+                    return;
+                }
+
+                Raise(UpClicked);
+                RefreshNavigationButtonStates();
+            };
             Controls.Add(btnUp);
 
             btnRefresh = CreateExplorerButton("\uE72C", "새로고침");
-            btnRefresh.Click += delegate { Raise(RefreshClicked); };
+            btnRefresh.Click += delegate
+            {
+                OVIA.Desktop.IOviaWorkspaceBrowserNavigation browserNavigation = OVIA.Desktop.OviaWorkspaceNavigation.FindBrowserNavigation(this);
+                if (browserNavigation != null && browserNavigation.RefreshBrowser())
+                {
+                    RefreshNavigationButtonStates();
+                    return;
+                }
+
+                Raise(RefreshClicked);
+                RefreshNavigationButtonStates();
+            };
             Controls.Add(btnRefresh);
 
             btnHome = CreateExplorerButton("\uE7F4", "메인");
             btnHome.Click += delegate
             {
+                OVIA.Desktop.IOviaWorkspaceNavigator navigator = OVIA.Desktop.OviaWorkspaceNavigation.FindNavigator(this);
+                if (navigator != null)
+                {
+                    navigator.NavigateToMain();
+                    return;
+                }
+
                 if (RaisePathSegmentClicked("MAIN"))
                 {
                     return;
@@ -395,6 +507,7 @@ namespace OVIA.Desktop.Controls
         protected override void OnParentChanged(EventArgs e)
         {
             base.OnParentChanged(e);
+            RefreshNavigationButtonStates();
             RefreshNotificationBadge();
         }
 
@@ -403,6 +516,7 @@ namespace OVIA.Desktop.Controls
             base.OnVisibleChanged(e);
             if (Visible)
             {
+                RefreshNavigationButtonStates();
                 RefreshNotificationBadge();
             }
         }
@@ -998,6 +1112,7 @@ namespace OVIA.Desktop.Controls
             if (segment == "ERP") return "ERP";
             if (segment == "기준정보") return "MASTER_DATA";
             if (segment == "시스템관리") return "SETTINGS";
+            if (segment == "환경설정") return "SETTINGS";
             if (segment == "BarList 항목 매핑") return "BARLIST_MAPPING";
             if (segment == "이형철근 단위중량표") return "REBAR_UNIT_WEIGHT";
             if (segment == "시스템 설정") return "SYSTEM_SETTINGS";

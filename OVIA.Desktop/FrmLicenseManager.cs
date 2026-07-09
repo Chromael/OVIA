@@ -72,7 +72,7 @@ namespace OVIA.Desktop
         {
             OviaWorkspaceHeader.AddTo(
                 parent,
-                "메인  ›  시스템관리  ›  License",
+                "메인  ›  환경설정  ›  License",
                 delegate { this.Close(); },
                 delegate { this.Close(); },
                 delegate { if (ConfirmDiscardUnsavedChanges()) LoadLicensesToUi(); },
@@ -308,7 +308,7 @@ namespace OVIA.Desktop
             isDirty = BuildSignature() != cleanSignature;
             UpdateSaveButtonVisibility();
             UpdateStatusText();
-            OviaNotificationStore.AddWorkLog(companyId, userId, "라이선스 항목 삭제", "메인  ›  시스템관리  ›  License");
+            OviaNotificationStore.AddWorkLog(companyId, userId, "라이선스 항목 삭제", "메인  ›  환경설정  ›  License");
         }
 
         private void Add_Click(object sender, EventArgs e)
@@ -374,7 +374,7 @@ namespace OVIA.Desktop
             UpdateSaveButtonVisibility();
             UpdateStatusText();
             MessageBox.Show("License 정보가 저장되었습니다.", "OVIA License", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            OviaNotificationStore.AddWorkLog(companyId, userId, "License 정보 저장", "메인  ›  시스템관리  ›  License");
+            OviaNotificationStore.AddWorkLog(companyId, userId, "License 정보 저장", "메인  ›  환경설정  ›  License");
         }
 
         private void PullEntriesFromPanels()

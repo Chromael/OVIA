@@ -9,7 +9,7 @@ namespace OVIA.Desktop
     /// WebView2 전환 단계에서 Web ERP 페이지를 OVIA Desktop 내부에 표시하는 공통 화면입니다.
     /// AutoCAD 제어와 로컬 설치 환경 체크는 WinForms/C#에 남기고, 공사등록 같은 업무 콘텐츠는 Web ERP로 이전합니다.
     /// </summary>
-    public class FrmOviaWebErpPage : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider
+    public class FrmOviaWebErpPage : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider, IOviaWorkspaceBrowserNavigation
     {
         private readonly string companyId;
         private readonly string userId;
@@ -21,6 +21,7 @@ namespace OVIA.Desktop
         private readonly string routePath;
 
         private OviaWebViewHost webViewHost;
+        private OviaWorkspaceHeader workspaceHeader;
         private Label lblStatus;
 
         public FrmOviaWebErpPage(string companyId, string userId, string key, string title, string pathText, string selectedMenu, string routePath, string helpText)
@@ -68,19 +69,20 @@ namespace OVIA.Desktop
 
         private void BuildExplorerHeader(Control parent)
         {
-            OviaWorkspaceHeader.AddTo(
+            workspaceHeader = OviaWorkspaceHeader.AddTo(
                 parent,
                 pathText,
                 delegate { NavigateBackOrMain(); },
                 delegate { NavigateBackOrMain(); },
                 delegate { RefreshContent(); },
                 delegate { RequestLogout(); },
-                true,
+                false,
                 true,
                 delegate(string target)
                 {
                     NavigateByTarget(target);
                 });
+            UpdateHeaderNavigationState();
         }
 
         private void BuildCommandBar(Control parent)
@@ -108,7 +110,9 @@ namespace OVIA.Desktop
             webViewHost.AutoResizeToDocumentHeight = false;
             webViewHost.ForwardMouseWheelToParentScroll = false;
             webViewHost.InitialUrl = ResolveWebErpUrl();
+            webViewHost.NavigationStateChanged += WebViewHost_NavigationStateChanged;
             parent.Controls.Add(webViewHost);
+            UpdateHeaderNavigationState();
         }
 
         private void BuildStatus(Control parent)
@@ -142,29 +146,57 @@ namespace OVIA.Desktop
         private string ResolveWebErpUrl()
         {
             OviaSystemSettings settings = OviaSystemSettingsStore.Load();
-            string baseUrl = settings == null || settings.ErpLoginUrl == null ? string.Empty : settings.ErpLoginUrl.Trim();
 
-            if (baseUrl == "")
+            if (string.Equals(workspaceHelpKey, "ERP", StringComparison.OrdinalIgnoreCase))
             {
-                return OviaWebViewHost.NormalizeUrl("https://celmon.com");
+                return OviaSystemSettingsStore.BuildErpConnectionUrl(settings);
             }
 
-            string normalizedBase = OviaWebViewHost.NormalizeUrl(baseUrl);
-            if (string.IsNullOrWhiteSpace(routePath))
+            string moduleName = OviaMenuHelpStore.GetErpModuleName(workspaceHelpKey);
+            if (OviaMenuHelpStore.IsErpLoadEnabled(workspaceHelpKey) && moduleName != "")
             {
-                return normalizedBase;
+                return OviaSystemSettingsStore.BuildErpModuleUrl(settings, moduleName);
             }
 
-            try
+            if (!string.IsNullOrWhiteSpace(routePath))
             {
-                Uri baseUri = new Uri(normalizedBase, UriKind.Absolute);
-                string relativePath = routePath.TrimStart('/');
-                Uri targetUri = new Uri(baseUri, relativePath);
-                return targetUri.AbsoluteUri;
+                string route = routePath.Trim();
+                if (route.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                    || route.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    return OviaWebViewHost.NormalizeUrl(route);
+                }
+
+                try
+                {
+                    string connectionUrl = OviaSystemSettingsStore.BuildErpConnectionUrl(settings);
+                    if (!connectionUrl.EndsWith("/", StringComparison.Ordinal))
+                    {
+                        connectionUrl += "/";
+                    }
+
+                    Uri baseUri = new Uri(connectionUrl, UriKind.Absolute);
+                    Uri targetUri = new Uri(baseUri, route.TrimStart('/'));
+                    return targetUri.AbsoluteUri;
+                }
+                catch
+                {
+                }
             }
-            catch
+
+            return OviaSystemSettingsStore.BuildErpConnectionUrl(settings);
+        }
+
+        private void WebViewHost_NavigationStateChanged(object sender, EventArgs e)
+        {
+            UpdateHeaderNavigationState();
+        }
+
+        private void UpdateHeaderNavigationState()
+        {
+            if (workspaceHeader != null && !workspaceHeader.IsDisposed)
             {
-                return normalizedBase;
+                workspaceHeader.RefreshNavigationButtonStates();
             }
         }
 
@@ -220,7 +252,7 @@ namespace OVIA.Desktop
 
             if (normalized == "SETTINGS")
             {
-                workspace.NavigateToWorkspaceInfoPage("SETTINGS", "메인  ›  시스템관리", "시스템관리", "SETTINGS", "OVIA 시스템 동작과 양식/출력 환경 설정을 관리합니다.", "시스템관리의 세부 설정은 드롭다운 메뉴에서 선택합니다.");
+                workspace.NavigateToWorkspaceInfoPage("SETTINGS", OviaMenuHelpStore.GetWorkspacePath("SETTINGS", "메인  ›  환경설정"), OviaMenuHelpStore.GetMenuName("SETTINGS", "환경설정"), "SETTINGS", "OVIA 시스템 동작과 양식/출력 환경 설정을 관리합니다.", "환경설정의 세부 설정은 드롭다운 메뉴에서 선택합니다.");
                 return;
             }
 
@@ -257,6 +289,44 @@ namespace OVIA.Desktop
                 lblStatus.Top = Math.Max(0, ClientSize.Height - 58);
                 lblStatus.Width = width;
             }
+        }
+
+
+        public bool CanNavigateBackInBrowser
+        {
+            get { return webViewHost != null && webViewHost.CanGoBackInWebView; }
+        }
+
+        public bool CanNavigateForwardInBrowser
+        {
+            get { return webViewHost != null && webViewHost.CanGoForwardInWebView; }
+        }
+
+        public bool NavigateBackInBrowser()
+        {
+            bool navigated = webViewHost != null && webViewHost.TryGoBackInWebView();
+            UpdateHeaderNavigationState();
+            return navigated;
+        }
+
+        public bool NavigateForwardInBrowser()
+        {
+            bool navigated = webViewHost != null && webViewHost.TryGoForwardInWebView();
+            UpdateHeaderNavigationState();
+            return navigated;
+        }
+
+        public bool RefreshBrowser()
+        {
+            bool reloaded = webViewHost != null && webViewHost.TryReloadCurrentWebViewPage();
+
+            if (reloaded && lblStatus != null)
+            {
+                lblStatus.Text = "Web ERP 현재 페이지를 새로고침했습니다. " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            }
+
+            UpdateHeaderNavigationState();
+            return reloaded;
         }
 
         public bool CanLeaveWorkspaceScreen()

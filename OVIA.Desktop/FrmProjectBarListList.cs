@@ -47,6 +47,7 @@ namespace OVIA.Desktop
         private const int BaseClientHeight = 720;
         private Panel scrollPanel;
         private Panel contentPanel;
+        private OviaContentLoadingOverlay contentLoadingOverlay;
         private bool isScrollResetQueued = false;
         private bool isInternalNavigation = false;
         private bool isBackNavigationQueued = false;
@@ -118,8 +119,33 @@ namespace OVIA.Desktop
             BuildFooter(contentPanel);
             UpdateScrollableContentSize();
             ResetScrollToTopLeft();
+            BuildContentLoadingOverlay();
 
             this.ResumeLayout(false);
+        }
+
+
+        private void BuildContentLoadingOverlay()
+        {
+            contentLoadingOverlay = new OviaContentLoadingOverlay();
+            this.Controls.Add(contentLoadingOverlay);
+            contentLoadingOverlay.BringToFront();
+        }
+
+        private void BeginContentLoading()
+        {
+            if (contentLoadingOverlay != null)
+            {
+                contentLoadingOverlay.BeginLoading();
+            }
+        }
+
+        private void EndContentLoading()
+        {
+            if (contentLoadingOverlay != null)
+            {
+                contentLoadingOverlay.EndLoading();
+            }
         }
 
         private void ScrollPanel_Resize(object sender, EventArgs e)
@@ -1097,7 +1123,10 @@ namespace OVIA.Desktop
 
         private void BindBarListRows()
         {
-            grid.Rows.Clear();
+            BeginContentLoading();
+            try
+            {
+                grid.Rows.Clear();
 
             List<ProjectBarListSummary> allRows = GetBarListSummaries();
             RefreshDynamicFilterOptions(allRows);
@@ -1162,6 +1191,11 @@ namespace OVIA.Desktop
             lblStatus.Text = currentBarListRows.Count > displayCount
                 ? "검색 결과: " + currentBarListRows.Count.ToString() + "건 / 현재 표시: " + displayCount.ToString() + "건 / 페이지당 " + pageSize.ToString() + "건"
                 : "검색 결과: " + currentBarListRows.Count.ToString() + "건 / 페이지당 " + pageSize.ToString() + "건";
+            }
+            finally
+            {
+                EndContentLoading();
+            }
         }
 
         private List<ProjectBarListSummary> GetFilteredBarListSummaries(List<ProjectBarListSummary> source)
