@@ -49,6 +49,7 @@ namespace OVIA.Desktop
         private Label lblLoadingDelaySeconds;
         private Label lblLoadingDelayHelper;
         private Button btnBrowseLogo;
+        private Button btnErpLogo;
         private Button btnDefaultLogo;
         private Button btnBrowseLoadingImage;
         private Button btnDefaultLoadingImage;
@@ -66,6 +67,7 @@ namespace OVIA.Desktop
         private string currentLoadingImagePath = "";
         private string pendingLoadingImageSourcePath = "";
         private bool defaultLogoRequested = false;
+        private string pendingLogoMode = "DEFAULT";
         private bool defaultLoadingImageRequested = false;
         private bool isDirty = false;
         private bool isLoading = false;
@@ -360,16 +362,20 @@ namespace OVIA.Desktop
 
             txtLogoPath = new OviaSystemInputBox();
             txtLogoPath.Location = new Point(0, 38);
-            txtLogoPath.Size = new Size(690, OviaFluentTheme.ButtonHeight);
+            txtLogoPath.Size = new Size(520, OviaFluentTheme.ButtonHeight);
             txtLogoPath.Placeholder = "회사 로고 이미지 파일을 선택해 주세요.";
             txtLogoPath.ReadOnly = true;
             logoSection.Controls.Add(txtLogoPath);
 
-            btnBrowseLogo = CreateBlackButton("이미지 선택", 706, 38, 126, OviaFluentTheme.ButtonHeight);
+            btnBrowseLogo = CreateBlackButton("이미지 선택", 536, 38, 126, OviaFluentTheme.ButtonHeight);
             btnBrowseLogo.Click += BrowseLogo_Click;
             logoSection.Controls.Add(btnBrowseLogo);
 
-            btnDefaultLogo = CreateNormalButton("기본 OVIA 로고 사용", 846, 38, 158, OviaFluentTheme.ButtonHeight);
+            btnErpLogo = CreateNormalButton("ERP 업로드 로고 사용", 676, 38, 176, OviaFluentTheme.ButtonHeight);
+            btnErpLogo.Click += ErpLogo_Click;
+            logoSection.Controls.Add(btnErpLogo);
+
+            btnDefaultLogo = CreateNormalButton("기본 OVIA 로고 사용", 866, 38, 158, OviaFluentTheme.ButtonHeight);
             btnDefaultLogo.Click += DefaultLogo_Click;
             logoSection.Controls.Add(btnDefaultLogo);
 
@@ -1431,8 +1437,37 @@ namespace OVIA.Desktop
 
             pendingLogoSourcePath = dialog.FileName;
             defaultLogoRequested = false;
+            pendingLogoMode = "LOCAL";
             txtLogoPath.Value = pendingLogoSourcePath;
             UpdateLogoPreview(pendingLogoSourcePath);
+            MarkDirty();
+        }
+
+        private void ErpLogo_Click(object sender, EventArgs e)
+        {
+            if (!EnsureCanEdit()) return;
+            this.UseWaitCursor = true;
+            bool found = false;
+            try
+            {
+                found = OviaErpCompanyLogoService.Synchronize(companyId);
+            }
+            finally
+            {
+                this.UseWaitCursor = false;
+            }
+            string path = OviaErpCompanyLogoService.GetCachedLogoPath(companyId);
+            if (!found || path == "")
+            {
+                MessageBox.Show("ERP에 등록된 로고가 없습니다", "OVIA 회사로고", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            pendingLogoSourcePath = "";
+            currentLogoPath = path;
+            defaultLogoRequested = false;
+            pendingLogoMode = "ERP";
+            txtLogoPath.Value = "ERP 업로드 로고 사용: " + path;
+            UpdateLogoPreview(path);
             MarkDirty();
         }
 
@@ -1446,6 +1481,8 @@ namespace OVIA.Desktop
             pendingLogoSourcePath = "";
             currentLogoPath = "";
             defaultLogoRequested = true;
+            pendingLogoMode = "DEFAULT";
+            OviaErpCompanyLogoService.ClearCachedLogo(companyId);
             txtLogoPath.Value = "기본 OVIA 로고 사용";
             UpdateLogoPreview("");
             MarkDirty();
@@ -1650,7 +1687,13 @@ namespace OVIA.Desktop
                     settings.LoadingAnimationImagePath = currentLoadingImagePath != null && File.Exists(currentLoadingImagePath) ? currentLoadingImagePath : "";
                 }
 
-                if (defaultLogoRequested)
+                settings.CompanyLogoMode = OviaSystemSettingsStore.NormalizeCompanyLogoMode(pendingLogoMode);
+                if (settings.CompanyLogoMode == "DEFAULT")
+                {
+                    settings.CompanyLogoFilePath = "";
+                    OviaErpCompanyLogoService.ClearCachedLogo(companyId);
+                }
+                else if (settings.CompanyLogoMode == "ERP")
                 {
                     settings.CompanyLogoFilePath = "";
                 }
@@ -1721,17 +1764,26 @@ namespace OVIA.Desktop
 
                 UpdateColorPreviews();
 
+                pendingLogoMode = OviaSystemSettingsStore.NormalizeCompanyLogoMode(settings.CompanyLogoMode);
                 currentLogoPath = settings.CompanyLogoFilePath == null ? "" : settings.CompanyLogoFilePath;
                 pendingLogoSourcePath = "";
-                defaultLogoRequested = currentLogoPath.Trim() == "";
+                defaultLogoRequested = pendingLogoMode == "DEFAULT";
 
-                if (currentLogoPath.Trim() != "" && File.Exists(currentLogoPath))
+                if (pendingLogoMode == "ERP")
+                {
+                    currentLogoPath = OviaErpCompanyLogoService.GetCachedLogoPath(companyId);
+                    txtLogoPath.Value = currentLogoPath == "" ? "ERP 업로드 로고 사용" : "ERP 업로드 로고 사용: " + currentLogoPath;
+                    UpdateLogoPreview(currentLogoPath);
+                }
+                else if (pendingLogoMode == "LOCAL" && currentLogoPath.Trim() != "" && File.Exists(currentLogoPath))
                 {
                     txtLogoPath.Value = currentLogoPath;
                     UpdateLogoPreview(currentLogoPath);
                 }
                 else
                 {
+                    pendingLogoMode = "DEFAULT";
+                    defaultLogoRequested = true;
                     txtLogoPath.Value = "기본 OVIA 로고 사용";
                     UpdateLogoPreview("");
                 }
@@ -2052,7 +2104,7 @@ namespace OVIA.Desktop
             string erp = erpDomain + "|" + erpConnection + "|" + erpAuth + "|" + erpModuleBase;
             string pending = pendingLogoSourcePath == null ? "" : pendingLogoSourcePath.Trim();
             string current = currentLogoPath == null ? "" : currentLogoPath.Trim();
-            string logo = defaultLogoRequested || (pending == "" && current == "") ? "DEFAULT" : (pending != "" ? pending : current);
+            string logo = pendingLogoMode + ":" + (defaultLogoRequested || (pending == "" && current == "") ? "DEFAULT" : (pending != "" ? pending : current));
             string loadingPending = pendingLoadingImageSourcePath == null ? "" : pendingLoadingImageSourcePath.Trim();
             string loadingCurrent = currentLoadingImagePath == null ? "" : currentLoadingImagePath.Trim();
             string loadingImage = defaultLoadingImageRequested || (loadingPending == "" && loadingCurrent == "") ? "DEFAULT" : (loadingPending != "" ? loadingPending : loadingCurrent);

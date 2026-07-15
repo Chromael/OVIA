@@ -67,6 +67,9 @@ namespace OVIA.Desktop
         private Label lblProjectTitle;
         private Label lblProjectSub;
         private Label lblSaveState;
+        private OviaBarListButton cadSelectionButton;
+        private OviaBarListButton cadSelectionModeOffButton;
+        private OviaBarListButton deleteCadBoxButton;
         private ToolTip windowToolTip;
         private OviaBarListMappingStore mappingStore;
         private RebarShapeRepository shapeRepository;
@@ -83,15 +86,32 @@ namespace OVIA.Desktop
         private const int GridZoomMaxPercent = 220;
         private const int GridZoomStepPercent = 10;
         private const int GridBaseHeaderHeight = 34;
-        private const int GridBaseRowHeight = 62;
+        private const int GridBaseRowHeight = 48;
         private const int GridBaseRowHeaderWidth = 48;
         private int gridZoomPercent = GridZoomMinPercent;
 
         private FileSystemWatcher autoCadWatcher;
         private DateTime autoImportStartTime;
         private string lastLoadedFilePath = "";
+        private HashSet<string> autoCadProcessedCsvFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private bool isProcessingAutoCadCsvQueue = false;
         private bool waitingAutoCadImport = false;
         private bool autoCadContinuousAppendMode = false;
+        private bool autoCadSelectionModeActive = false;
+        private BarListImportMode autoCadInitialImportMode = BarListImportMode.Replace;
+        private System.Windows.Forms.Timer autoCadImportPollTimer;
+        private System.Windows.Forms.Timer autoCadAvailabilityTimer;
+        private DateTime autoCadSelectionCommandIssuedAt = DateTime.MinValue;
+        private DateTime autoCadSelectionCommandEndedAt = DateTime.MinValue;
+        private bool autoCadSelectionCommandObserved = false;
+        private bool autoCadSelectionCommandDispatchReturned = false;
+        private int autoCadLoadedCsvCount = 0;
+        private bool isDeletingAutoCadSelectionBoxes = false;
+        private const int AutoCadDeleteRetryIntervalMs = 250;
+        private const int AutoCadDeleteTimeoutMs = 6000;
+        private const int RpcECallRejected = unchecked((int)0x80010001);
+        private const int RpcEServerCallRetryLater = unchecked((int)0x8001010A);
+        private const string AutoCadBusyErrorPrefix = "AUTOCAD_BUSY:";
         private bool isSaved = true;
         private bool isClosingByButton = false;
         private bool suppressUnsavedClosePrompt = false;
@@ -102,7 +122,6 @@ namespace OVIA.Desktop
 
         private readonly Color BrandIndigo = OviaFluentTheme.AccentHover;
         private readonly Color BrandViolet = OviaFluentTheme.Accent;
-        private readonly Color BrandCyan = Color.FromArgb(64, 156, 255);
         private readonly Color SurfaceColor = OviaFluentTheme.AppBackground;
         private readonly Color TextDark = OviaFluentTheme.TextPrimary;
         private readonly Color TextSub = OviaFluentTheme.TextSecondary;
@@ -138,6 +157,7 @@ namespace OVIA.Desktop
             shapeRepository = RebarShapeRepository.CreateDefault();
 
             BuildUI();
+            StartAutoCadAvailabilityTimer();
 
             if (this.initialFilePath.Trim() != "" && File.Exists(this.initialFilePath))
             {
@@ -816,28 +836,50 @@ namespace OVIA.Desktop
 
             txtFilePath = new TextBox();
             txtFilePath.Location = new Point(22, 43);
-            txtFilePath.Size = new Size(570, 23);
+            txtFilePath.Size = new Size(410, 23);
             txtFilePath.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             txtFilePath.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
             OviaFluentTheme.ApplyTextBox(txtFilePath);
             txtFilePath.ReadOnly = true;
             card.Controls.Add(txtFilePath);
 
-            OviaBarListButton autoButton = new OviaBarListButton();
-            autoButton.Text = "AutoCAD에서 가져오기";
-            autoButton.Location = new Point(610, 36);
-            autoButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            autoButton.Size = new Size(160, 34);
-            autoButton.StartColor = BrandCyan;
-            autoButton.EndColor = BrandViolet;
-            autoButton.Click += AutoCadImport_Click;
-            card.Controls.Add(autoButton);
+            cadSelectionButton = new OviaBarListButton();
+            cadSelectionButton.Text = "CAD에서 영역선택";
+            cadSelectionButton.Location = new Point(445, 36);
+            cadSelectionButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            cadSelectionButton.Size = new Size(145, 34);
+            cadSelectionButton.StartColor = OviaFluentTheme.Accent;
+            cadSelectionButton.EndColor = OviaFluentTheme.Accent;
+            cadSelectionButton.UseCustomColors = true;
+            cadSelectionButton.Click += AutoCadImport_Click;
+            card.Controls.Add(cadSelectionButton);
+
+            cadSelectionModeOffButton = new OviaBarListButton();
+            cadSelectionModeOffButton.Text = "CAD 선택모드 해제";
+            cadSelectionModeOffButton.Location = new Point(598, 36);
+            cadSelectionModeOffButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            cadSelectionModeOffButton.Size = new Size(120, 34);
+            cadSelectionModeOffButton.Click += ReleaseAutoCadSelectionMode_Click;
+            cadSelectionModeOffButton.Enabled = false;
+            cadSelectionModeOffButton.Visible = false;
+            card.Controls.Add(cadSelectionModeOffButton);
+
+            deleteCadBoxButton = new OviaBarListButton();
+            deleteCadBoxButton.Text = "CAD에 선택된 영역 삭제";
+            deleteCadBoxButton.Location = new Point(726, 36);
+            deleteCadBoxButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            deleteCadBoxButton.Size = new Size(160, 34);
+            deleteCadBoxButton.StartColor = OviaFluentTheme.Danger;
+            deleteCadBoxButton.EndColor = OviaFluentTheme.Danger;
+            deleteCadBoxButton.Click += DeleteAutoCadSelectionBoxes_Click;
+            deleteCadBoxButton.Visible = false;
+            card.Controls.Add(deleteCadBoxButton);
 
             OviaBarListButton recentButton = new OviaBarListButton();
             recentButton.Text = "최근 추출";
-            recentButton.Location = new Point(785, 36);
+            recentButton.Location = new Point(894, 36);
             recentButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            recentButton.Size = new Size(92, 34);
+            recentButton.Size = new Size(70, 34);
             recentButton.StartColor = OviaFluentTheme.Accent;
             recentButton.EndColor = BrandViolet;
             recentButton.Click += LoadRecent_Click;
@@ -845,9 +887,9 @@ namespace OVIA.Desktop
 
             OviaBarListButton openButton = new OviaBarListButton();
             openButton.Text = "CSV 선택";
-            openButton.Location = new Point(890, 36);
+            openButton.Location = new Point(972, 36);
             openButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            openButton.Size = new Size(92, 34);
+            openButton.Size = new Size(70, 34);
             openButton.StartColor = BrandViolet;
             openButton.EndColor = BrandIndigo;
             openButton.Click += OpenCsv_Click;
@@ -855,16 +897,16 @@ namespace OVIA.Desktop
 
             OviaBarListButton saveProjectButton = new OviaBarListButton();
             saveProjectButton.Text = "검토 후 저장";
-            saveProjectButton.Location = new Point(995, 36);
+            saveProjectButton.Location = new Point(1050, 36);
             saveProjectButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            saveProjectButton.Size = new Size(120, 34);
+            saveProjectButton.Size = new Size(100, 34);
             saveProjectButton.StartColor = OviaFluentTheme.Success;
             saveProjectButton.EndColor = OviaFluentTheme.Success;
             saveProjectButton.Click += SaveProjectBarList_Click;
             card.Controls.Add(saveProjectButton);
 
             Label guide = new Label();
-            guide.Text = "※ AutoCAD에서 OVIABOX로 영역을 선택하면 자동 추출 CSV를 감지해 입력합니다. 다음 영역을 계속 선택하면 기존 데이터 뒤에 추가할 수 있습니다.";
+            guide.Text = "※ NETLOAD 후 CAD에서 영역선택을 누르세요. 각 영역은 시작점·끝점으로 노란 박스를 만든 뒤 Enter로 전송하며, 전체 종료는 다음 시작점 대기에서 Enter 또는 CAD 선택모드 해제를 누릅니다.";
             guide.AutoSize = true;
             guide.Font = new Font("맑은 고딕", 8.5F, FontStyle.Regular);
             guide.ForeColor = OviaFluentTheme.Danger;
@@ -931,6 +973,7 @@ namespace OVIA.Desktop
             grid.AllowUserToDeleteRows = true;
             grid.AllowUserToResizeRows = false;
             grid.AllowUserToResizeColumns = true;
+            grid.ShowCellToolTips = true;
             grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             grid.ScrollBars = ScrollBars.Vertical;
             grid.SelectionMode = DataGridViewSelectionMode.CellSelect;
@@ -1131,6 +1174,159 @@ namespace OVIA.Desktop
 
         private void AutoCadImport_Click(object sender, EventArgs e)
         {
+            if (autoCadSelectionModeActive)
+            {
+                ActivateAutoCad();
+                lblStatus.Text = "CAD 영역 선택모드가 실행 중입니다. AutoCAD에서 시작점·끝점으로 노란 박스를 만든 뒤 Enter로 현재 영역을 전송하세요.";
+                lblStatus.ForeColor = TextSub;
+                return;
+            }
+
+            UpdateAutoCadSelectionButtonState();
+
+            OviaEnvironmentReport report = OviaEnvironmentChecker.CheckForUi();
+
+            if (report.RecommendedAutoCad != null && !report.IsAutoCadRunning)
+            {
+                MessageBox.Show(
+                    "AutoCAD가 설치되어 있지만 현재 실행중이 아닙니다.\r\nAutoCAD를 먼저 실행하세요.",
+                    "OVIA AutoCAD 확인",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+
+                return;
+            }
+
+            if (!report.IsCurrentDevelopmentAutoCadReady())
+            {
+                MessageBox.Show(
+                    report.GetAutoCadExtractionBlockMessage(),
+                    "OVIA AutoCAD 확인",
+                    MessageBoxButtons.OK,
+                    report.OverallStatus == OviaEnvironmentStatus.Blocked ? MessageBoxIcon.Error : MessageBoxIcon.Warning
+                );
+
+                return;
+            }
+
+            if (!CanImportIntoCurrentBarList())
+            {
+                return;
+            }
+
+            if (!PrepareAutoCadImportMode())
+            {
+                return;
+            }
+
+            StartAutoCadWatcher();
+            SetAutoCadSelectionModeState(true);
+            autoCadSelectionCommandIssuedAt = DateTime.Now;
+            autoCadSelectionCommandEndedAt = DateTime.MinValue;
+            autoCadSelectionCommandObserved = false;
+            autoCadSelectionCommandDispatchReturned = false;
+            ActivateAutoCad();
+
+            lblStatus.Text = "CAD 영역 선택모드 실행 중 - 각 범위는 시작점·끝점으로 노란 박스를 확인한 뒤 Enter로 전송하세요. 전체 종료는 다음 시작점 대기에서 Enter 또는 CAD 선택모드 해제입니다.";
+            lblStatus.ForeColor = TextSub;
+
+            BeginAutoCadCommandDispatch(
+                "OVIABOX",
+                delegate(bool success, string commandError)
+                {
+                    autoCadSelectionCommandDispatchReturned = true;
+
+                    if (!success)
+                    {
+                        waitingAutoCadImport = false;
+                        StopAutoCadWatcher();
+                        SetAutoCadSelectionModeState(false);
+
+                        MessageBox.Show(
+                            commandError,
+                            "OVIA AutoCAD 명령 실행",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning
+                        );
+
+                        return;
+                    }
+
+                    TryLoadAutoCadLatestCsv();
+
+                    if (autoCadSelectionModeActive
+                        && autoCadSelectionCommandIssuedAt != DateTime.MinValue
+                        && DateTime.Now - autoCadSelectionCommandIssuedAt > TimeSpan.FromSeconds(1)
+                        && (autoCadLoadedCsvCount > 0 || autoCadSelectionCommandObserved))
+                    {
+                        SetAutoCadSelectionModeState(false);
+                        autoCadSelectionCommandEndedAt = DateTime.Now;
+                    }
+                }
+            );
+        }
+
+        private bool PrepareAutoCadImportMode()
+        {
+            if (!HasGridData())
+            {
+                autoCadInitialImportMode = BarListImportMode.Replace;
+                return true;
+            }
+
+            autoCadInitialImportMode = DecideImportModeForCurrentGrid();
+            return autoCadInitialImportMode != BarListImportMode.Cancel;
+        }
+
+        private void ReleaseAutoCadSelectionMode_Click(object sender, EventArgs e)
+        {
+            if (!autoCadSelectionModeActive && !waitingAutoCadImport)
+            {
+                SetAutoCadSelectionModeState(false);
+                lblStatus.Text = "CAD 영역 선택모드는 이미 해제되어 있습니다.";
+                lblStatus.ForeColor = TextSub;
+                return;
+            }
+
+            lblStatus.Text = "CAD 영역 선택모드를 해제하는 중입니다.";
+            lblStatus.ForeColor = TextSub;
+
+            BeginCancelAutoCadCommand(
+                delegate(bool success, string commandError)
+                {
+                    FlushAutoCadCsvQueueBeforeStop();
+                    waitingAutoCadImport = false;
+                    StopAutoCadWatcher();
+                    SetAutoCadSelectionModeState(false);
+
+                    if (!success)
+                    {
+                        MessageBox.Show(
+                            commandError,
+                            "OVIA CAD 선택모드 해제",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning
+                        );
+                        return;
+                    }
+
+                    ActivateAutoCad();
+                    lblStatus.Text = "CAD 영역 선택모드를 해제했습니다. 노란 선택영역은 유지됩니다.";
+                    lblStatus.ForeColor = TextSub;
+                }
+            );
+        }
+
+        private void DeleteAutoCadSelectionBoxes_Click(object sender, EventArgs e)
+        {
+            if (isDeletingAutoCadSelectionBoxes)
+            {
+                lblStatus.Text = "CAD 선택영역을 삭제하고 있습니다. 잠시만 기다려 주세요.";
+                lblStatus.ForeColor = TextSub;
+                return;
+            }
+
             OviaEnvironmentReport report = OviaEnvironmentChecker.CheckForUi();
 
             if (!report.IsCurrentDevelopmentAutoCadReady())
@@ -1145,16 +1341,454 @@ namespace OVIA.Desktop
                 return;
             }
 
-            if (!CanImportIntoCurrentBarList())
+            SetAutoCadDeleteBusyState(true);
+            lblStatus.Text = "CAD의 현재 명령을 종료하고 선택영역을 삭제하고 있습니다. 잠시만 기다려 주세요.";
+            lblStatus.ForeColor = TextSub;
+
+            BeginCancelAndRunAutoCadCommand(
+                "OVIABOXDEL",
+                delegate(bool success, string commandError)
+                {
+                    try
+                    {
+                        FlushAutoCadCsvQueueBeforeStop();
+                        waitingAutoCadImport = false;
+                        StopAutoCadWatcher();
+                        SetAutoCadSelectionModeState(false);
+
+                        if (!success)
+                        {
+                            string friendlyMessage = GetFriendlyAutoCadDeleteError(commandError);
+                            lblStatus.Text = "CAD 선택영역을 삭제하지 못했습니다. AutoCAD 상태를 확인한 뒤 다시 실행해 주세요.";
+                            lblStatus.ForeColor = OviaFluentTheme.Danger;
+
+                            MessageBox.Show(
+                                friendlyMessage,
+                                "OVIA CAD 선택영역 삭제",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Warning
+                            );
+                            return;
+                        }
+
+                        lblStatus.Text = "CAD에 표시된 노란 선택영역을 삭제했습니다. 새로운 영역을 다시 선택할 수 있습니다.";
+                        lblStatus.ForeColor = TextSub;
+                        ActivateAutoCad();
+                    }
+                    finally
+                    {
+                        SetAutoCadDeleteBusyState(false);
+                    }
+                }
+            );
+        }
+
+        private void SetAutoCadDeleteBusyState(bool isBusy)
+        {
+            isDeletingAutoCadSelectionBoxes = isBusy;
+
+            if (deleteCadBoxButton != null && !deleteCadBoxButton.IsDisposed)
+            {
+                deleteCadBoxButton.Text = isBusy ? "CAD 선택영역 삭제 중..." : "CAD에 선택된 영역 삭제";
+                deleteCadBoxButton.Enabled = !isBusy && IsAutoCadRunning();
+                deleteCadBoxButton.Cursor = isBusy ? Cursors.Default : Cursors.Hand;
+                deleteCadBoxButton.Invalidate();
+            }
+
+            if (cadSelectionModeOffButton != null && !cadSelectionModeOffButton.IsDisposed)
+            {
+                cadSelectionModeOffButton.Enabled = !isBusy && IsAutoCadRunning() && autoCadSelectionModeActive;
+            }
+
+            if (cadSelectionButton != null && !cadSelectionButton.IsDisposed)
+            {
+                if (isBusy)
+                {
+                    cadSelectionButton.Enabled = false;
+                    cadSelectionButton.Cursor = Cursors.Default;
+                    cadSelectionButton.Invalidate();
+                }
+                else
+                {
+                    UpdateAutoCadSelectionButtonState();
+                }
+            }
+        }
+
+        private string GetFriendlyAutoCadDeleteError(string errorMessage)
+        {
+            if (IsAutoCadBusyError(errorMessage))
+            {
+                return "AutoCAD가 현재 명령 종료 또는 화면 작업을 처리 중이어서 선택영역을 삭제하지 못했습니다.\r\n\r\n"
+                    + "AutoCAD 명령창에서 Esc 키를 한두 번 누른 뒤, ‘CAD에 선택된 영역 삭제’를 다시 실행해 주세요.";
+            }
+
+            if (errorMessage == null || errorMessage.Trim() == "")
+            {
+                return "CAD 선택영역을 삭제하지 못했습니다. AutoCAD에서 현재 명령을 종료한 뒤 다시 실행해 주세요.";
+            }
+
+            return errorMessage;
+        }
+
+        private void BeginAutoCadCommandDispatch(string command, Action<bool, string> completed)
+        {
+            System.Threading.Thread commandThread = new System.Threading.Thread(
+                delegate()
+                {
+                    string errorMessage;
+                    bool success = TrySendAutoCadCommand(command, out errorMessage);
+                    CompleteAutoCadBackgroundAction(completed, success, errorMessage);
+                }
+            );
+
+            commandThread.IsBackground = true;
+            commandThread.SetApartmentState(System.Threading.ApartmentState.STA);
+            commandThread.Start();
+        }
+
+        private void BeginCancelAutoCadCommand(Action<bool, string> completed)
+        {
+            System.Threading.Thread commandThread = new System.Threading.Thread(
+                delegate()
+                {
+                    string errorMessage;
+                    bool success = TryCancelActiveAutoCadCommand(out errorMessage);
+                    CompleteAutoCadBackgroundAction(completed, success, errorMessage);
+                }
+            );
+
+            commandThread.IsBackground = true;
+            commandThread.SetApartmentState(System.Threading.ApartmentState.STA);
+            commandThread.Start();
+        }
+
+        private void BeginCancelAndRunAutoCadCommand(string command, Action<bool, string> completed)
+        {
+            System.Threading.Thread commandThread = new System.Threading.Thread(
+                delegate()
+                {
+                    DateTime cancelDeadline = DateTime.UtcNow.AddMilliseconds(AutoCadDeleteTimeoutMs);
+                    string cancelError = "";
+                    bool cancelled = false;
+                    int cancelAttempt = 0;
+
+                    while (DateTime.UtcNow <= cancelDeadline)
+                    {
+                        cancelAttempt++;
+                        cancelled = TryCancelActiveAutoCadCommand(out cancelError);
+
+                        if (cancelled)
+                        {
+                            break;
+                        }
+
+                        Trace.WriteLine("OVIA CAD delete cancel retry " + cancelAttempt.ToString(CultureInfo.InvariantCulture) + ": " + cancelError);
+
+                        if (!IsAutoCadBusyError(cancelError) && cancelAttempt >= 2)
+                        {
+                            break;
+                        }
+
+                        System.Threading.Thread.Sleep(AutoCadDeleteRetryIntervalMs);
+                    }
+
+                    if (!cancelled)
+                    {
+                        CompleteAutoCadBackgroundAction(completed, false, cancelError);
+                        return;
+                    }
+
+                    string readyError;
+
+                    if (!WaitForAutoCadReadyAfterCancel("OVIABOX", AutoCadDeleteTimeoutMs, out readyError))
+                    {
+                        CompleteAutoCadBackgroundAction(completed, false, readyError);
+                        return;
+                    }
+
+                    DateTime commandDeadline = DateTime.UtcNow.AddMilliseconds(AutoCadDeleteTimeoutMs);
+                    string commandError = "";
+                    bool commandExecuted = false;
+                    int commandAttempt = 0;
+
+                    while (DateTime.UtcNow <= commandDeadline)
+                    {
+                        commandAttempt++;
+                        commandExecuted = TrySendAutoCadCommand(command, out commandError);
+
+                        if (commandExecuted)
+                        {
+                            break;
+                        }
+
+                        Trace.WriteLine("OVIA CAD delete command retry " + commandAttempt.ToString(CultureInfo.InvariantCulture) + ": " + commandError);
+
+                        if (!IsAutoCadBusyError(commandError))
+                        {
+                            break;
+                        }
+
+                        System.Threading.Thread.Sleep(AutoCadDeleteRetryIntervalMs);
+                    }
+
+                    if (!commandExecuted && IsAutoCadBusyError(commandError))
+                    {
+                        commandError = AutoCadBusyErrorPrefix + "AutoCAD가 다른 명령을 처리 중이어서 삭제 명령을 받을 수 없습니다.";
+                    }
+
+                    if (commandExecuted)
+                    {
+                        // SendCommand는 비동기 큐에 명령을 넣으므로 버튼이 즉시 다시 눌리지 않게 짧게 안정화합니다.
+                        System.Threading.Thread.Sleep(450);
+                    }
+
+                    CompleteAutoCadBackgroundAction(completed, commandExecuted, commandError);
+                }
+            );
+
+            commandThread.IsBackground = true;
+            commandThread.SetApartmentState(System.Threading.ApartmentState.STA);
+            commandThread.Start();
+        }
+
+        private bool WaitForAutoCadReadyAfterCancel(string commandName, int timeoutMilliseconds, out string errorMessage)
+        {
+            errorMessage = "";
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(timeoutMilliseconds, 500));
+
+            while (DateTime.UtcNow <= deadline)
+            {
+                string commandNames;
+
+                if (TryGetAutoCadCommandNames(out commandNames) && commandNames.Trim() == "")
+                {
+                    return true;
+                }
+
+                System.Threading.Thread.Sleep(AutoCadDeleteRetryIntervalMs);
+            }
+
+            errorMessage = AutoCadBusyErrorPrefix + "AutoCAD가 현재 선택 명령의 종료 처리를 완료하지 못했습니다.";
+            return false;
+        }
+
+        private void CompleteAutoCadBackgroundAction(Action<bool, string> completed, bool success, string errorMessage)
+        {
+            if (completed == null || this.IsDisposed || !this.IsHandleCreated)
             {
                 return;
             }
 
-            StartAutoCadWatcher();
-            ActivateAutoCad();
+            try
+            {
+                this.BeginInvoke(new MethodInvoker(delegate
+                {
+                    completed(success, errorMessage == null ? "" : errorMessage);
+                }));
+            }
+            catch
+            {
+            }
+        }
 
-            lblStatus.Text = "AutoCAD 추출 대기 중 - OVIABOX로 영역을 계속 선택하면 자동 입력됩니다.";
-            lblStatus.ForeColor = TextSub;
+        private bool TryCancelActiveAutoCadCommand(out string errorMessage)
+        {
+            errorMessage = "";
+            bool commandCancelSent = false;
+            string rawError;
+
+            try
+            {
+                rawError = "";
+
+                bool activeBeforeCancel;
+
+                if (TryIsAutoCadCommandActive("OVIABOX", out activeBeforeCancel) && !activeBeforeCancel)
+                {
+                    return true;
+                }
+
+                ActivateAutoCad();
+                System.Threading.Thread.Sleep(120);
+
+                try
+                {
+                    System.Windows.Forms.SendKeys.SendWait("{ESC}");
+                    System.Threading.Thread.Sleep(100);
+                    System.Windows.Forms.SendKeys.SendWait("{ESC}");
+                    commandCancelSent = true;
+                }
+                catch
+                {
+                }
+
+                System.Threading.Thread.Sleep(150);
+
+                bool rawCancelSent = TrySendAutoCadRawCommand("\u0003\u0003", out rawError);
+
+                if (rawCancelSent)
+                {
+                    commandCancelSent = true;
+                }
+
+                System.Threading.Thread.Sleep(250);
+
+                bool stillActive;
+
+                if (TryIsAutoCadCommandActive("OVIABOX", out stillActive) && stillActive)
+                {
+                    string retryError;
+                    TrySendAutoCadRawCommand("\u0003\u0003\r", out retryError);
+                    System.Threading.Thread.Sleep(300);
+
+                    if (TryIsAutoCadCommandActive("OVIABOX", out stillActive) && stillActive)
+                    {
+                        errorMessage = "AutoCAD의 영역 선택 명령이 아직 실행 중입니다. AutoCAD 창에서 Esc를 두 번 누른 뒤 다시 버튼을 눌러 주세요.";
+                        return false;
+                    }
+                }
+
+                if (!commandCancelSent)
+                {
+                    errorMessage = rawError == null || rawError.Trim() == ""
+                        ? "AutoCAD의 현재 선택 명령을 종료하지 못했습니다. AutoCAD 창에서 Esc를 두 번 누른 뒤 다시 시도해 주세요."
+                        : rawError;
+                    return false;
+                }
+
+                return true;
+            }
+            catch (System.Exception ex)
+            {
+                errorMessage = "AutoCAD 선택 명령을 종료하는 중 오류가 발생했습니다.\r\n\r\n상세: " + ex.Message;
+                return false;
+            }
+        }
+
+        private void SetAutoCadSelectionModeState(bool isActive)
+        {
+            autoCadSelectionModeActive = isActive;
+
+            if (cadSelectionButton != null)
+            {
+                if (isActive)
+                {
+                    cadSelectionButton.Text = "CAD에서 영역선택중";
+                    cadSelectionButton.StartColor = OviaFluentTheme.Success;
+                    cadSelectionButton.EndColor = OviaFluentTheme.Success;
+                    cadSelectionButton.UseCustomColors = true;
+                    cadSelectionButton.UseDisabledAppearance = false;
+                    cadSelectionButton.KeepCustomColorsWhenDisabled = true;
+                    cadSelectionButton.Enabled = false;
+                    cadSelectionButton.Cursor = Cursors.Default;
+                    cadSelectionButton.Invalidate();
+                }
+                else
+                {
+                    UpdateAutoCadSelectionButtonState();
+                }
+            }
+
+            if (cadSelectionModeOffButton != null)
+            {
+                cadSelectionModeOffButton.Enabled = isActive;
+            }
+        }
+
+        private void StartAutoCadAvailabilityTimer()
+        {
+            StopAutoCadAvailabilityTimer();
+
+            autoCadAvailabilityTimer = new System.Windows.Forms.Timer();
+            autoCadAvailabilityTimer.Interval = 1000;
+            autoCadAvailabilityTimer.Tick += AutoCadAvailabilityTimer_Tick;
+            autoCadAvailabilityTimer.Start();
+
+            UpdateAutoCadSelectionButtonState();
+        }
+
+        private void StopAutoCadAvailabilityTimer()
+        {
+            if (autoCadAvailabilityTimer == null)
+            {
+                return;
+            }
+
+            autoCadAvailabilityTimer.Stop();
+            autoCadAvailabilityTimer.Tick -= AutoCadAvailabilityTimer_Tick;
+            autoCadAvailabilityTimer.Dispose();
+            autoCadAvailabilityTimer = null;
+        }
+
+        private void AutoCadAvailabilityTimer_Tick(object sender, EventArgs e)
+        {
+            UpdateAutoCadSelectionButtonState();
+        }
+
+        private void UpdateAutoCadSelectionButtonState()
+        {
+            bool isAutoCadRunning = IsAutoCadRunning();
+
+            UpdateAutoCadAuxiliaryButtonVisibility(isAutoCadRunning);
+
+            if (cadSelectionButton == null || cadSelectionButton.IsDisposed || autoCadSelectionModeActive || isDeletingAutoCadSelectionBoxes)
+            {
+                return;
+            }
+
+            cadSelectionButton.Text = "CAD에서 영역선택";
+            cadSelectionButton.StartColor = OviaFluentTheme.Accent;
+            cadSelectionButton.EndColor = OviaFluentTheme.Accent;
+            cadSelectionButton.UseCustomColors = true;
+            cadSelectionButton.KeepCustomColorsWhenDisabled = false;
+            cadSelectionButton.UseDisabledAppearance = !isAutoCadRunning;
+            cadSelectionButton.Enabled = true;
+            cadSelectionButton.Cursor = Cursors.Hand;
+            cadSelectionButton.Invalidate();
+        }
+
+        private void UpdateAutoCadAuxiliaryButtonVisibility(bool isAutoCadRunning)
+        {
+            if (cadSelectionModeOffButton != null && !cadSelectionModeOffButton.IsDisposed)
+            {
+                cadSelectionModeOffButton.Visible = isAutoCadRunning;
+                cadSelectionModeOffButton.Enabled = isAutoCadRunning && autoCadSelectionModeActive && !isDeletingAutoCadSelectionBoxes;
+            }
+
+            if (deleteCadBoxButton != null && !deleteCadBoxButton.IsDisposed)
+            {
+                deleteCadBoxButton.Visible = isAutoCadRunning;
+                deleteCadBoxButton.Enabled = isAutoCadRunning && !isDeletingAutoCadSelectionBoxes;
+            }
+        }
+
+        private void ReleaseAutoCadSelectionModeSilently()
+        {
+            if (autoCadSelectionModeActive)
+            {
+                string ignoredError;
+                TryCancelActiveAutoCadCommand(out ignoredError);
+            }
+
+            waitingAutoCadImport = false;
+            SetAutoCadSelectionModeState(false);
+        }
+
+        private void FlushAutoCadCsvQueueBeforeStop()
+        {
+            if (!waitingAutoCadImport || autoCadWatcher == null)
+            {
+                return;
+            }
+
+            try
+            {
+                TryLoadAutoCadLatestCsv();
+            }
+            catch
+            {
+            }
         }
 
         private void StartAutoCadWatcher()
@@ -1171,6 +1805,21 @@ namespace OVIA.Desktop
             autoImportStartTime = DateTime.Now.AddSeconds(-3);
             waitingAutoCadImport = true;
             autoCadContinuousAppendMode = false;
+            isProcessingAutoCadCsvQueue = false;
+            autoCadLoadedCsvCount = 0;
+            autoCadSelectionCommandIssuedAt = DateTime.MinValue;
+            autoCadSelectionCommandEndedAt = DateTime.MinValue;
+            autoCadSelectionCommandObserved = false;
+            autoCadSelectionCommandDispatchReturned = false;
+            autoCadProcessedCsvFiles.Clear();
+
+            List<string> existingCsvFiles = FindOviaBoxTableCsvFilesAfter(DateTime.MinValue);
+            int existingIndex;
+
+            for (existingIndex = 0; existingIndex < existingCsvFiles.Count; existingIndex++)
+            {
+                autoCadProcessedCsvFiles.Add(existingCsvFiles[existingIndex]);
+            }
 
             autoCadWatcher = new FileSystemWatcher();
             autoCadWatcher.Path = desktop;
@@ -1179,8 +1828,9 @@ namespace OVIA.Desktop
             autoCadWatcher.Created += AutoCadWatcher_Changed;
             autoCadWatcher.Changed += AutoCadWatcher_Changed;
             autoCadWatcher.EnableRaisingEvents = true;
+            StartAutoCadImportPollTimer();
 
-            lblStatus.Text = "AutoCAD 추출 대기 중 - OVIABOX 영역 선택과 자동 추출 CSV를 기다립니다.";
+            lblStatus.Text = "CAD에서 영역선택 대기 중 - 노란 선택박스 확인 후 Enter로 전송된 추출 결과를 기다립니다.";
         }
 
         private void StopAutoCadWatcher()
@@ -1194,7 +1844,201 @@ namespace OVIA.Desktop
                 autoCadWatcher = null;
             }
 
+            StopAutoCadImportPollTimer();
             autoCadContinuousAppendMode = false;
+            isProcessingAutoCadCsvQueue = false;
+        }
+
+        private void StartAutoCadImportPollTimer()
+        {
+            StopAutoCadImportPollTimer();
+
+            autoCadImportPollTimer = new System.Windows.Forms.Timer();
+            autoCadImportPollTimer.Interval = 500;
+            autoCadImportPollTimer.Tick += AutoCadImportPollTimer_Tick;
+            autoCadImportPollTimer.Start();
+        }
+
+        private void StopAutoCadImportPollTimer()
+        {
+            if (autoCadImportPollTimer == null)
+            {
+                return;
+            }
+
+            autoCadImportPollTimer.Stop();
+            autoCadImportPollTimer.Tick -= AutoCadImportPollTimer_Tick;
+            autoCadImportPollTimer.Dispose();
+            autoCadImportPollTimer = null;
+        }
+
+        private void AutoCadImportPollTimer_Tick(object sender, EventArgs e)
+        {
+            if (!waitingAutoCadImport || this.IsDisposed)
+            {
+                return;
+            }
+
+            TryLoadAutoCadLatestCsv();
+
+            bool commandActive;
+
+            if (TryIsAutoCadCommandActive("OVIABOX", out commandActive))
+            {
+                if (commandActive)
+                {
+                    autoCadSelectionCommandObserved = true;
+                    autoCadSelectionCommandEndedAt = DateTime.MinValue;
+                }
+                else if (autoCadSelectionModeActive
+                    && (autoCadSelectionCommandObserved
+                        || (autoCadSelectionCommandDispatchReturned
+                            && autoCadSelectionCommandIssuedAt != DateTime.MinValue
+                            && DateTime.Now - autoCadSelectionCommandIssuedAt > TimeSpan.FromSeconds(2))))
+                {
+                    SetAutoCadSelectionModeState(false);
+                    autoCadSelectionCommandEndedAt = DateTime.Now;
+                    lblStatus.Text = autoCadLoadedCsvCount > 0
+                        ? "CAD 영역 선택이 완료되었습니다. 마지막 추출 데이터를 확인하고 있습니다."
+                        : "CAD 영역 선택이 종료되었습니다. 생성된 추출 데이터를 확인하고 있습니다.";
+                    lblStatus.ForeColor = TextSub;
+                }
+            }
+
+            if (!autoCadSelectionModeActive
+                && autoCadSelectionCommandEndedAt != DateTime.MinValue
+                && DateTime.Now - autoCadSelectionCommandEndedAt > TimeSpan.FromSeconds(2))
+            {
+                TryLoadAutoCadLatestCsv();
+                waitingAutoCadImport = false;
+                StopAutoCadWatcher();
+
+                if (autoCadLoadedCsvCount > 0)
+                {
+                    lblStatus.Text = "CAD 추출 데이터 입력을 완료했습니다.";
+                    lblStatus.ForeColor = TextSub;
+                }
+                else
+                {
+                    lblStatus.Text = "CAD 선택은 종료되었지만 새 OVIA_BoxTable CSV를 찾지 못했습니다. AutoCAD 명령창의 추출 오류를 확인해 주세요.";
+                    lblStatus.ForeColor = OviaFluentTheme.Danger;
+                }
+            }
+        }
+
+        private bool TryGetAutoCadCommandNames(out string commandNames)
+        {
+            commandNames = "";
+            object autoCadApplication = null;
+            object activeDocument = null;
+
+            try
+            {
+                autoCadApplication = Marshal.GetActiveObject("AutoCAD.Application");
+
+                if (autoCadApplication == null)
+                {
+                    return false;
+                }
+
+                activeDocument = autoCadApplication.GetType().InvokeMember(
+                    "ActiveDocument",
+                    BindingFlags.GetProperty,
+                    null,
+                    autoCadApplication,
+                    null
+                );
+
+                if (activeDocument == null)
+                {
+                    return false;
+                }
+
+                object value = activeDocument.GetType().InvokeMember(
+                    "GetVariable",
+                    BindingFlags.InvokeMethod,
+                    null,
+                    activeDocument,
+                    new object[] { "CMDNAMES" }
+                );
+
+                commandNames = value == null ? "" : Convert.ToString(value, CultureInfo.InvariantCulture);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                if (activeDocument != null && Marshal.IsComObject(activeDocument))
+                {
+                    Marshal.ReleaseComObject(activeDocument);
+                }
+
+                if (autoCadApplication != null && Marshal.IsComObject(autoCadApplication))
+                {
+                    Marshal.ReleaseComObject(autoCadApplication);
+                }
+            }
+        }
+
+        private bool TryIsAutoCadCommandActive(string commandName, out bool isActive)
+        {
+            isActive = false;
+            object autoCadApplication = null;
+            object activeDocument = null;
+
+            try
+            {
+                autoCadApplication = Marshal.GetActiveObject("AutoCAD.Application");
+
+                if (autoCadApplication == null)
+                {
+                    return false;
+                }
+
+                activeDocument = autoCadApplication.GetType().InvokeMember(
+                    "ActiveDocument",
+                    BindingFlags.GetProperty,
+                    null,
+                    autoCadApplication,
+                    null
+                );
+
+                if (activeDocument == null)
+                {
+                    return false;
+                }
+
+                object commandNames = activeDocument.GetType().InvokeMember(
+                    "GetVariable",
+                    BindingFlags.InvokeMethod,
+                    null,
+                    activeDocument,
+                    new object[] { "CMDNAMES" }
+                );
+
+                string value = commandNames == null ? "" : Convert.ToString(commandNames, CultureInfo.InvariantCulture);
+                isActive = value.IndexOf(commandName, StringComparison.OrdinalIgnoreCase) >= 0;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                if (activeDocument != null && Marshal.IsComObject(activeDocument))
+                {
+                    Marshal.ReleaseComObject(activeDocument);
+                }
+
+                if (autoCadApplication != null && Marshal.IsComObject(autoCadApplication))
+                {
+                    Marshal.ReleaseComObject(autoCadApplication);
+                }
+            }
         }
 
         private void AutoCadWatcher_Changed(object sender, FileSystemEventArgs e)
@@ -1223,38 +2067,67 @@ namespace OVIA.Desktop
 
         private void TryLoadAutoCadLatestCsv()
         {
-            string filePath = FindLatestOviaBoxTableCsvAfter(autoImportStartTime);
-
-            if (filePath == "")
+            if (isProcessingAutoCadCsvQueue)
             {
                 return;
             }
 
-            if (filePath == lastLoadedFilePath)
+            isProcessingAutoCadCsvQueue = true;
+            bool loadedAny = false;
+
+            try
+            {
+                List<string> filePaths = FindOviaBoxTableCsvFilesAfter(autoImportStartTime);
+                int fileIndex;
+
+                for (fileIndex = 0; fileIndex < filePaths.Count; fileIndex++)
+                {
+                    string filePath = filePaths[fileIndex];
+
+                    if (autoCadProcessedCsvFiles.Contains(filePath))
+                    {
+                        continue;
+                    }
+
+                    if (!WaitUntilFileReady(filePath))
+                    {
+                        continue;
+                    }
+
+                    bool loaded = LoadCsvWithImportPolicy(filePath, false);
+
+                    if (!loaded)
+                    {
+                        waitingAutoCadImport = false;
+                        StopAutoCadWatcher();
+                        return;
+                    }
+
+                    autoCadProcessedCsvFiles.Add(filePath);
+                    autoCadLoadedCsvCount++;
+                    waitingAutoCadImport = true;
+                    autoCadContinuousAppendMode = true;
+                    loadedAny = true;
+                }
+            }
+            finally
+            {
+                isProcessingAutoCadCsvQueue = false;
+            }
+
+            if (!loadedAny)
             {
                 return;
             }
 
-            if (!WaitUntilFileReady(filePath))
-            {
-                return;
-            }
-
-            bool loaded = LoadCsvWithImportPolicy(filePath, false);
-
-            if (!loaded)
-            {
-                waitingAutoCadImport = false;
-                StopAutoCadWatcher();
-                return;
-            }
-
-            autoImportStartTime = DateTime.Now;
-            waitingAutoCadImport = true;
-            autoCadContinuousAppendMode = true;
-
-            lblStatus.Text = "AutoCAD 추출 데이터 입력 완료 - 다음 영역도 OVIABOX로 계속 선택해 자동 추가할 수 있습니다.";
+            lblStatus.Text = "추출 완료 - 다음 영역을 계속 선택하면 자동 추가됩니다.";
             lblStatus.ForeColor = TextSub;
+
+            if (autoCadSelectionModeActive)
+            {
+                ActivateAutoCad();
+                return;
+            }
 
             if (this.WindowState == FormWindowState.Minimized)
             {
@@ -1266,42 +2139,147 @@ namespace OVIA.Desktop
 
         private bool WaitUntilFileReady(string filePath)
         {
+            string readyMarkerPath = filePath + ".ready";
+            long previousLength = -1;
+            int stableCount = 0;
             int i;
 
-            for (i = 0; i < 10; i++)
+            for (i = 0; i < 30; i++)
             {
                 try
                 {
-                    using (FileStream stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    FileInfo csvInfo = new FileInfo(filePath);
+                    FileInfo markerInfo = new FileInfo(readyMarkerPath);
+
+                    if (csvInfo.Exists && csvInfo.Length > 0 && markerInfo.Exists && markerInfo.Length > 0)
                     {
-                        if (stream.Length > 0)
+                        bool lengthStable = csvInfo.Length == previousLength;
+                        bool writeSettled = DateTime.Now - csvInfo.LastWriteTime > TimeSpan.FromMilliseconds(200)
+                            && DateTime.Now - markerInfo.LastWriteTime > TimeSpan.FromMilliseconds(100);
+
+                        if (lengthStable && writeSettled && ValidateAutoCadExtractionPackage(filePath))
                         {
-                            return true;
+                            stableCount++;
+                            if (stableCount >= 2)
+                            {
+                                return true;
+                            }
                         }
+                        else
+                        {
+                            stableCount = 0;
+                        }
+
+                        previousLength = csvInfo.Length;
                     }
                 }
                 catch
                 {
+                    stableCount = 0;
                 }
 
                 Application.DoEvents();
-                System.Threading.Thread.Sleep(200);
+                System.Threading.Thread.Sleep(100);
             }
 
             return false;
         }
 
-        private bool IsAutoCadRunning()
+        private bool ValidateAutoCadExtractionPackage(string filePath)
         {
             try
             {
-                Process[] processes = Process.GetProcessesByName("acad");
+                List<List<string>> rows = ReadCsv(filePath);
+                if (rows == null || rows.Count < 2 || rows[0] == null || rows[0].Count == 0)
+                {
+                    return false;
+                }
 
+                int headerCount = rows[0].Count;
+                int jsonColumnIndex = -1;
+                int sourceColumnIndex = -1;
+                int statusColumnIndex = -1;
+
+                for (int c = 0; c < headerCount; c++)
+                {
+                    string header = rows[0][c] == null ? "" : rows[0][c].Trim();
+                    if (header.Equals("OVIA_CAD_SHAPE_JSON", StringComparison.OrdinalIgnoreCase)) jsonColumnIndex = c;
+                    else if (header.Equals("OVIA_SHAPE_SOURCE", StringComparison.OrdinalIgnoreCase)) sourceColumnIndex = c;
+                    else if (header.Equals("OVIA_SHAPE_STATUS", StringComparison.OrdinalIgnoreCase)) statusColumnIndex = c;
+                }
+
+                if (jsonColumnIndex < 0 || sourceColumnIndex < 0 || statusColumnIndex < 0)
+                {
+                    return false;
+                }
+
+                string csvDirectory = Path.GetDirectoryName(filePath);
+                for (int r = 1; r < rows.Count; r++)
+                {
+                    List<string> row = rows[r];
+                    if (row == null || row.Count != headerCount)
+                    {
+                        return false;
+                    }
+
+                    string source = row[sourceColumnIndex] == null ? "" : row[sourceColumnIndex].Trim();
+                    string status = row[statusColumnIndex] == null ? "" : row[statusColumnIndex].Trim();
+                    string jsonValue = row[jsonColumnIndex] == null ? "" : row[jsonColumnIndex].Trim();
+
+                    if (!source.Equals("CAD", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (status.Equals("CAD_CAPTURED", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (jsonValue == "") return false;
+                        string jsonPath = Path.IsPathRooted(jsonValue)
+                            ? jsonValue
+                            : Path.GetFullPath(Path.Combine(csvDirectory, jsonValue.Replace('/', Path.DirectorySeparatorChar)));
+                        if (!File.Exists(jsonPath) || new FileInfo(jsonPath).Length == 0) return false;
+                    }
+                    else if (!status.Equals("CAD_EMPTY", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool IsAutoCadRunning()
+        {
+            Process[] processes = null;
+
+            try
+            {
+                processes = Process.GetProcessesByName("acad");
                 return processes != null && processes.Length > 0;
             }
             catch
             {
                 return false;
+            }
+            finally
+            {
+                if (processes != null)
+                {
+                    int i;
+
+                    for (i = 0; i < processes.Length; i++)
+                    {
+                        if (processes[i] != null)
+                        {
+                            processes[i].Dispose();
+                        }
+                    }
+                }
             }
         }
 
@@ -1332,6 +2310,121 @@ namespace OVIA.Desktop
             }
         }
 
+        private bool TrySendAutoCadCommand(string command, out string errorMessage)
+        {
+            errorMessage = "";
+
+            if (command == null || command.Trim() == "")
+            {
+                errorMessage = "실행할 AutoCAD 명령이 지정되지 않았습니다.";
+                return false;
+            }
+
+            return TrySendAutoCadRawCommand(command.Trim() + "\r", out errorMessage);
+        }
+
+        private bool TrySendAutoCadRawCommand(string commandText, out string errorMessage)
+        {
+            errorMessage = "";
+
+            if (commandText == null || commandText.Length == 0)
+            {
+                errorMessage = "실행할 AutoCAD 명령이 지정되지 않았습니다.";
+                return false;
+            }
+
+            object autoCadApplication = null;
+            object activeDocument = null;
+
+            try
+            {
+                autoCadApplication = Marshal.GetActiveObject("AutoCAD.Application");
+
+                if (autoCadApplication == null)
+                {
+                    errorMessage = "실행 중인 AutoCAD에 연결하지 못했습니다. AutoCAD와 도면을 연 뒤 다시 시도해 주세요.";
+                    return false;
+                }
+
+                activeDocument = autoCadApplication.GetType().InvokeMember(
+                    "ActiveDocument",
+                    BindingFlags.GetProperty,
+                    null,
+                    autoCadApplication,
+                    null
+                );
+
+                if (activeDocument == null)
+                {
+                    errorMessage = "AutoCAD에서 활성 도면을 찾지 못했습니다. DWG 도면을 연 뒤 다시 시도해 주세요.";
+                    return false;
+                }
+
+                activeDocument.GetType().InvokeMember(
+                    "SendCommand",
+                    BindingFlags.InvokeMethod,
+                    null,
+                    activeDocument,
+                    new object[] { commandText }
+                );
+
+                return true;
+            }
+            catch (COMException ex)
+            {
+                if (IsAutoCadBusyHResult(ex.HResult))
+                {
+                    errorMessage = AutoCadBusyErrorPrefix + ex.Message;
+                    return false;
+                }
+
+                errorMessage = "AutoCAD 명령을 전달하지 못했습니다. AutoCAD와 활성 도면을 확인하고 OVIA 플러그인이 로드되어 있는지 확인해 주세요.\r\n\r\n상세: " + ex.Message;
+                return false;
+            }
+            catch (TargetInvocationException ex)
+            {
+                Exception detail = ex.InnerException == null ? ex : ex.InnerException;
+                COMException comDetail = detail as COMException;
+
+                if (comDetail != null && IsAutoCadBusyHResult(comDetail.HResult))
+                {
+                    errorMessage = AutoCadBusyErrorPrefix + comDetail.Message;
+                    return false;
+                }
+
+                errorMessage = "AutoCAD 명령을 실행하지 못했습니다. AutoCAD와 활성 도면을 확인하고 OVIA 플러그인이 로드되어 있는지 확인해 주세요.\r\n\r\n상세: " + detail.Message;
+                return false;
+            }
+            catch (System.Exception ex)
+            {
+                errorMessage = "AutoCAD 명령 실행 중 오류가 발생했습니다. AutoCAD와 활성 도면, OVIA 플러그인 로드 상태를 확인해 주세요.\r\n\r\n상세: " + ex.Message;
+                return false;
+            }
+            finally
+            {
+                if (activeDocument != null && Marshal.IsComObject(activeDocument))
+                {
+                    Marshal.ReleaseComObject(activeDocument);
+                }
+
+                if (autoCadApplication != null && Marshal.IsComObject(autoCadApplication))
+                {
+                    Marshal.ReleaseComObject(autoCadApplication);
+                }
+            }
+        }
+
+        private bool IsAutoCadBusyHResult(int hresult)
+        {
+            return hresult == RpcECallRejected || hresult == RpcEServerCallRetryLater;
+        }
+
+        private bool IsAutoCadBusyError(string errorMessage)
+        {
+            return errorMessage != null
+                && errorMessage.StartsWith(AutoCadBusyErrorPrefix, StringComparison.OrdinalIgnoreCase);
+        }
+
         private void LoadRecent_Click(object sender, EventArgs e)
         {
             string filePath = FindLatestOviaBoxTableCsv();
@@ -1339,7 +2432,7 @@ namespace OVIA.Desktop
             if (filePath == "")
             {
                 MessageBox.Show(
-                    "바탕화면에서 OVIA_BoxTable CSV 파일을 찾지 못했습니다.\r\n\r\nAutoCAD에서 OVIABOXTABLE을 먼저 실행하거나 CSV 선택 버튼으로 파일을 직접 선택해주세요.",
+                    "바탕화면에서 OVIA_BoxTable CSV 파일을 찾지 못했습니다.\r\n\r\nCAD에서 영역선택 버튼으로 도면 영역을 추출하거나 CSV 선택 버튼으로 파일을 직접 선택해 주세요.",
                     "OVIA",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information
@@ -3389,6 +4482,8 @@ namespace OVIA.Desktop
 
         public void BeforeLeaveWorkspaceScreen()
         {
+            StopAutoCadAvailabilityTimer();
+            ReleaseAutoCadSelectionModeSilently();
             StopAutoCadWatcher();
         }
 
@@ -3411,6 +4506,8 @@ namespace OVIA.Desktop
         {
             if (isInternalNavigation)
             {
+                StopAutoCadAvailabilityTimer();
+                ReleaseAutoCadSelectionModeSilently();
                 StopAutoCadWatcher();
                 return;
             }
@@ -3429,6 +4526,8 @@ namespace OVIA.Desktop
                 return;
             }
 
+            StopAutoCadAvailabilityTimer();
+            ReleaseAutoCadSelectionModeSilently();
             StopAutoCadWatcher();
         }
 
@@ -3509,11 +4608,24 @@ namespace OVIA.Desktop
 
         private string FindLatestOviaBoxTableCsvAfter(DateTime startTime)
         {
+            List<string> candidates = FindOviaBoxTableCsvFilesAfter(startTime);
+
+            if (candidates.Count == 0)
+            {
+                return "";
+            }
+
+            return candidates[candidates.Count - 1];
+        }
+
+        private List<string> FindOviaBoxTableCsvFilesAfter(DateTime startTime)
+        {
+            List<string> candidates = new List<string>();
             string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
 
             if (!Directory.Exists(desktop))
             {
-                return "";
+                return candidates;
             }
 
             /*
@@ -3524,10 +4636,9 @@ namespace OVIA.Desktop
 
             if (files == null || files.Length == 0)
             {
-                return "";
+                return candidates;
             }
 
-            List<string> candidates = new List<string>();
             int i;
 
             for (i = 0; i < files.Length; i++)
@@ -3549,7 +4660,7 @@ namespace OVIA.Desktop
 
             if (candidates.Count == 0)
             {
-                return "";
+                return candidates;
             }
 
             candidates.Sort(delegate (string a, string b)
@@ -3557,10 +4668,17 @@ namespace OVIA.Desktop
                 DateTime at = File.GetLastWriteTime(a);
                 DateTime bt = File.GetLastWriteTime(b);
 
-                return bt.CompareTo(at);
+                int timeCompare = at.CompareTo(bt);
+
+                if (timeCompare != 0)
+                {
+                    return timeCompare;
+                }
+
+                return string.Compare(a, b, StringComparison.OrdinalIgnoreCase);
             });
 
-            return candidates[0];
+            return candidates;
         }
 
         private bool IsOviaAutoCadTableCsvFile(string fileName)
@@ -3589,9 +4707,16 @@ namespace OVIA.Desktop
 
             BarListImportMode mode;
 
-            if (waitingAutoCadImport && autoCadContinuousAppendMode && HasGridData())
+            if (waitingAutoCadImport)
             {
-                mode = BarListImportMode.Append;
+                if (autoCadContinuousAppendMode && HasGridData())
+                {
+                    mode = BarListImportMode.Append;
+                }
+                else
+                {
+                    mode = autoCadInitialImportMode;
+                }
             }
             else
             {
@@ -3908,6 +5033,7 @@ namespace OVIA.Desktop
             try
             {
                 List<List<string>> rows = ReadCsv(filePath);
+                NormalizeCadShapePathsInCsvRows(rows, filePath);
 
                 if (rows.Count == 0)
                 {
@@ -3956,6 +5082,7 @@ namespace OVIA.Desktop
             try
             {
                 List<List<string>> rows = ReadCsv(filePath);
+                NormalizeCadShapePathsInCsvRows(rows, filePath);
 
                 if (rows.Count == 0)
                 {
@@ -3969,7 +5096,22 @@ namespace OVIA.Desktop
                     return LoadCsv(filePath, false);
                 }
 
-                AppendCsvRows(rows);
+                int skippedDuplicateCount;
+                int appendedRowCount = AppendCsvRows(rows, out skippedDuplicateCount);
+
+                if (appendedRowCount <= 0)
+                {
+                    allowExtractEditMenu = true;
+                    txtFilePath.Text = filePath;
+                    lastLoadedFilePath = filePath;
+                    RecalculateSummary();
+                    lblStatus.Text = skippedDuplicateCount > 0
+                        ? "중복 선택 영역은 제외되었습니다. 기존 BarList 값은 그대로 유지됩니다."
+                        : "추가할 신규 BarList 행이 없습니다.";
+                    lblStatus.ForeColor = TextSub;
+                    return true;
+                }
+
                 rebarMismatchWarningShown = false;
                 ApplyRebarCalculationAndValidation(true);
                 allowExtractEditMenu = true;
@@ -3978,7 +5120,9 @@ namespace OVIA.Desktop
                 lastLoadedFilePath = filePath;
                 RecalculateSummary();
                 MarkUnsaved();
-                lblStatus.Text = "BarList 데이터가 기존 행 뒤에 추가되었습니다 - " + GetMappingSummaryText();
+                lblStatus.Text = skippedDuplicateCount > 0
+                    ? "중복 " + skippedDuplicateCount.ToString() + "개 행을 제외하고 신규 " + appendedRowCount.ToString() + "개 행을 추가했습니다."
+                    : "BarList 데이터가 기존 행 뒤에 추가되었습니다 - " + GetMappingSummaryText();
                 lblStatus.ForeColor = OviaFluentTheme.Danger;
                 return true;
             }
@@ -3990,13 +5134,67 @@ namespace OVIA.Desktop
             }
         }
 
-        private void AppendCsvRows(List<List<string>> rows)
+        private void NormalizeCadShapePathsInCsvRows(List<List<string>> rows, string csvFilePath)
         {
+            if (rows == null || rows.Count == 0 || rows[0] == null || csvFilePath == null)
+            {
+                return;
+            }
+
+            int jsonColumnIndex = -1;
+
+            for (int i = 0; i < rows[0].Count; i++)
+            {
+                string header = rows[0][i] == null ? "" : rows[0][i].Trim();
+
+                if (header.Equals("OVIA_CAD_SHAPE_JSON", StringComparison.OrdinalIgnoreCase) ||
+                    header.Equals("CAD_SHAPE_JSON", StringComparison.OrdinalIgnoreCase) ||
+                    header.Equals("OVIA CAD SHAPE JSON", StringComparison.OrdinalIgnoreCase))
+                {
+                    jsonColumnIndex = i;
+                    break;
+                }
+            }
+
+            if (jsonColumnIndex < 0)
+            {
+                return;
+            }
+
+            string csvDirectory = Path.GetDirectoryName(csvFilePath);
+
+            if (csvDirectory == null || csvDirectory.Trim() == "")
+            {
+                return;
+            }
+
+            for (int r = 1; r < rows.Count; r++)
+            {
+                if (rows[r] == null || jsonColumnIndex >= rows[r].Count)
+                {
+                    continue;
+                }
+
+                string value = rows[r][jsonColumnIndex] == null ? "" : rows[r][jsonColumnIndex].Trim();
+
+                if (value == "" || Path.IsPathRooted(value))
+                {
+                    continue;
+                }
+
+                string absolutePath = Path.GetFullPath(Path.Combine(csvDirectory, value.Replace('/', Path.DirectorySeparatorChar)));
+                rows[r][jsonColumnIndex] = absolutePath;
+            }
+        }
+
+        private int AppendCsvRows(List<List<string>> rows, out int skippedDuplicateCount)
+        {
+            skippedDuplicateCount = 0;
             rows = RemoveRuntimeCsvColumnsForDisplay(rows);
 
             if (rows == null || rows.Count == 0)
             {
-                return;
+                return 0;
             }
 
             BeginGridSelectionUpdate();
@@ -4013,7 +5211,9 @@ namespace OVIA.Desktop
                 lastMappingVersion = store.Version;
 
                 Dictionary<int, int> destinationColumns = EnsureMappedColumnsForAppend(mappedTable);
+                HashSet<string> existingRowKeys = BuildExistingBarListRowIdentityKeys();
                 int startRowIndex = grid.Rows.Count;
+                int appendedRowCount = 0;
                 int r;
                 int i;
 
@@ -4043,26 +5243,135 @@ namespace OVIA.Desktop
                         }
                     }
 
+                    string rowIdentityKey = BuildBarListRowIdentityKey(cells);
+
+                    if (rowIdentityKey != "" && existingRowKeys.Contains(rowIdentityKey))
+                    {
+                        skippedDuplicateCount++;
+                        continue;
+                    }
+
                     int newRowIndex = grid.Rows.Add(cells);
                     SetRowOriginalValues(newRowIndex, cells);
-                }
+                    appendedRowCount++;
 
-                ConvertAppendedWeightColumnsIfNeeded(mappedTable, destinationColumns, startRowIndex, grid.Rows.Count - 1);
-                ApplyGridColumnStyle();
-
-                for (r = startRowIndex; r < grid.Rows.Count; r++)
-                {
-                    if (!grid.Rows[r].IsNewRow)
+                    if (rowIdentityKey != "")
                     {
-                        SetRowOriginalValues(r, CloneRowValues(grid.Rows[r]));
+                        existingRowKeys.Add(rowIdentityKey);
                     }
                 }
+
+                if (appendedRowCount > 0)
+                {
+                    ConvertAppendedWeightColumnsIfNeeded(mappedTable, destinationColumns, startRowIndex, grid.Rows.Count - 1);
+                    ApplyGridColumnStyle();
+                    ApplySourceDrawingToolTips(startRowIndex, grid.Rows.Count - 1);
+
+                    for (r = startRowIndex; r < grid.Rows.Count; r++)
+                    {
+                        if (!grid.Rows[r].IsNewRow)
+                        {
+                            SetRowOriginalValues(r, CloneRowValues(grid.Rows[r]));
+                        }
+                    }
+                }
+
+                return appendedRowCount;
             }
             finally
             {
                 grid.ResumeLayout();
                 EndGridSelectionUpdate();
             }
+        }
+
+        private HashSet<string> BuildExistingBarListRowIdentityKeys()
+        {
+            HashSet<string> keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (grid == null || grid.Columns.Count == 0)
+            {
+                return keys;
+            }
+
+            int rowIndex;
+
+            for (rowIndex = 0; rowIndex < grid.Rows.Count; rowIndex++)
+            {
+                if (grid.Rows[rowIndex].IsNewRow)
+                {
+                    continue;
+                }
+
+                string key = BuildBarListRowIdentityKey(CloneRowValues(grid.Rows[rowIndex]));
+
+                if (key != "")
+                {
+                    keys.Add(key);
+                }
+            }
+
+            return keys;
+        }
+
+        private string BuildBarListRowIdentityKey(object[] cells)
+        {
+            if (grid == null || cells == null || cells.Length == 0)
+            {
+                return "";
+            }
+
+            int markColumnIndex = FindExactColumnIndexByHeaders(new string[] { "번호", "부호", "MARK", "MARK NO", "BAR NO" });
+
+            if (markColumnIndex < 0 || markColumnIndex >= cells.Length)
+            {
+                return "";
+            }
+
+            string markNo = NormalizeBarListDuplicateToken(Convert.ToString(cells[markColumnIndex]));
+
+            if (markNo == "")
+            {
+                return "";
+            }
+
+            int sourcePathColumnIndex = FindExactColumnIndexByHeaders(new string[] { "OVIA_원본도면경로", "원본도면경로", "SOURCE_DRAWING_PATH" });
+            int sourceNameColumnIndex = FindExactColumnIndexByHeaders(new string[] { "원본 도면", "원본도면", "SOURCE_DRAWING" });
+            string sourceIdentity = "";
+
+            if (sourcePathColumnIndex >= 0 && sourcePathColumnIndex < cells.Length)
+            {
+                sourceIdentity = NormalizeBarListDuplicateToken(Convert.ToString(cells[sourcePathColumnIndex]));
+            }
+
+            if (sourceIdentity == "" && sourceNameColumnIndex >= 0 && sourceNameColumnIndex < cells.Length)
+            {
+                sourceIdentity = NormalizeBarListDuplicateToken(Convert.ToString(cells[sourceNameColumnIndex]));
+            }
+
+            /*
+             * 같은 DWG에서 같은 번호는 동일 철근 행으로 봅니다.
+             * 먼저 들어온 행의 값이 기준이며, 이후 중복 선택에서 같은 번호가 다시 들어오면
+             * 기존 값을 덮어쓰거나 재계산하지 않고 추가 자체를 건너뜁니다.
+             */
+            return sourceIdentity + "|" + markNo;
+        }
+
+        private string NormalizeBarListDuplicateToken(string value)
+        {
+            if (value == null)
+            {
+                return "";
+            }
+
+            value = value.Trim().ToUpperInvariant();
+            value = value.Replace(" ", "");
+            value = value.Replace("\t", "");
+            value = value.Replace("\r", "");
+            value = value.Replace("\n", "");
+            value = value.Replace("/", "\\");
+
+            return value;
         }
 
         private Dictionary<int, int> EnsureMappedColumnsForAppend(OviaBarListMappedTable mappedTable)
@@ -4208,8 +5517,9 @@ namespace OVIA.Desktop
 
                 ApplyUnitConversionAfterMapping(mappedTable);
                 ApplyGridColumnStyle();
+                ApplySourceDrawingToolTips(0, grid.Rows.Count - 1);
 
-                // 형상번호 표시 컬럼은 수동 형상코드 선택 시 코드값을 보여주기 위해 유지합니다.
+                // 숨김 CAD 형상 경로를 포함한 현재 열 구성이 확정된 뒤 원본값을 다시 저장합니다.
                 // 컬럼이 추가된 뒤 기존 row.Tag 원본값 배열이 밀리면 모든 컬럼이 수정된 것처럼 빨간색으로 보일 수 있으므로,
                 // CSV를 새로 불러온 직후에는 현재 화면 상태를 원본값으로 다시 잡습니다.
                 ResetAllRowOriginalValuesToCurrent();
@@ -4377,13 +5687,28 @@ namespace OVIA.Desktop
 
             bool selected = grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Selected;
             string cadShapePath = ResolveCadShapeJsonPath(GetCadShapeJsonText(e.RowIndex));
+            string shapeSource = GetShapeSourceText(e.RowIndex);
+            bool cadSource = shapeSource != null && shapeSource.Trim().Equals("CAD", StringComparison.OrdinalIgnoreCase);
 
             e.Handled = true;
             PaintGridCellBase(e, selected);
 
-            if (!IsManualShapeOverrideRow(e.RowIndex) && cadShapePath != "" && File.Exists(cadShapePath))
+            if (!IsManualShapeOverrideRow(e.RowIndex) && (cadSource || cadShapePath != ""))
             {
-                cadShapeRenderer.DrawCadShape(e.Graphics, e.CellBounds, cadShapePath, selected, GetShapeDimensionText(e.RowIndex));
+                /*
+                 * CAD 추출 행은 JSON 파일이 일시적으로 확인되지 않더라도 형번/형상코드 텍스트로
+                 * 되돌아가면 안 됩니다. 스크롤 재페인트 때 70, 407 등이 나타나는 현상을 차단하고,
+                 * CAD 벡터 경로만 단일 소스로 사용합니다.
+                 */
+                cadShapeRenderer.DrawCadShape(
+                    e.Graphics,
+                    e.CellBounds,
+                    cadShapePath,
+                    selected,
+                    GetShapeDimensionText(e.RowIndex),
+                    IsCadShapeTextEditedRow(e.RowIndex),
+                    gridZoomPercent / 100F
+                );
                 PaintGridCellBorder(e.Graphics, e.CellBounds, selected);
                 return;
             }
@@ -4408,6 +5733,19 @@ namespace OVIA.Desktop
             string source = GetShapeSourceText(rowIndex);
 
             return source != null && source.Trim().Equals("MANUAL", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string GetShapeStatusText(int rowIndex)
+        {
+            return GetFirstExistingCellText(rowIndex, new string[] { "OVIA_SHAPE_STATUS", "SHAPE_STATUS", "OVIA SHAPE STATUS" });
+        }
+
+        private bool IsCadShapeTextEditedRow(int rowIndex)
+        {
+            string status = GetShapeStatusText(rowIndex);
+
+            return status != null
+                && status.Trim().Equals("CAD_EDITED", StringComparison.OrdinalIgnoreCase);
         }
 
         private string ResolveCadShapeJsonPath(string value)
@@ -4784,7 +6122,7 @@ namespace OVIA.Desktop
                 return result;
             }
 
-            text = text.Replace("\r", ";").Replace("\n", ";").Replace(",", ";");
+            text = text.Replace("\r", ";").Replace("\n", ";").Replace("|", ";");
             string[] parts = text.Split(';');
             int i;
 
@@ -5187,6 +6525,27 @@ namespace OVIA.Desktop
             PopulateShapeNumberColumn(existingIndex, shapeColumnIndex);
         }
 
+        private void RemoveDeprecatedShapeNumberColumns()
+        {
+            if (grid == null)
+            {
+                return;
+            }
+
+            for (int i = grid.Columns.Count - 1; i >= 0; i--)
+            {
+                string header = grid.Columns[i].HeaderText == null ? "" : grid.Columns[i].HeaderText.Trim();
+                string name = grid.Columns[i].Name == null ? "" : grid.Columns[i].Name.Trim();
+
+                if (header.Equals("형상번호", StringComparison.OrdinalIgnoreCase)
+                    || header.Equals("형번", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("OVIA_ShapeNoVisible", StringComparison.OrdinalIgnoreCase))
+                {
+                    grid.Columns.RemoveAt(i);
+                }
+            }
+        }
+
         private int FindFirstRebarShapeColumnIndex()
         {
             if (grid == null)
@@ -5344,10 +6703,11 @@ namespace OVIA.Desktop
         {
             int i;
 
-            // CAD 원본에는 부위/형상번호가 없을 수 있지만 사용자가 일괄 변경/수동 형상 선택을 할 수 있어야 하므로
-            // 사용자 표시용 부위 컬럼과 형상번호 컬럼을 번호 뒤쪽에 유지합니다.
+            // 형상번호/형번은 업체별 임의 코드이므로 OVIA 표준 컬럼에서 사용하지 않습니다.
+            // 사용자 화면은 번호, 부위, 철근규격, CAD 원본 철근형상을 중심으로 구성합니다.
             EnsurePartColumnExists();
-            EnsureShapeNumberColumnExists();
+            RemoveDeprecatedShapeNumberColumns();
+            EnsureSourceDrawingColumnPosition();
 
             grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
             grid.ScrollBars = ScrollBars.Both;
@@ -5373,7 +6733,7 @@ namespace OVIA.Desktop
                 }
                 else if (IsRebarShapeHeader(name))
                 {
-                    baseWidth = 145;
+                    baseWidth = 190;
                 }
                 else if (name != null && name.Trim().Equals("형상번호", StringComparison.OrdinalIgnoreCase))
                 {
@@ -5393,7 +6753,7 @@ namespace OVIA.Desktop
                 }
                 else if (ContainsAny(name, "형상"))
                 {
-                    baseWidth = 145;
+                    baseWidth = 190;
                 }
                 else if (ContainsAny(name, "길이"))
                 {
@@ -5410,6 +6770,11 @@ namespace OVIA.Desktop
                 else if (ContainsAny(name, "중량"))
                 {
                     baseWidth = 112;
+                }
+                else if (name != null && name.Trim().Equals("원본 도면", StringComparison.OrdinalIgnoreCase))
+                {
+                    baseWidth = 190;
+                    grid.Columns[i].ReadOnly = true;
                 }
                 else if (ContainsAny(name, "비고"))
                 {
@@ -5428,15 +6793,215 @@ namespace OVIA.Desktop
                 grid.Columns[i].DefaultCellStyle.Alignment = GetBarListCellAlignment(name);
             }
 
+            int uniformRowHeight = GetUniformCadShapeRowHeight();
+            grid.RowTemplate.Height = uniformRowHeight;
+
             int r;
 
             for (r = 0; r < grid.Rows.Count; r++)
             {
                 if (!grid.Rows[r].IsNewRow)
                 {
-                    grid.Rows[r].Height = ScaleGridSize(GridBaseRowHeight);
+                    grid.Rows[r].Height = uniformRowHeight;
                 }
             }
+        }
+
+        private int GetUniformCadShapeRowHeight()
+        {
+            int baseHeight = ScaleGridSize(GridBaseRowHeight);
+            int maximumHeight = ScaleGridSize(92);
+
+            if (grid == null || grid.Rows.Count == 0)
+            {
+                return baseHeight;
+            }
+
+            int uniformHeight = baseHeight;
+            int rowIndex;
+
+            for (rowIndex = 0; rowIndex < grid.Rows.Count; rowIndex++)
+            {
+                if (grid.Rows[rowIndex].IsNewRow)
+                {
+                    continue;
+                }
+
+                int candidate = GetRecommendedCadShapeRowHeight(rowIndex);
+
+                if (candidate > uniformHeight)
+                {
+                    uniformHeight = candidate;
+                }
+            }
+
+            if (uniformHeight > maximumHeight)
+            {
+                uniformHeight = maximumHeight;
+            }
+
+            return Math.Max(baseHeight, uniformHeight);
+        }
+
+        private int GetRecommendedCadShapeRowHeight(int rowIndex)
+        {
+            int baseHeight = ScaleGridSize(GridBaseRowHeight);
+            int maximumHeight = ScaleGridSize(92);
+
+            if (grid == null || rowIndex < 0 || rowIndex >= grid.Rows.Count)
+            {
+                return baseHeight;
+            }
+
+            string cadShapePath = ResolveCadShapeJsonPath(GetCadShapeJsonText(rowIndex));
+
+            if (cadShapePath == "" || !File.Exists(cadShapePath))
+            {
+                return baseHeight;
+            }
+
+            return GetRecommendedCadShapeRowHeightFromJson(cadShapePath, baseHeight, maximumHeight);
+        }
+
+        private int GetRecommendedCadShapeRowHeightFromJson(string jsonPath, int baseHeight, int maximumHeight)
+        {
+            if (baseHeight <= 0)
+            {
+                baseHeight = ScaleGridSize(GridBaseRowHeight);
+            }
+
+            if (maximumHeight < baseHeight)
+            {
+                maximumHeight = baseHeight;
+            }
+
+            if (jsonPath == null || jsonPath.Trim() == "" || !File.Exists(jsonPath))
+            {
+                return baseHeight;
+            }
+
+            try
+            {
+                string json = File.ReadAllText(jsonPath);
+                int textCount = Regex.Matches(json, "\\\"type\\\"\\s*:\\s*\\\"TEXT\\\"", RegexOptions.IgnoreCase).Count;
+                int lineCount = Regex.Matches(json, "\\\"type\\\"\\s*:\\s*\\\"(?:LINE|ARC|CIRCLE)\\\"", RegexOptions.IgnoreCase).Count;
+                int recommended = baseHeight;
+
+                if (textCount >= 8 || lineCount >= 120)
+                {
+                    recommended = (int)Math.Round(baseHeight * 1.72);
+                }
+                else if (textCount >= 5 || lineCount >= 70)
+                {
+                    recommended = (int)Math.Round(baseHeight * 1.45);
+                }
+                else if (textCount >= 3 || lineCount >= 35)
+                {
+                    recommended = (int)Math.Round(baseHeight * 1.23);
+                }
+
+                if (recommended > maximumHeight)
+                {
+                    recommended = maximumHeight;
+                }
+
+                return Math.Max(baseHeight, recommended);
+            }
+            catch
+            {
+                return baseHeight;
+            }
+        }
+
+        private void EnsureSourceDrawingColumnPosition()
+        {
+            if (grid == null || grid.Columns.Count == 0)
+            {
+                return;
+            }
+
+            int remarkColumnIndex = FindExactColumnIndexByHeaders(new string[] { "비고" });
+            int sourceDrawingColumnIndex = FindExactColumnIndexByHeaders(new string[] { "원본 도면" });
+
+            if (remarkColumnIndex < 0 || sourceDrawingColumnIndex < 0)
+            {
+                return;
+            }
+
+            int desiredDisplayIndex = grid.Columns[remarkColumnIndex].DisplayIndex + 1;
+
+            if (desiredDisplayIndex >= grid.Columns.Count)
+            {
+                desiredDisplayIndex = grid.Columns.Count - 1;
+            }
+
+            if (grid.Columns[sourceDrawingColumnIndex].DisplayIndex != desiredDisplayIndex)
+            {
+                grid.Columns[sourceDrawingColumnIndex].DisplayIndex = desiredDisplayIndex;
+            }
+        }
+
+        private void ApplySourceDrawingToolTips(int startRowIndex, int endRowIndex)
+        {
+            if (grid == null || grid.Columns.Count == 0 || grid.Rows.Count == 0)
+            {
+                return;
+            }
+
+            int nameColumnIndex = FindExactColumnIndexByHeaders(new string[] { "원본 도면" });
+            int pathColumnIndex = FindExactColumnIndexByHeaders(new string[] { "OVIA_원본도면경로" });
+
+            if (nameColumnIndex < 0)
+            {
+                return;
+            }
+
+            if (startRowIndex < 0)
+            {
+                startRowIndex = 0;
+            }
+
+            if (endRowIndex >= grid.Rows.Count)
+            {
+                endRowIndex = grid.Rows.Count - 1;
+            }
+
+            int r;
+
+            for (r = startRowIndex; r <= endRowIndex; r++)
+            {
+                if (r < 0 || r >= grid.Rows.Count || grid.Rows[r].IsNewRow)
+                {
+                    continue;
+                }
+
+                string displayName = GetGridCellText(r, nameColumnIndex);
+                string fullPath = pathColumnIndex >= 0 ? GetGridCellText(r, pathColumnIndex) : "";
+
+                if (fullPath != "")
+                {
+                    grid.Rows[r].Cells[nameColumnIndex].ToolTipText = fullPath;
+                }
+                else if (displayName != "")
+                {
+                    grid.Rows[r].Cells[nameColumnIndex].ToolTipText = displayName;
+                }
+                else
+                {
+                    grid.Rows[r].Cells[nameColumnIndex].ToolTipText = "";
+                }
+            }
+        }
+
+        private string GetGridCellText(int rowIndex, int columnIndex)
+        {
+            if (grid == null || rowIndex < 0 || columnIndex < 0 || rowIndex >= grid.Rows.Count || columnIndex >= grid.Columns.Count)
+            {
+                return "";
+            }
+
+            object value = grid.Rows[rowIndex].Cells[columnIndex].Value;
+            return value == null ? "" : value.ToString().Trim();
         }
 
         private DataGridViewContentAlignment GetBarListCellAlignment(string header)
@@ -6437,13 +8002,13 @@ namespace OVIA.Desktop
                 "no",
                 "part",
                 "dia",
-                "shape_no",
                 "shape",
                 "length_mm",
                 "qty_ea",
                 "total_length_m",
                 "weight_ton",
-                "remark"
+                "remark",
+                "source_drawing_name"
             };
 
             Dictionary<string, OviaBarListMappingColumn> current = new Dictionary<string, OviaBarListMappingColumn>(StringComparer.OrdinalIgnoreCase);
@@ -6454,6 +8019,11 @@ namespace OVIA.Desktop
                 OviaBarListMappingColumn col = store.StandardColumns[i];
 
                 if (col == null || col.Key == null || col.Key.Trim() == "")
+                {
+                    continue;
+                }
+
+                if (col.Key.Equals("shape_no", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -6501,6 +8071,11 @@ namespace OVIA.Desktop
                 OviaBarListMappingColumn col = store.StandardColumns[i];
 
                 if (col == null || col.Key == null || col.Key.Trim() == "")
+                {
+                    continue;
+                }
+
+                if (col.Key.Equals("shape_no", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -6998,21 +8573,21 @@ namespace OVIA.Desktop
         public static OviaBarListMappingStore CreateBuiltInDefault()
         {
             OviaBarListMappingStore store = new OviaBarListMappingStore();
-            store.Version = "built-in-2026.05.27.009";
-            store.UpdatedAt = "2026-05-27";
+            store.Version = "built-in-2026.07.14.012";
+            store.UpdatedAt = "2026-07-14";
 
             // OVIA BarList 고정 헤더 순서입니다.
             // 이 순서는 CAD 도면마다 헤더명이 달라도 화면/저장 기준으로 유지합니다.
             store.AddColumn("no", "번호", "number_or_text", 100, "NO", "NO.", "No", "No.", "순번", "번호", "번", "부호", "부호번호", "기호", "ITEM");
             store.AddColumn("part", "부위", "text", 100, "부위", "위치", "층", "구간", "시공부위", "ZONE", "AREA", "LOCATION");
             store.AddColumn("dia", "철근규격", "rebar_diameter", 100, "규격", "철근규격", "DIA", "D", "직경", "BAR DIA", "SIZE", "강종");
-            store.AddColumn("shape_no", "형상번호", "text", 100, "형상번호", "형번", "형상코드", "SHAPE NO", "SHAPE CODE", "BAR MARK", "MARK");
             store.AddColumn("shape", "철근형상", "text_or_image", 100, "형상", "형태", "철근형상", "SHAPE", "BENT", "BAR SHAPE", "절곡형상");
             store.AddColumn("length_mm", "길이(mm)", "number", 100, "길이", "L", "LENGTH", "절단길이", "산출길이", "MM", "길이MM", "길이(MM)");
             store.AddColumn("qty_ea", "수량(EA)", "number", 100, "수량", "개수", "갯수", "본수", "EA", "QTY", "QUANTITY", "수량EA", "수량(EA)");
             store.AddColumn("total_length_m", "총길이(M)", "number", 90, "총길이", "총연장", "연장", "TOTAL LENGTH", "T.L", "M", "총길이M", "총길이(M)");
             store.AddColumn("weight_ton", "중량(Ton)", "number_ton", 90, "중량", "총중량", "톤", "TON", "Ton", "ton", "WEIGHT", "WT", "TOTAL WEIGHT", "중량TON", "중량(TON)", "총중량TON", "총중량(TON)", "KG", "kg", "중량KG", "중량(KG)");
             store.AddColumn("remark", "비고", "text", 80, "비고", "REMARK", "NOTE", "메모", "특기사항", "비고사항");
+            store.AddColumn("source_drawing_name", "원본 도면", "readonly_text", 80, "원본 도면", "원본도면", "도면 파일명", "도면파일명", "SOURCE DRAWING", "SOURCE DRAWING NAME", "DWG NAME");
 
             return store;
         }
@@ -7048,6 +8623,9 @@ namespace OVIA.Desktop
     {
         public Color StartColor = OviaFluentTheme.Accent;
         public Color EndColor = OviaFluentTheme.Accent;
+        public bool UseCustomColors = false;
+        public bool UseDisabledAppearance = false;
+        public bool KeepCustomColorsWhenDisabled = false;
 
         private bool hover;
 
@@ -7085,7 +8663,13 @@ namespace OVIA.Desktop
             Color borderColor = OviaFluentTheme.ButtonPrimaryBorder;
             Color textColor = OviaFluentTheme.ButtonPrimaryText;
 
-            if (role == OVIA.Desktop.OviaButtonRole.Danger)
+            if (UseCustomColors)
+            {
+                fillColor = hover ? Lighten(StartColor, 10) : StartColor;
+                borderColor = StartColor;
+                textColor = Color.White;
+            }
+            else if (role == OVIA.Desktop.OviaButtonRole.Danger)
             {
                 fillColor = hover ? OviaFluentTheme.ButtonDangerBackHover : OviaFluentTheme.ButtonDangerBack;
                 borderColor = OviaFluentTheme.ButtonDangerBorder;
@@ -7100,6 +8684,13 @@ namespace OVIA.Desktop
             else
             {
                 fillColor = hover ? OviaFluentTheme.ButtonPrimaryBackHover : OviaFluentTheme.ButtonPrimaryBack;
+            }
+
+            if (UseDisabledAppearance || (!this.Enabled && !KeepCustomColorsWhenDisabled))
+            {
+                fillColor = OviaFluentTheme.ButtonNeutralBack;
+                borderColor = OviaFluentTheme.ButtonNeutralBorder;
+                textColor = Color.FromArgb(156, 163, 175);
             }
 
             Rectangle rect = new Rectangle(0, 0, this.Width - 1, this.Height - 1);

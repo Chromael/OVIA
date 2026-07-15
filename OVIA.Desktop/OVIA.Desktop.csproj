@@ -64,6 +64,7 @@
     <Reference Include="System.Drawing" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
@@ -80,6 +81,8 @@
     <Compile Include="Services\OviaSystemIconManager.cs" />
     <Compile Include="Services\OviaWebView2RuntimeChecker.cs" />
     <Compile Include="Services\OviaSystemSettingsStore.cs" />
+    <Compile Include="Services\OviaErpCompanyLogoService.cs" />
+    <Compile Include="Services\OviaErpAuthenticationService.cs" />
     <Compile Include="Services\OviaWindowCaptionTheme.cs" />
     <Compile Include="Services\OviaNotificationStore.cs" />
     <Compile Include="Services\OviaVersionInfoStore.cs" />
@@ -178,6 +181,9 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Assets\Icons\ovia_symbol.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ovia_logo.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Assets\Fonts\*.otf" Exclude="Assets\Fonts\SUIT-*.otf">

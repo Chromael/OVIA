@@ -95,7 +95,8 @@ namespace OVIA.Desktop
                 // 현재 행이 OVIA 형상코드로 교체된 상태라면 currentDimensionText는 OVIA 형상 입력값입니다.
                 // 이 값을 CAD 원본 형상 입력란에 재사용하면 CAD 원본값이 오염되므로,
                 // OVIA 형상 선택 상태에서는 CAD JSON 안의 원본 치수값을 우선 사용합니다.
-                bool currentIsManualOviaShape = safeCurrentValue != "";
+                RebarShapeInfo currentManualShape = this.repository.FindByRawValue(safeCurrentValue);
+                bool currentIsManualOviaShape = currentManualShape != null && currentManualShape.ShapeNo > 0;
                 PreloadCadDimensionValues(currentDimensionText, currentIsManualOviaShape);
 
                 if (safeCurrentValue != "")
@@ -255,27 +256,36 @@ namespace OVIA.Desktop
             {
                 string json = File.ReadAllText(jsonPath);
                 MatchCollection matches = Regex.Matches(json, "\\{[^\\{\\}]*\\\"type\\\"[^\\{\\}]*\\}", RegexOptions.Singleline);
-                int textIndex = 0;
+                int fallbackTextIndex = 0;
                 int i;
 
                 for (i = 0; i < matches.Count; i++)
                 {
                     string item = matches[i].Value;
                     string type = GetJsonString(item, "type").ToUpperInvariant();
-                    string text = GetJsonString(item, "text").Trim();
+                    string textValue = GetJsonString(item, "text").Trim();
 
-                    if (type != "TEXT" || text == "")
+                    if (type != "TEXT" || textValue == "")
                     {
                         continue;
                     }
 
-                    if (textIndex >= keys.Count)
+                    string textId = GetJsonString(item, "textId").Trim().ToUpperInvariant();
+                    int mappedIndex = ParseCadTextIdIndex(textId);
+
+                    if (mappedIndex < 0)
                     {
-                        break;
+                        mappedIndex = fallbackTextIndex;
                     }
 
-                    values[keys[textIndex]] = text;
-                    textIndex++;
+                    fallbackTextIndex++;
+
+                    if (mappedIndex < 0 || mappedIndex >= keys.Count)
+                    {
+                        continue;
+                    }
+
+                    values[keys[mappedIndex]] = textValue;
                 }
             }
             catch
@@ -283,6 +293,23 @@ namespace OVIA.Desktop
             }
 
             return values;
+        }
+
+        private int ParseCadTextIdIndex(string textId)
+        {
+            if (textId == null || textId.Length < 2 || Char.ToUpperInvariant(textId[0]) != 'T')
+            {
+                return -1;
+            }
+
+            int number;
+
+            if (!Int32.TryParse(textId.Substring(1), NumberStyles.Integer, CultureInfo.InvariantCulture, out number))
+            {
+                return -1;
+            }
+
+            return number <= 0 ? -1 : number - 1;
         }
 
         private List<string> SplitFieldKeys(string fieldsText)
@@ -363,7 +390,7 @@ namespace OVIA.Desktop
                 return values;
             }
 
-            string[] parts = text.Split(new char[] { ';', '|', ',' }, StringSplitOptions.RemoveEmptyEntries);
+            string[] parts = text.Split(new char[] { ';', '|' }, StringSplitOptions.RemoveEmptyEntries);
             int i;
 
             for (i = 0; i < parts.Length; i++)
@@ -498,7 +525,7 @@ namespace OVIA.Desktop
             }
 
             Label note = new Label();
-            note.Text = "선택한 형상에 표시된 알파벳/반경 기호만 입력할 수 있습니다. 필드가 미정의된 형상은 관리자 필드 등록 후 입력 가능합니다.";
+            note.Text = "CAD 원본 형상은 숫자·알파벳·기호·각도 표시를 화면 읽기 순서대로 수정하며, 입력 즉시 미리보기에 반영됩니다.";
             note.ForeColor = Color.FromArgb(92, 98, 110);
             note.Location = new Point(18, 620);
             note.Size = new Size(224, 52);
@@ -873,6 +900,7 @@ namespace OVIA.Desktop
         {
             string[] allKeys = new string[] { "A", "B", "C", "D", "E", "F", "G", "H", "R1", "R2", "R3", "R4" };
             List<string> activeKeys = shape == null ? new List<string>() : shape.GetFieldKeys();
+            bool cadImported = IsCadImportedShape(shape);
             int i;
 
             isApplyingShapeFields = true;
@@ -897,6 +925,9 @@ namespace OVIA.Desktop
 
                     if (dimensionLabels.TryGetValue(key, out label))
                     {
+                        label.Text = cadImported && enabled
+                            ? (i + 1).ToString(CultureInfo.InvariantCulture) + "번 값"
+                            : key + " 값";
                         label.ForeColor = enabled ? Color.FromArgb(35, 35, 35) : Color.FromArgb(150, 150, 150);
                     }
                 }
@@ -1125,9 +1156,9 @@ namespace OVIA.Desktop
             if (IsCadImportedShape(shape))
             {
                 lblInfo.Text = "형상구분: CAD에서 불러온 형상\r\n"
-                    + "표시명: CAD 원본 형상 수정\r\n"
-                    + "입력필드: " + (shape.FieldsText == null || shape.FieldsText.Trim() == "" ? "미정의" : shape.FieldsText.Replace("|", ", ")) + "\r\n"
-                    + "사용기준: 기존 CAD 형상은 유지하고 치수값만 수정합니다.";
+                    + "표시명: CAD 원본 문자 수정\r\n"
+                    + "입력필드: " + shape.GetFieldKeys().Count.ToString(CultureInfo.InvariantCulture) + "개 (위→아래, 같은 줄은 좌→우)\r\n"
+                    + "사용기준: 선과 위치는 유지하고 숫자·문자·기호만 수정합니다.";
                 return;
             }
 

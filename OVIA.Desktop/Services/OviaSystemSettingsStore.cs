@@ -15,6 +15,7 @@ namespace OVIA.Desktop
         public string ErpAuthPath = OviaSystemSettingsStore.DefaultErpAuthPath;
         public string ErpModuleBasePath = OviaSystemSettingsStore.DefaultErpModuleBasePath;
         public string CompanyLogoFilePath = "";
+        public string CompanyLogoMode = "DEFAULT";
         public string VersionText = "";
         public int ListPageSize = 100;
         public string BrandPrimaryHex = OviaSystemSettingsStore.DefaultBrandPrimaryHex;
@@ -119,6 +120,10 @@ namespace OVIA.Desktop
                     {
                         settings.CompanyLogoFilePath = value;
                     }
+                    else if (key.Equals("CompanyLogoMode", StringComparison.OrdinalIgnoreCase))
+                    {
+                        settings.CompanyLogoMode = value;
+                    }
                     else if (key.Equals("VersionText", StringComparison.OrdinalIgnoreCase))
                     {
                         settings.VersionText = NormalizeVersionText(value);
@@ -173,6 +178,7 @@ namespace OVIA.Desktop
                 "ErpAuthPath=" + Encode(settings.ErpAuthPath),
                 "ErpModuleBasePath=" + Encode(settings.ErpModuleBasePath),
                 "CompanyLogoFilePath=" + Encode(settings.CompanyLogoFilePath),
+                "CompanyLogoMode=" + Encode(settings.CompanyLogoMode),
                 "VersionText=" + Encode(NormalizeVersionText(settings.VersionText)),
                 "ListPageSize=" + Encode(NormalizeListPageSize(settings.ListPageSize.ToString()).ToString()),
                 "BrandPrimaryHex=" + Encode(NormalizeHexColor(settings.BrandPrimaryHex, DefaultBrandPrimaryHex)),
@@ -235,6 +241,7 @@ namespace OVIA.Desktop
             {
                 settings.CompanyLogoFilePath = "";
             }
+            settings.CompanyLogoMode = NormalizeCompanyLogoMode(settings.CompanyLogoMode);
 
             if (settings.VersionText == null)
             {
@@ -274,6 +281,7 @@ namespace OVIA.Desktop
             clone.ErpModuleBasePath = NormalizeErpPath(source.ErpModuleBasePath, DefaultErpModuleBasePath);
             clone.ErpLoginUrl = BuildErpConnectionUrl(clone);
             clone.CompanyLogoFilePath = source.CompanyLogoFilePath == null ? "" : source.CompanyLogoFilePath;
+            clone.CompanyLogoMode = NormalizeCompanyLogoMode(source.CompanyLogoMode);
             clone.VersionText = source.VersionText == null ? "" : source.VersionText;
             clone.ListPageSize = source.ListPageSize;
             clone.BrandPrimaryHex = NormalizeHexColor(source.BrandPrimaryHex, DefaultBrandPrimaryHex);
@@ -641,6 +649,19 @@ namespace OVIA.Desktop
 
             File.Copy(sourcePath, targetPath, true);
             return targetPath;
+        }
+
+
+        public static string GetCompanyLogoMode()
+        {
+            return NormalizeCompanyLogoMode(Load().CompanyLogoMode);
+        }
+
+        public static string NormalizeCompanyLogoMode(string value)
+        {
+            string mode = value == null ? "" : value.Trim().ToUpperInvariant();
+            if (mode == "LOCAL" || mode == "ERP") return mode;
+            return "DEFAULT";
         }
 
         public static string GetConfiguredCompanyLogoPath()

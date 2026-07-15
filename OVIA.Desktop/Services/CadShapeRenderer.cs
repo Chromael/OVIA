@@ -6,19 +6,34 @@ using System.Drawing.Text;
 using System.Globalization;
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Windows.Forms;
 
 namespace OVIA.Desktop
 {
     public class CadShapeRenderer
     {
-        private const float Padding = 1F;
+        private const float Padding = 0F;
+        private const float CadTextFontSizePt = 8F;
+        private const float VisualScale = 0.90F;
+        private const float StraightShapeMaxWidthRatio = 0.60F;
 
         public void DrawCadShape(Graphics g, Rectangle bounds, string jsonPath, bool selected)
         {
-            DrawCadShape(g, bounds, jsonPath, selected, "");
+            DrawCadShape(g, bounds, jsonPath, selected, "", false, 1F);
         }
 
         public void DrawCadShape(Graphics g, Rectangle bounds, string jsonPath, bool selected, string dimensionText)
+        {
+            // 형상 수정창의 실시간 미리보기는 전달된 텍스트 값을 즉시 반영합니다.
+            DrawCadShape(g, bounds, jsonPath, selected, dimensionText, true, 1F);
+        }
+
+        public void DrawCadShape(Graphics g, Rectangle bounds, string jsonPath, bool selected, string dimensionText, bool applyTextOverrides)
+        {
+            DrawCadShape(g, bounds, jsonPath, selected, dimensionText, applyTextOverrides, 1F);
+        }
+
+        public void DrawCadShape(Graphics g, Rectangle bounds, string jsonPath, bool selected, string dimensionText, bool applyTextOverrides, float viewZoomScale)
         {
             if (g == null || bounds.Width <= 2 || bounds.Height <= 2)
             {
@@ -44,30 +59,92 @@ namespace OVIA.Desktop
                 return;
             }
 
-            DrawData(g, inner, data, dimensionText);
+            /*
+             * 예외적인 CAD 객체 구성이나 기존 JSON에서 일자형 숫자만 남고 선이 빠진 경우에도
+             * 숫자만 표시되지 않도록 단일 숫자 TEXT 데이터에는 표시용 수평선을 복원합니다.
+             * 실제 지오메트리가 하나라도 있으면 적용하지 않습니다.
+             */
+            EnsureStraightShapeFallback(data);
+            DrawData(g, inner, data, dimensionText, applyTextOverrides, NormalizeViewZoomScale(viewZoomScale));
         }
 
-        private void DrawData(Graphics g, Rectangle inner, CadShapeData data, string dimensionText)
+        public int GetRecommendedRowHeight(string jsonPath, int baseHeight, int maximumHeight)
+        {
+            if (baseHeight <= 0)
+            {
+                baseHeight = 62;
+            }
+
+            if (maximumHeight < baseHeight)
+            {
+                maximumHeight = baseHeight;
+            }
+
+            if (jsonPath == null || jsonPath.Trim() == "" || !File.Exists(jsonPath))
+            {
+                return baseHeight;
+            }
+
+            CadShapeData data = Load(jsonPath);
+
+            if (data == null || data.Elements == null || data.Elements.Count == 0)
+            {
+                return baseHeight;
+            }
+
+            int textCount = CountElements(data, "TEXT");
+            int geometryCount = CountGeometryElements(data);
+            int recommended = baseHeight;
+
+            if (textCount >= 8 || geometryCount >= 120)
+            {
+                recommended = (int)Math.Round(baseHeight * 1.72);
+            }
+            else if (textCount >= 5 || geometryCount >= 70)
+            {
+                recommended = (int)Math.Round(baseHeight * 1.45);
+            }
+            else if (textCount >= 3 || geometryCount >= 35)
+            {
+                recommended = (int)Math.Round(baseHeight * 1.23);
+            }
+
+            if (recommended > maximumHeight)
+            {
+                recommended = maximumHeight;
+            }
+
+            return Math.Max(baseHeight, recommended);
+        }
+
+        private void DrawData(Graphics g, Rectangle inner, CadShapeData data, string dimensionText, bool applyTextOverrides, float viewZoomScale)
         {
             SmoothingMode oldSmoothing = g.SmoothingMode;
+            PixelOffsetMode oldPixelOffsetMode = g.PixelOffsetMode;
+            CompositingQuality oldCompositingQuality = g.CompositingQuality;
             TextRenderingHint oldTextRenderingHint = g.TextRenderingHint;
+            int oldTextContrast = g.TextContrast;
+
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.CompositingQuality = CompositingQuality.HighQuality;
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            g.TextContrast = 0;
 
             try
             {
-                RectangleF drawArea = new RectangleF(inner.Left + Padding, inner.Top + Padding, Math.Max(1F, inner.Width - Padding * 2), Math.Max(1F, inner.Height - Padding * 2));
+                RectangleF drawArea = new RectangleF(
+                    inner.Left + Padding,
+                    inner.Top + Padding,
+                    Math.Max(1F, inner.Width - Padding * 2F),
+                    Math.Max(1F, inner.Height - Padding * 2F)
+                );
 
-                if (drawArea.Width <= 1 || drawArea.Height <= 1)
+                if (drawArea.Width <= 1F || drawArea.Height <= 1F)
                 {
                     return;
                 }
 
-                /*
-                 * CAD에서 가져온 철근형상은 실제 형상과 치수값을 사람이 읽을 수 있어야 합니다.
-                 * 기존 방식은 JSON의 전체 셀 폭/높이를 기준으로 축소해서 그려, 복잡한 형상이 너무 작아졌습니다.
-                 * 여기서는 실제 객체가 존재하는 범위만 다시 계산해서 표시 영역에 맞춥니다.
-                 */
                 double contentMinX;
                 double contentMinY;
                 double contentMaxX;
@@ -81,62 +158,88 @@ namespace OVIA.Desktop
                     contentMaxY = Math.Max(data.Height, 1);
                 }
 
-                double contentWidth = Math.Max(contentMaxX - contentMinX, 1);
-                double contentHeight = Math.Max(contentMaxY - contentMinY, 1);
+                double contentWidth = Math.Max(contentMaxX - contentMinX, 1.0);
+                double contentHeight = Math.Max(contentMaxY - contentMinY, 1.0);
+                double scale = Math.Min(drawArea.Width / contentWidth, drawArea.Height / contentHeight) * VisualScale;
 
-                int textCount = CountElements(data, "TEXT");
-                int geometryCount = CountGeometryElements(data);
-
-                // 복잡한 형상은 너무 좁게 제한하지 않고, 단순 직선은 과도하게 길어지지 않도록 제한합니다.
-                float widthLimitRatio = textCount >= 4 || geometryCount >= 4 ? 5.20F : 3.20F;
-                float maxShapeWidth = Math.Min(drawArea.Width, drawArea.Height * widthLimitRatio);
-
-                if (maxShapeWidth > 1 && maxShapeWidth < drawArea.Width)
+                /*
+                 * 일자형 철근은 세로 높이가 거의 없어서 일반 맞춤 배율을 적용하면 가로 폭을
+                 * 셀 전체에 가깝게 채웁니다. CAD 원본 표처럼 가운데에 적정 길이로 보이도록
+                 * 순수 수평 일자형 형상에만 셀 가로 폭의 60% 상한을 적용합니다.
+                 * 형상선과 치수 문자는 같은 좌표 배율을 사용하므로 함께 축소됩니다.
+                 */
+                if (IsStraightHorizontalShape(data))
                 {
-                    drawArea = new RectangleF(
-                        drawArea.Left + (drawArea.Width - maxShapeWidth) / 2F,
-                        drawArea.Top,
-                        maxShapeWidth,
-                        drawArea.Height
-                    );
+                    double straightWidthScale = drawArea.Width * StraightShapeMaxWidthRatio / contentWidth;
+
+                    if (straightWidthScale < scale)
+                    {
+                        scale = straightWidthScale;
+                    }
                 }
 
-                double scale = Math.Min(drawArea.Width / contentWidth, drawArea.Height / contentHeight);
-                float offsetX = drawArea.Left + (float)((drawArea.Width - contentWidth * scale) / 2.0) - (float)(contentMinX * scale);
-                float offsetY = drawArea.Top + (float)((drawArea.Height - contentHeight * scale) / 2.0) - (float)(contentMinY * scale);
+                float offsetX = drawArea.Left
+                    + (float)((drawArea.Width - contentWidth * scale) / 2.0)
+                    - (float)(contentMinX * scale);
+                float offsetY = drawArea.Top
+                    + (float)((drawArea.Height - contentHeight * scale) / 2.0)
+                    - (float)(contentMinY * scale);
 
-                float penWidth = Math.Max(1.1F, Math.Min(2.8F, drawArea.Height / 34F));
-                float defaultFontPx = Math.Max(8.0F, Math.Min(20F, drawArea.Height / 5.6F));
-                List<string> overrideValues = BuildOverrideTextList(dimensionText);
+                float penWidth = Math.Max(1.15F, Math.Min(1.85F, inner.Height / 56F));
+                Dictionary<string, string> overrideValues = applyTextOverrides
+                    ? BuildCadTextOverrideMap(dimensionText)
+                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 int overrideTextIndex = 0;
 
-                using (Pen pen = new Pen(Color.FromArgb(15, 20, 35), penWidth))
-                using (SolidBrush textBrush = new SolidBrush(Color.FromArgb(15, 20, 35)))
+                using (Pen pen = new Pen(Color.FromArgb(8, 12, 22), penWidth))
+                using (SolidBrush textBrush = new SolidBrush(Color.FromArgb(0, 0, 0)))
+                using (Font textFont = OviaFluentTheme.FontKorean(CadTextFontSizePt * VisualScale * viewZoomScale, FontStyle.Regular, GraphicsUnit.Point))
                 {
+                    pen.StartCap = LineCap.Round;
+                    pen.EndCap = LineCap.Round;
+                    pen.LineJoin = LineJoin.Round;
+
                     int i;
 
-                    // 선/곡선 먼저 렌더링
+                    // 도형은 CAD 좌표를 같은 비율로만 축소하여 먼저 그립니다.
                     for (i = 0; i < data.Elements.Count; i++)
                     {
                         CadShapeElement element = data.Elements[i];
 
+                        if (element == null)
+                        {
+                            continue;
+                        }
+
                         if (element.Type == "LINE")
                         {
-                            g.DrawLine(pen, X(element.X1, offsetX, scale), Y(element.Y1, offsetY, scale), X(element.X2, offsetX, scale), Y(element.Y2, offsetY, scale));
+                            g.DrawLine(
+                                pen,
+                                X(element.X1, offsetX, scale),
+                                Y(element.Y1, offsetY, scale),
+                                X(element.X2, offsetX, scale),
+                                Y(element.Y2, offsetY, scale)
+                            );
                         }
                         else if (element.Type == "CIRCLE")
                         {
-                            float r = (float)(element.Radius * scale);
-                            float cx = X(element.CX, offsetX, scale);
-                            float cy = Y(element.CY, offsetY, scale);
-                            g.DrawEllipse(pen, cx - r, cy - r, r * 2, r * 2);
+                            float radius = (float)(element.Radius * scale);
+                            float centerX = X(element.CX, offsetX, scale);
+                            float centerY = Y(element.CY, offsetY, scale);
+                            g.DrawEllipse(pen, centerX - radius, centerY - radius, radius * 2F, radius * 2F);
                         }
                         else if (element.Type == "ARC")
                         {
-                            float r = (float)(element.Radius * scale);
-                            float cx = X(element.CX, offsetX, scale);
-                            float cy = Y(element.CY, offsetY, scale);
-                            RectangleF rect = new RectangleF(cx - r, cy - r, r * 2, r * 2);
+                            float radius = (float)(element.Radius * scale);
+                            float centerX = X(element.CX, offsetX, scale);
+                            float centerY = Y(element.CY, offsetY, scale);
+                            RectangleF arcBounds = new RectangleF(
+                                centerX - radius,
+                                centerY - radius,
+                                radius * 2F,
+                                radius * 2F
+                            );
+
                             float start = (float)(-element.StartAngle);
                             float sweep = (float)(-(element.EndAngle - element.StartAngle));
 
@@ -145,76 +248,139 @@ namespace OVIA.Desktop
                                 sweep = 360F;
                             }
 
-                            g.DrawArc(pen, rect, start, sweep);
+                            g.DrawArc(pen, arcBounds, start, sweep);
                         }
                     }
 
-                    // 치수값은 별도 레이어처럼 나중에 렌더링
+                    // CAD 원본 텍스트는 이동시키지 않고 원래 상대 좌표와 회전값 그대로 표시합니다.
+                    // 글자 크기만 모든 형상에서 맑은 고딕 8pt로 통일합니다.
                     for (i = 0; i < data.Elements.Count; i++)
                     {
                         CadShapeElement element = data.Elements[i];
 
-                        if (element.Type == "TEXT")
+                        if (element == null || element.Type != "TEXT")
                         {
-                            string text = element.Text == null ? "" : element.Text.Trim();
+                            continue;
+                        }
 
-                            if (overrideValues.Count > overrideTextIndex)
+                        string text = element.Text == null ? "" : element.Text.Trim();
+                        string replacement = "";
+                        string textId = element.TextId == null ? "" : element.TextId.Trim();
+
+                        if (textId != "" && overrideValues.TryGetValue(textId, out replacement))
+                        {
+                            replacement = replacement == null ? "" : replacement.Trim();
+                        }
+                        else
+                        {
+                            string legacyKey = GetLegacyCadOverrideKey(overrideTextIndex);
+
+                            if (legacyKey != "")
                             {
-                                string replacement = overrideValues[overrideTextIndex] == null ? "" : overrideValues[overrideTextIndex].Trim();
-
-                                if (replacement != "")
-                                {
-                                    text = replacement;
-                                }
-                            }
-
-                            overrideTextIndex++;
-
-                            if (text != "")
-                            {
-                                float textFontPx = GetElementFontPixelSize(element, scale, defaultFontPx);
-
-                                using (Font font = OviaFluentTheme.FontKorean(textFontPx, FontStyle.Regular, GraphicsUnit.Pixel))
-                                {
-                                    DrawReadableText(g, text, font, textBrush, element, data.Elements, drawArea, offsetX, offsetY, scale);
-                                }
+                                overrideValues.TryGetValue(legacyKey, out replacement);
+                                replacement = replacement == null ? "" : replacement.Trim();
                             }
                         }
+
+                        if (replacement != "")
+                        {
+                            text = replacement;
+                        }
+
+                        overrideTextIndex++;
+
+                        if (text == "")
+                        {
+                            continue;
+                        }
+
+                        PointF center = new PointF(
+                            X(element.X1, offsetX, scale),
+                            Y(element.Y1, offsetY, scale)
+                        );
+
+                        DrawTextAtCenter(
+                            g,
+                            text,
+                            textFont,
+                            textBrush,
+                            center,
+                            NormalizeRotation((float)element.Rotation)
+                        );
                     }
                 }
             }
             finally
             {
                 g.SmoothingMode = oldSmoothing;
+                g.PixelOffsetMode = oldPixelOffsetMode;
+                g.CompositingQuality = oldCompositingQuality;
                 g.TextRenderingHint = oldTextRenderingHint;
+                g.TextContrast = oldTextContrast;
             }
         }
 
 
-        private List<string> BuildOverrideTextList(string dimensionText)
+        private float NormalizeViewZoomScale(float value)
         {
-            List<string> result = new List<string>();
-
-            if (dimensionText == null || dimensionText.Trim() == "")
+            if (Single.IsNaN(value) || Single.IsInfinity(value) || value <= 0F)
             {
-                return result;
+                return 1F;
             }
 
+            if (value < 1F)
+            {
+                return 1F;
+            }
+
+            if (value > 2.2F)
+            {
+                return 2.2F;
+            }
+
+            return value;
+        }
+
+        private Dictionary<string, string> BuildCadTextOverrideMap(string dimensionText)
+        {
             Dictionary<string, string> values = ParseDimensionValues(dimensionText);
-            string[] keys = new string[] { "A", "B", "C", "D", "E", "F", "G", "H", "R1", "R2", "R3", "R4" };
+
+            /*
+             * 기존 형상 수정창은 A~H, R1~R4 키를 사용합니다.
+             * JSON v3의 안정적인 텍스트 ID(T1, T2...)에도 같은 값을 함께 연결하여
+             * 기존 UI를 유지하면서 CAD 텍스트가 실제 화면에 반영되도록 합니다.
+             */
+            string[] legacyKeys = new string[] { "A", "B", "C", "D", "E", "F", "G", "H", "R1", "R2", "R3", "R4" };
             int i;
 
-            for (i = 0; i < keys.Length; i++)
+            for (i = 0; i < legacyKeys.Length; i++)
             {
                 string value;
 
-                if (values.TryGetValue(keys[i], out value))
+                if (values.TryGetValue(legacyKeys[i], out value))
                 {
-                    result.Add(value);
+                    string textId = "T" + (i + 1).ToString(CultureInfo.InvariantCulture);
+
+                    if (!values.ContainsKey(textId))
+                    {
+                        values[textId] = value;
+                    }
                 }
             }
 
-            return result;
+            return values;
+        }
+
+        private string GetLegacyCadOverrideKey(int textIndex)
+        {
+            string[] keys = new string[] { "A", "B", "C", "D", "E", "F", "G", "H", "R1", "R2", "R3", "R4" };
+
+            if (textIndex < 0 || textIndex >= keys.Length)
+            {
+                return "";
+            }
+
+            return keys[textIndex];
         }
 
         private Dictionary<string, string> ParseDimensionValues(string text)
@@ -226,7 +392,7 @@ namespace OVIA.Desktop
                 return values;
             }
 
-            string[] parts = text.Split(new char[] { ';', '|', ',' }, StringSplitOptions.RemoveEmptyEntries);
+            string[] parts = text.Split(new char[] { ';', '|' }, StringSplitOptions.RemoveEmptyEntries);
             int i;
 
             for (i = 0; i < parts.Length; i++)
@@ -296,9 +462,22 @@ namespace OVIA.Desktop
                 }
                 else if (element.Type == "TEXT")
                 {
-                    double margin = Math.Max(element.Height, Math.Max(data.Width, data.Height) * 0.035);
-                    IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.X1 - margin, element.Y1 - margin);
-                    IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.X1 + margin, element.Y1 + margin);
+                    if (element.HasBounds)
+                    {
+                        IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.BoundsMinX, element.BoundsMinY);
+                        IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.BoundsMaxX, element.BoundsMaxY);
+                    }
+                    else
+                    {
+                        double estimatedHeight = Math.Max(element.Height, 0.8);
+                        double estimatedWidth = Math.Max(
+                            estimatedHeight * 0.55 * Math.Max(element.Text == null ? 0 : element.Text.Length, 1),
+                            estimatedHeight
+                        );
+                        IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.X1 - estimatedWidth / 2.0, element.Y1 - estimatedHeight / 2.0);
+                        IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.X1 + estimatedWidth / 2.0, element.Y1 + estimatedHeight / 2.0);
+                    }
+
                     found = true;
                 }
             }
@@ -329,6 +508,130 @@ namespace OVIA.Desktop
             if (y > maxY) maxY = y;
         }
 
+        private void EnsureStraightShapeFallback(CadShapeData data)
+        {
+            if (data == null || data.Elements == null || data.Elements.Count == 0)
+            {
+                return;
+            }
+
+            CadShapeElement onlyText = null;
+            int textCount = 0;
+            int geometryCount = 0;
+            int i;
+
+            for (i = 0; i < data.Elements.Count; i++)
+            {
+                CadShapeElement element = data.Elements[i];
+
+                if (element == null)
+                {
+                    continue;
+                }
+
+                if (element.Type == "TEXT")
+                {
+                    if (element.Text != null && element.Text.Trim() != "")
+                    {
+                        textCount++;
+                        onlyText = element;
+                    }
+
+                    continue;
+                }
+
+                if (element.Type == "LINE" || element.Type == "ARC" || element.Type == "CIRCLE")
+                {
+                    geometryCount++;
+                }
+            }
+
+            if (geometryCount > 0 || textCount != 1 || onlyText == null)
+            {
+                return;
+            }
+
+            string text = onlyText.Text == null ? "" : onlyText.Text.Trim().Replace(",", "");
+            double numericValue;
+
+            if (!Double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out numericValue)
+                && !Double.TryParse(text, out numericValue))
+            {
+                return;
+            }
+
+            if (numericValue <= 0)
+            {
+                return;
+            }
+
+            double textHeight = Math.Max(onlyText.Height, 1.0);
+            double estimatedTextWidth = Math.Max(textHeight * 0.55 * Math.Max(text.Length, 1), textHeight * 2.0);
+            double lineLength = Math.Max(estimatedTextWidth * 2.25, textHeight * 7.5);
+            double centerX = onlyText.X1;
+            double lineY = onlyText.Y1 + Math.Max(textHeight * 0.95, 0.8);
+
+            CadShapeElement line = new CadShapeElement();
+            line.Type = "LINE";
+            line.X1 = centerX - lineLength / 2.0;
+            line.Y1 = lineY;
+            line.X2 = centerX + lineLength / 2.0;
+            line.Y2 = lineY;
+            data.Elements.Insert(0, line);
+        }
+
+        private bool IsStraightHorizontalShape(CadShapeData data)
+        {
+            if (data == null || data.Elements == null || data.Elements.Count == 0)
+            {
+                return false;
+            }
+
+            bool hasLine = false;
+            double minY = Double.MaxValue;
+            double maxY = Double.MinValue;
+            double maxLineLength = 0.0;
+            int i;
+
+            for (i = 0; i < data.Elements.Count; i++)
+            {
+                CadShapeElement element = data.Elements[i];
+
+                if (element == null || element.Type == "TEXT")
+                {
+                    continue;
+                }
+
+                if (element.Type != "LINE")
+                {
+                    return false;
+                }
+
+                double dx = Math.Abs(element.X2 - element.X1);
+                double dy = Math.Abs(element.Y2 - element.Y1);
+                double lineLength = Math.Sqrt(dx * dx + dy * dy);
+                double horizontalTolerance = Math.Max(lineLength * 0.035, 0.10);
+
+                if (dy > horizontalTolerance || dx <= 0.0001)
+                {
+                    return false;
+                }
+
+                hasLine = true;
+                maxLineLength = Math.Max(maxLineLength, lineLength);
+                minY = Math.Min(minY, Math.Min(element.Y1, element.Y2));
+                maxY = Math.Max(maxY, Math.Max(element.Y1, element.Y2));
+            }
+
+            if (!hasLine)
+            {
+                return false;
+            }
+
+            double verticalSpread = Math.Max(maxY - minY, 0.0);
+            return verticalSpread <= Math.Max(maxLineLength * 0.05, 0.20);
+        }
+
         private int CountGeometryElements(CadShapeData data)
         {
             if (data == null || data.Elements == null)
@@ -357,28 +660,6 @@ namespace OVIA.Desktop
             return count;
         }
 
-        private float GetElementFontPixelSize(CadShapeElement element, double scale, float defaultFontPx)
-        {
-            float size = defaultFontPx;
-
-            if (element != null && element.Height > 0.0001)
-            {
-                size = (float)(element.Height * scale * 0.92);
-            }
-
-            if (size < 7F)
-            {
-                size = 7F;
-            }
-
-            if (size > 18F)
-            {
-                size = 18F;
-            }
-
-            return size;
-        }
-
         private int CountElements(CadShapeData data, string type)
         {
             if (data == null || data.Elements == null || type == null)
@@ -402,198 +683,82 @@ namespace OVIA.Desktop
             return count;
         }
 
-        private void DrawReadableText(Graphics g, string text, Font font, Brush brush, CadShapeElement textElement, List<CadShapeElement> elements, RectangleF drawArea, float offsetX, float offsetY, double scale)
+        private void DrawTextAtCenter(Graphics g, string text, Font font, Brush brush, PointF center, float rotation)
         {
-            if (text == null || text.Trim() == "")
+            if (g == null || font == null || text == null || text.Trim() == "")
             {
                 return;
             }
 
-            SizeF rawSize = g.MeasureString(text, font);
-            PointF center = new PointF(X(textElement.X1, offsetX, scale), Y(textElement.Y1, offsetY, scale));
-            float rotation = NormalizeRotation((float)textElement.Rotation);
-            SizeF visualSize = GetVisualTextSize(rawSize, rotation);
-
             /*
-             * CAD 원본 텍스트는 선 가까이에 붙어 있는 경우가 많습니다.
-             * OVIA 셀 안에서 축소 렌더링하면 선과 숫자가 겹쳐 보이므로,
-             * 회전 텍스트까지 포함해 가장 가까운 선에서 일정 간격만큼 떨어뜨립니다.
+             * 수평 문자는 GDI TextRenderer를 사용해 ClearType으로 출력합니다.
+             * 기존 DrawString + 소수점 좌표 조합은 8pt 숫자가 회색으로 번져 보이는 원인이었습니다.
              */
-            center = AdjustTextCenterAwayFromLines(center, visualSize, elements, drawArea, offsetX, offsetY, scale);
-
-            DrawTextAtCenter(g, text, font, brush, center, rotation);
-        }
-
-        private SizeF GetVisualTextSize(SizeF rawSize, float rotation)
-        {
-            float abs = Math.Abs(rotation);
-
-            if (Math.Abs(abs - 90F) < 12F)
+            if (Math.Abs(rotation) <= 0.35F)
             {
-                return new SizeF(rawSize.Height, rawSize.Width);
+                TextFormatFlags flags = TextFormatFlags.NoPadding
+                    | TextFormatFlags.NoPrefix
+                    | TextFormatFlags.SingleLine
+                    | TextFormatFlags.HorizontalCenter
+                    | TextFormatFlags.VerticalCenter
+                    | TextFormatFlags.PreserveGraphicsClipping;
+
+                Size measured = TextRenderer.MeasureText(
+                    g,
+                    text,
+                    font,
+                    new Size(10000, 1000),
+                    TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine
+                );
+
+                int width = Math.Max(measured.Width + 2, 4);
+                int height = Math.Max(measured.Height + 2, 4);
+                Rectangle textRect = new Rectangle(
+                    (int)Math.Round(center.X - width / 2F),
+                    (int)Math.Round(center.Y - height / 2F),
+                    width,
+                    height
+                );
+
+                TextRenderer.DrawText(g, text, font, textRect, Color.Black, flags);
+                return;
             }
 
-            return rawSize;
-        }
-
-        private void DrawTextAtCenter(Graphics g, string text, Font font, Brush brush, PointF center, float rotation)
-        {
             GraphicsState state = g.Save();
+            TextRenderingHint oldHint = g.TextRenderingHint;
 
             try
             {
-                SizeF size = g.MeasureString(text, font);
-                g.TranslateTransform(center.X, center.Y);
+                // 회전 문자는 ClearType의 색상 번짐을 피하고 검은 단색 GridFit으로 선명하게 출력합니다.
+                g.TextRenderingHint = TextRenderingHint.SingleBitPerPixelGridFit;
+                g.TranslateTransform((float)Math.Round(center.X), (float)Math.Round(center.Y));
+                g.RotateTransform(-rotation);
 
-                if (Math.Abs(rotation) >= 8F)
+                using (StringFormat format = (StringFormat)StringFormat.GenericTypographic.Clone())
                 {
-                    // CAD 좌표계와 화면 좌표계는 Y축 방향이 반대이므로 회전 방향을 반전합니다.
-                    g.RotateTransform(-rotation);
+                    format.Alignment = StringAlignment.Center;
+                    format.LineAlignment = StringAlignment.Center;
+                    format.FormatFlags |= StringFormatFlags.NoClip | StringFormatFlags.NoWrap;
+                    g.DrawString(text, font, brush, new PointF(0F, 0F), format);
                 }
-
-                g.DrawString(text, font, brush, -size.Width / 2F, -size.Height / 2F);
             }
             finally
             {
+                g.TextRenderingHint = oldHint;
                 g.Restore(state);
             }
         }
 
         private float NormalizeRotation(float value)
         {
-            while (value > 180F) value -= 360F;
-            while (value < -180F) value += 360F;
-
-            // 0도, 90도, -90도에 가까운 치수값은 보기 좋게 스냅합니다.
-            if (Math.Abs(value) < 6F) return 0F;
-            if (Math.Abs(value - 90F) < 6F) return 90F;
-            if (Math.Abs(value + 90F) < 6F) return -90F;
-            if (Math.Abs(Math.Abs(value) - 180F) < 6F) return 180F;
-
-            return value;
-        }
-
-        private PointF AdjustTextCenterAwayFromLines(PointF center, SizeF size, List<CadShapeElement> elements, RectangleF drawArea, float offsetX, float offsetY, double scale)
-        {
-            CadShapeElement nearest = null;
-            double nearestDistance = Double.MaxValue;
-            int i;
-
-            if (elements == null)
+            while (value > 180F)
             {
-                return center;
+                value -= 360F;
             }
 
-            for (i = 0; i < elements.Count; i++)
+            while (value < -180F)
             {
-                CadShapeElement line = elements[i];
-
-                if (line == null || line.Type != "LINE")
-                {
-                    continue;
-                }
-
-                PointF p1 = new PointF(X(line.X1, offsetX, scale), Y(line.Y1, offsetY, scale));
-                PointF p2 = new PointF(X(line.X2, offsetX, scale), Y(line.Y2, offsetY, scale));
-                double distance = DistancePointToSegment(center, p1, p2);
-
-                if (distance < nearestDistance)
-                {
-                    nearestDistance = distance;
-                    nearest = line;
-                }
-            }
-
-            float threshold = Math.Max(6F, Math.Max(size.Width, size.Height) * 0.78F);
-
-            if (nearest == null || nearestDistance > threshold)
-            {
-                return ClampPointToArea(center, size, drawArea);
-            }
-
-            PointF lp1 = new PointF(X(nearest.X1, offsetX, scale), Y(nearest.Y1, offsetY, scale));
-            PointF lp2 = new PointF(X(nearest.X2, offsetX, scale), Y(nearest.Y2, offsetY, scale));
-            float dx = lp2.X - lp1.X;
-            float dy = lp2.Y - lp1.Y;
-            PointF adjusted = center;
-            float gap = Math.Max(4F, Math.Min(size.Width, size.Height) * 0.35F);
-
-            if (Math.Abs(dx) >= Math.Abs(dy))
-            {
-                float lineY = (lp1.Y + lp2.Y) / 2F;
-
-                if (center.Y <= lineY)
-                {
-                    adjusted.Y = lineY - size.Height * 0.55F - gap;
-                }
-                else
-                {
-                    adjusted.Y = lineY + size.Height * 0.55F + gap;
-                }
-            }
-            else
-            {
-                float lineX = (lp1.X + lp2.X) / 2F;
-
-                if (center.X <= lineX)
-                {
-                    adjusted.X = lineX - size.Width * 0.55F - gap;
-                }
-                else
-                {
-                    adjusted.X = lineX + size.Width * 0.55F + gap;
-                }
-            }
-
-            return ClampPointToArea(adjusted, size, drawArea);
-        }
-
-        private PointF ClampPointToArea(PointF center, SizeF size, RectangleF drawArea)
-        {
-            center.X = Clamp(center.X, drawArea.Left + size.Width / 2F, drawArea.Right - size.Width / 2F);
-            center.Y = Clamp(center.Y, drawArea.Top + size.Height / 2F, drawArea.Bottom - size.Height / 2F);
-            return center;
-        }
-
-        private double DistancePointToSegment(PointF p, PointF a, PointF b)
-        {
-            double dx = b.X - a.X;
-            double dy = b.Y - a.Y;
-
-            if (Math.Abs(dx) < 0.0001 && Math.Abs(dy) < 0.0001)
-            {
-                double sx = p.X - a.X;
-                double sy = p.Y - a.Y;
-                return Math.Sqrt(sx * sx + sy * sy);
-            }
-
-            double t = ((p.X - a.X) * dx + (p.Y - a.Y) * dy) / (dx * dx + dy * dy);
-
-            if (t < 0) t = 0;
-            if (t > 1) t = 1;
-
-            double px = a.X + t * dx;
-            double py = a.Y + t * dy;
-            double ex = p.X - px;
-            double ey = p.Y - py;
-            return Math.Sqrt(ex * ex + ey * ey);
-        }
-
-        private float Clamp(float value, float min, float max)
-        {
-            if (min > max)
-            {
-                return value;
-            }
-
-            if (value < min)
-            {
-                return min;
-            }
-
-            if (value > max)
-            {
-                return max;
+                value += 360F;
             }
 
             return value;
@@ -625,6 +790,7 @@ namespace OVIA.Desktop
             {
                 string json = File.ReadAllText(path);
                 CadShapeData data = new CadShapeData();
+                data.Version = (int)Math.Round(GetNumber(json, "version", 1));
                 data.Width = GetNumber(json, "width", 100);
                 data.Height = GetNumber(json, "height", 60);
 
@@ -637,6 +803,7 @@ namespace OVIA.Desktop
                     CadShapeElement element = new CadShapeElement();
                     element.Type = GetString(item, "type").ToUpperInvariant();
                     element.Text = GetString(item, "text");
+                    element.TextId = GetString(item, "textId");
                     element.X1 = GetNumber(item, "x1", GetNumber(item, "x", 0));
                     element.Y1 = GetNumber(item, "y1", GetNumber(item, "y", 0));
                     element.X2 = GetNumber(item, "x2", 0);
@@ -648,6 +815,14 @@ namespace OVIA.Desktop
                     element.EndAngle = GetNumber(item, "endAngle", 0);
                     element.Height = GetNumber(item, "height", 0);
                     element.Rotation = GetNumber(item, "rotation", 0);
+                    element.HasBounds = HasNumber(item, "boundsMinX")
+                        && HasNumber(item, "boundsMinY")
+                        && HasNumber(item, "boundsMaxX")
+                        && HasNumber(item, "boundsMaxY");
+                    element.BoundsMinX = GetNumber(item, "boundsMinX", 0);
+                    element.BoundsMinY = GetNumber(item, "boundsMinY", 0);
+                    element.BoundsMaxX = GetNumber(item, "boundsMaxX", 0);
+                    element.BoundsMaxY = GetNumber(item, "boundsMaxY", 0);
                     data.Elements.Add(element);
                 }
 
@@ -657,6 +832,15 @@ namespace OVIA.Desktop
             {
                 return null;
             }
+        }
+
+        private bool HasNumber(string json, string key)
+        {
+            return Regex.IsMatch(
+                json,
+                "\\\"" + Regex.Escape(key) + "\\\"\\s*:\\s*-?\\d+(?:\\.\\d+)?",
+                RegexOptions.Singleline
+            );
         }
 
         private double GetNumber(string json, string key, double defaultValue)
@@ -693,6 +877,7 @@ namespace OVIA.Desktop
 
     internal class CadShapeData
     {
+        public int Version = 1;
         public double Width = 100;
         public double Height = 60;
         public List<CadShapeElement> Elements = new List<CadShapeElement>();
@@ -702,6 +887,7 @@ namespace OVIA.Desktop
     {
         public string Type = "";
         public string Text = "";
+        public string TextId = "";
         public double X1 = 0;
         public double Y1 = 0;
         public double X2 = 0;
@@ -713,5 +899,10 @@ namespace OVIA.Desktop
         public double EndAngle = 0;
         public double Height = 0;
         public double Rotation = 0;
+        public bool HasBounds = false;
+        public double BoundsMinX = 0;
+        public double BoundsMinY = 0;
+        public double BoundsMaxX = 0;
+        public double BoundsMaxY = 0;
     }
 }

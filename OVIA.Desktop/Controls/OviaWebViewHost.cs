@@ -340,7 +340,20 @@ namespace OVIA.Desktop.Controls
             try
             {
                 ShowLoadingOverlay();
-                await webView.EnsureCoreWebView2Async(null);
+
+                string userDataFolder = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "OVIA",
+                    "WebView2"
+                );
+                Directory.CreateDirectory(userDataFolder);
+
+                CoreWebView2Environment environment = await CoreWebView2Environment.CreateAsync(
+                    browserExecutableFolder: null,
+                    userDataFolder: userDataFolder
+                );
+
+                await webView.EnsureCoreWebView2Async(environment);
 
                 if (webView.CoreWebView2 != null)
                 {
@@ -350,6 +363,7 @@ namespace OVIA.Desktop.Controls
                     AttachNavigationEvents();
                     AttachWebViewBridgeEvents();
                     InjectWebViewPointerScript();
+                    ApplyErpSessionCookies();
                     NavigateCore(InitialUrl);
                 }
             }
@@ -359,6 +373,43 @@ namespace OVIA.Desktop.Controls
                     "WebView2 초기화 실패",
                     "웹 ERP 테스트 페이지를 불러오는 중 오류가 발생했습니다.\r\n\r\n주소: " + InitialUrl + "\r\n\r\n" + ex.Message
                 );
+            }
+        }
+
+        private void ApplyErpSessionCookies()
+        {
+            if (webView == null || webView.CoreWebView2 == null)
+            {
+                return;
+            }
+
+            try
+            {
+                foreach (OviaErpSessionCookie sessionCookie in OviaErpAuthenticationService.GetSessionCookies())
+                {
+                    if (sessionCookie == null || string.IsNullOrWhiteSpace(sessionCookie.Name) || string.IsNullOrWhiteSpace(sessionCookie.Domain))
+                    {
+                        continue;
+                    }
+
+                    CoreWebView2Cookie cookie = webView.CoreWebView2.CookieManager.CreateCookie(
+                        sessionCookie.Name,
+                        sessionCookie.Value ?? "",
+                        sessionCookie.Domain,
+                        string.IsNullOrWhiteSpace(sessionCookie.Path) ? "/" : sessionCookie.Path
+                    );
+                    cookie.IsSecure = sessionCookie.IsSecure;
+                    cookie.IsHttpOnly = sessionCookie.IsHttpOnly;
+                    if (sessionCookie.ExpiresUtc.HasValue)
+                    {
+                        cookie.Expires = sessionCookie.ExpiresUtc.Value;
+                    }
+                    webView.CoreWebView2.CookieManager.AddOrUpdateCookie(cookie);
+                }
+            }
+            catch
+            {
+                // 쿠키 전달 실패가 WebView2 화면 자체를 중단시키지는 않는다.
             }
         }
 

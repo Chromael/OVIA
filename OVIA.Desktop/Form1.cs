@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Drawing.Text;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace OVIA.Desktop
@@ -18,6 +19,11 @@ namespace OVIA.Desktop
         private Timer		loginFadeTimer;
         private bool		hasPlayedStartupFadeIn;
         private OviaWindowCaptionTheme captionTheme;
+        private OviaLogoImage loginLogo;
+        private Label loginOviaName;
+        private Label loginSlogan;
+        private Label loginDescription;
+        private bool loginInProgress;
 
         private const double	LoginFadeStep	= 0.07D;
         private const int	LoginFadeInterval	= 15;
@@ -29,12 +35,17 @@ namespace OVIA.Desktop
         private readonly Color	BorderSoft	= OviaFluentTheme.ControlBorder;
         private readonly Color	SurfaceColor	= OviaFluentTheme.AppBackground;
 
-        private readonly string	SaveFilePath	= Path.Combine(Application.StartupPath, "ovia_login_save.txt");
+        private readonly string	SaveFilePath	= Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "OVIA",
+            "ovia_login_save.txt"
+        );
 
         public Form1()
         {
             BuildOviaLoginUI();
             LoadSavedLoginInfo();
+            ReloadLoginLogoForCurrentCompany();
         }
 
         private void BuildOviaLoginUI()
@@ -134,48 +145,38 @@ namespace OVIA.Desktop
             brand.BackColor			= SurfaceColor;
             parent.Controls.Add(brand);
 
-            OviaLogoImage logo		= new OviaLogoImage();
-            logo.Location			= new Point(68, 65);
-            logo.Size				= new Size(370, 135);
-            logo.SurfaceColor		= SurfaceColor;
-            brand.Controls.Add(logo);
+            loginLogo				= new OviaLogoImage();
+            loginLogo.Location		= new Point(68, 65);
+            loginLogo.Size			= new Size(370, 135);
+            loginLogo.SurfaceColor	= SurfaceColor;
+            brand.Controls.Add(loginLogo);
 
-            bool hasCompanyLogo = OviaLogoLoader.HasConfiguredCompanyLogo();
+            loginOviaName = new Label();
+            loginOviaName.Text = "OVIA";
+            loginOviaName.AutoSize = true;
+            loginOviaName.Font = OviaFluentTheme.FontBrand(18F, FontStyle.Bold);
+            loginOviaName.ForeColor = Color.Black;
+            loginOviaName.BackColor = SurfaceColor;
+            brand.Controls.Add(loginOviaName);
 
-            int sloganY = 220;
+            loginSlogan = new Label();
+            loginSlogan.Text = "Operational Value Intelligence Agent";
+            loginSlogan.AutoSize = true;
+            loginSlogan.Font = OviaFluentTheme.FontBrand(11F, FontStyle.Regular);
+            loginSlogan.ForeColor = TextDark;
+            loginSlogan.BackColor = SurfaceColor;
+            brand.Controls.Add(loginSlogan);
 
-            if (hasCompanyLogo)
-            {
-                Label oviaName = new Label();
-                oviaName.Text = "OVIA";
-                oviaName.AutoSize = true;
-                oviaName.Font = OviaFluentTheme.FontBrand(18F, FontStyle.Bold);
-                oviaName.ForeColor = Color.Black;
-                oviaName.BackColor = SurfaceColor;
-                oviaName.Location = new Point(75, 202);
-                brand.Controls.Add(oviaName);
+            loginDescription = new Label();
+            loginDescription.Text = "업무 가치를 올리는 AI 업무 에이전트";
+            loginDescription.AutoSize = false;
+            loginDescription.Size = new Size(390, 60);
+            loginDescription.Font = OviaFluentTheme.FontBrand(10F, FontStyle.Bold);
+            loginDescription.ForeColor = Color.FromArgb(150, 158, 168);
+            loginDescription.BackColor = SurfaceColor;
+            brand.Controls.Add(loginDescription);
 
-                sloganY = 238;
-            }
-
-            Label slogan			= new Label();
-            slogan.Text				= "Operational Value Intelligence Agent";
-            slogan.AutoSize			= true;
-            slogan.Font				= OviaFluentTheme.FontBrand(11F, FontStyle.Regular);
-            slogan.ForeColor		= TextDark;
-            slogan.BackColor		= SurfaceColor;
-            slogan.Location			= new Point(78, sloganY);
-            brand.Controls.Add(slogan);
-
-            Label desc				= new Label();
-            desc.Text				= "업무 가치를 올리는 AI 업무 에이전트";
-            desc.AutoSize			= false;
-            desc.Size				= new Size(390, 60);
-            desc.Font				= OviaFluentTheme.FontBrand(10F, FontStyle.Bold);
-            desc.ForeColor			= Color.FromArgb(150, 158, 168);
-            desc.BackColor			= SurfaceColor;
-            desc.Location			= new Point(78, slogan.Bottom + 7);
-            brand.Controls.Add(desc);
+            UpdateLoginBrandTextLayout();
 
             OviaCubeIllustration cube = new OviaCubeIllustration();
             cube.Location			= new Point(62, 350);
@@ -205,6 +206,7 @@ namespace OVIA.Desktop
             card.Controls.Add(title);
 
             txtCompanyId			= AddInput(card, "회사 아이디", "회사 아이디를 입력하세요", 55, 108, false);
+            txtCompanyId.ValueChanged += CompanyId_ValueChanged;
             txtUserId				= AddInput(card, "사용자 아이디", "사용자 아이디를 입력하세요", 55, 198, false);
             txtPassword				= AddInput(card, "암호", "암호를 입력하세요", 55, 288, true);
 
@@ -296,20 +298,54 @@ namespace OVIA.Desktop
         {
             if (keyData == Keys.Enter)
             {
-                ExecuteLogin();
+                _ = ExecuteLoginAsync();
                 return true;
             }
 
             return base.ProcessCmdKey(ref msg, keyData);
         }
 
-        private void BtnLogin_Click(object sender, EventArgs e)
+        private void CompanyId_ValueChanged(object sender, EventArgs e)
         {
-            ExecuteLogin();
+            ReloadLoginLogoForCurrentCompany();
         }
 
-        private void ExecuteLogin()
+        private void ReloadLoginLogoForCurrentCompany()
         {
+            if (loginLogo == null)
+            {
+                return;
+            }
+
+            string companyId = txtCompanyId == null ? "" : txtCompanyId.Value.Trim();
+            loginLogo.Reload(companyId);
+            UpdateLoginBrandTextLayout();
+        }
+
+
+        private void UpdateLoginBrandTextLayout()
+        {
+            if (loginOviaName == null || loginSlogan == null || loginDescription == null) return;
+            string companyId = txtCompanyId == null ? "" : txtCompanyId.Value.Trim();
+            bool hasCompanyLogo = OviaLogoLoader.HasCompanyLogo(companyId);
+            loginOviaName.Visible = hasCompanyLogo;
+            loginOviaName.Location = new Point(75, 202);
+            int sloganY = hasCompanyLogo ? 238 : 220;
+            loginSlogan.Location = new Point(78, sloganY);
+            loginDescription.Location = new Point(78, loginSlogan.Bottom + 7);
+        }
+
+        private async void BtnLogin_Click(object sender, EventArgs e)
+        {
+            await ExecuteLoginAsync();
+        }
+
+        private async Task ExecuteLoginAsync()
+        {
+            if (loginInProgress)
+            {
+                return;
+            }
             string companyId		= txtCompanyId.Value.Trim();
             string userId			= txtUserId.Value.Trim();
             string password			= txtPassword.Value.Trim();
@@ -326,7 +362,44 @@ namespace OVIA.Desktop
                 return;
             }
 
-            OviaSessionSecurity.SetCurrentLogin(companyId, userId, password);
+            loginInProgress = true;
+            this.UseWaitCursor = true;
+
+            OviaErpAuthenticationResult authentication;
+            try
+            {
+                authentication = await OviaErpAuthenticationService.AuthenticateAsync(companyId, userId, password);
+            }
+            finally
+            {
+                loginInProgress = false;
+                this.UseWaitCursor = false;
+            }
+
+            if (authentication == null || !authentication.IsSuccess)
+            {
+                string failureMessage = authentication == null
+                    ? "ERP 로그인 처리 결과를 확인할 수 없습니다."
+                    : BuildErpLoginFailureMessage(authentication);
+
+                MessageBox.Show(
+                    failureMessage,
+                    "OVIA ERP 로그인 실패",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                txtPassword.FocusInput();
+                return;
+            }
+
+            // ERP 로고 사용으로 저장된 경우에만 회사별 ERP 로고를 동기화합니다.
+            if (OviaSystemSettingsStore.GetCompanyLogoMode() == "ERP")
+            {
+                OviaErpCompanyLogoService.Synchronize(companyId);
+            }
+            ReloadLoginLogoForCurrentCompany();
+
+            OviaSessionSecurity.SetCurrentLogin(companyId, userId, password, authentication.UserLevel);
 
             if (chkSaveId.Checked)
             {
@@ -357,6 +430,55 @@ namespace OVIA.Desktop
             mainForm.Show();
         }
 
+
+        private static string BuildErpLoginFailureMessage(OviaErpAuthenticationResult authentication)
+        {
+            if (authentication == null)
+            {
+                return "ERP 로그인 처리 결과를 확인할 수 없습니다.";
+            }
+
+            // res=false/msg 응답은 ERP가 보낸 msg만 그대로 표시합니다.
+            if (authentication.HasAuthenticationResponse)
+            {
+                return authentication.Message;
+            }
+
+            System.Text.StringBuilder builder = new System.Text.StringBuilder();
+            builder.Append(authentication.Message);
+
+            if (!string.IsNullOrWhiteSpace(authentication.RequestMethod))
+            {
+                builder.AppendLine();
+                builder.AppendLine();
+                builder.Append("요청 방식: ");
+                builder.Append(authentication.RequestMethod);
+            }
+
+            if (authentication.HttpStatusCode > 0)
+            {
+                builder.AppendLine();
+                builder.Append("HTTP 상태: ");
+                builder.Append(authentication.HttpStatusCode);
+            }
+
+            if (!string.IsNullOrWhiteSpace(authentication.RawResponse))
+            {
+                string raw = authentication.RawResponse;
+                if (raw.Length > 1000)
+                {
+                    raw = raw.Substring(0, 1000) + "...";
+                }
+
+                builder.AppendLine();
+                builder.AppendLine();
+                builder.AppendLine("ERP 원본 응답:");
+                builder.Append(raw);
+            }
+
+            return builder.ToString();
+        }
+
         private void LoadSavedLoginInfo()
         {
             try
@@ -384,6 +506,12 @@ namespace OVIA.Desktop
         {
             try
             {
+                string directoryPath = Path.GetDirectoryName(SaveFilePath);
+                if (!string.IsNullOrWhiteSpace(directoryPath))
+                {
+                    Directory.CreateDirectory(directoryPath);
+                }
+
                 string[] lines = new string[]
                 {
                     companyId,
@@ -560,6 +688,8 @@ namespace OVIA.Desktop
         public Color SurfaceColor = Color.White;
         public int Radius = OviaFluentTheme.ButtonRadius;
 
+        public event EventHandler ValueChanged;
+
         public string Value
         {
             get
@@ -587,7 +717,7 @@ namespace OVIA.Desktop
 
             innerTextBox = new TextBox();
             innerTextBox.BorderStyle = BorderStyle.None;
-            innerTextBox.Font = OviaFluentTheme.FontInput(10.5F, FontStyle.Bold);
+            innerTextBox.Font = OviaFluentTheme.FontInput(11F, FontStyle.Bold);
             innerTextBox.Location = new Point(18, 14);
             innerTextBox.Width = 350;
             innerTextBox.BackColor = Color.White;
@@ -745,6 +875,12 @@ namespace OVIA.Desktop
             UpdatePlaceholderVisibility();
             UpdatePasswordMask();
             UpdateCapsLockHint();
+
+            EventHandler handler = ValueChanged;
+            if (handler != null)
+            {
+                handler(this, EventArgs.Empty);
+            }
         }
 
         private void InnerTextBox_CapsLockStateChanged(object sender, KeyEventArgs e)
@@ -918,28 +1054,17 @@ namespace OVIA.Desktop
                 return;
             }
 
-            innerTextBox.UseSystemPasswordChar = false;
+            // 비밀번호도 실제 TextBox가 직접 렌더링하도록 한다.
+            // 별도 마스킹 라벨을 덮으면 선택 영역과 입력 커서가 가려지므로 사용하지 않는다.
+            innerTextBox.UseSystemPasswordChar = IsPassword;
             innerTextBox.PasswordChar = '\0';
+            innerTextBox.ForeColor = TextColor;
 
-            if (passwordMaskLabel == null)
-            {
-                return;
-            }
-
-            bool showMask = IsPassword && innerTextBox.Text.Length > 0;
-            passwordMaskLabel.Visible = showMask;
-
-            if (showMask)
-            {
-                passwordMaskLabel.Text = new string('●', innerTextBox.Text.Length);
-                passwordMaskLabel.Font = innerTextBox.Font;
-                passwordMaskLabel.BringToFront();
-                innerTextBox.ForeColor = Color.White;
-            }
-            else
+            if (passwordMaskLabel != null)
             {
                 passwordMaskLabel.Text = "";
-                innerTextBox.ForeColor = TextColor;
+                passwordMaskLabel.Visible = false;
+                passwordMaskLabel.SendToBack();
             }
         }
 
@@ -964,14 +1089,8 @@ namespace OVIA.Desktop
                 return;
             }
 
-            innerTextBox.Font = OviaFluentTheme.FontInput(10.5F, FontStyle.Bold);
-
-            if (IsPassword && innerTextBox.Text.Length > 0)
-            {
-                innerTextBox.ForeColor = Color.White;
-                return;
-            }
-
+            // 약 14px 수준의 로그인 입력 글자 크기(11pt)를 공통 적용한다.
+            innerTextBox.Font = OviaFluentTheme.FontInput(11F, FontStyle.Bold);
             innerTextBox.ForeColor = TextColor;
         }
 
@@ -1211,12 +1330,25 @@ namespace OVIA.Desktop
             this.DoubleBuffered = true;
             this.BackColor = SurfaceColor;
 
-            LoadLogo();
+            LoadLogo("");
         }
 
-        private void LoadLogo()
+        public void Reload(string companyId)
         {
-            string logoPath = OviaLogoLoader.FindLogoPath();
+            if (logoImage != null)
+            {
+                logoImage.Dispose();
+                logoImage = null;
+            }
+
+            hasImage = false;
+            LoadLogo(companyId);
+            Invalidate();
+        }
+
+        private void LoadLogo(string companyId)
+        {
+            string logoPath = OviaLogoLoader.FindLogoPath(companyId);
 
             if (logoPath == "")
             {
@@ -1315,19 +1447,36 @@ namespace OVIA.Desktop
     {
         public static string FindLogoPath()
         {
-            string companyLogoPath = OviaSystemSettingsStore.GetConfiguredCompanyLogoPath();
+            return FindLogoPath("");
+        }
 
-            if (companyLogoPath != "")
+        public static string FindLogoPath(string companyId)
+        {
+            string mode = OviaSystemSettingsStore.GetCompanyLogoMode();
+            if (mode == "LOCAL")
             {
-                return companyLogoPath;
+                string localPath = OviaSystemSettingsStore.GetConfiguredCompanyLogoPath();
+                if (localPath != "") return localPath;
             }
-
+            else if (mode == "ERP")
+            {
+                string erpLogoPath = OviaErpCompanyLogoService.GetCachedLogoPath(companyId);
+                if (erpLogoPath != "") return erpLogoPath;
+            }
             return FindDefaultLogoPath();
+        }
+
+        public static bool HasCompanyLogo(string companyId)
+        {
+            string mode = OviaSystemSettingsStore.GetCompanyLogoMode();
+            if (mode == "LOCAL") return OviaSystemSettingsStore.GetConfiguredCompanyLogoPath() != "";
+            if (mode == "ERP") return OviaErpCompanyLogoService.GetCachedLogoPath(companyId) != "";
+            return false;
         }
 
         public static bool HasConfiguredCompanyLogo()
         {
-            return OviaSystemSettingsStore.GetConfiguredCompanyLogoPath() != "";
+            return HasCompanyLogo("");
         }
 
         public static string FindDefaultLogoPath()

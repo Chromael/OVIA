@@ -55,7 +55,7 @@ namespace OVIA.Desktop
         {
             this.companyId = companyId == null ? string.Empty : companyId;
             this.userId = userId == null ? string.Empty : userId;
-            this.canEdit = OviaMenuHelpStore.GetCurrentUserPermissionLevel(this.companyId, this.userId) >= 10;
+            this.canEdit = OviaSystemSettingsStore.IsSystemAdministrator(this.companyId, this.userId);
 
             BuildUI();
             LoadRowsToGrid(OviaMenuHelpStore.Load());
@@ -2077,6 +2077,11 @@ namespace OVIA.Desktop
 
         public static bool CanAccess(string key, string companyId, string userId)
         {
+            if (OviaSystemSettingsStore.IsSystemAdministrator(companyId, userId))
+            {
+                return true;
+            }
+
             OviaMenuSetting setting = FindSetting(key);
             if (setting == null)
             {
@@ -2101,10 +2106,7 @@ namespace OVIA.Desktop
 
         public static int GetCurrentUserPermissionLevel(string companyId, string userId)
         {
-            // ERP 연동 전 임시 기준입니다.
-            // 추후 ERP 사용자 테이블의 meber_level 컬럼(1~10)을 이 메서드에 연결합니다.
-            // 레벨 1이 가장 낮고, 레벨 10이 가장 높은 권한입니다.
-            return OviaSystemSettingsStore.IsSystemAdministrator(companyId, userId) ? 10 : 1;
+            return OviaSessionSecurity.GetCurrentUserLevel(companyId, userId);
         }
 
         public static int NormalizePermissionLevel(string value)

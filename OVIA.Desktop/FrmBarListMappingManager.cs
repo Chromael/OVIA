@@ -62,7 +62,7 @@ namespace OVIA.Desktop
         {
             get
             {
-                return "CAD 도면마다 다른 철근재료표 헤더명을 OVIA 기본 헤더로 치환합니다. 매핑 텍스트는 셀 단위로 추가/수정할 수 있으며, 매핑 열은 드래그로 순서를 바꿀 수 있습니다.";
+                return "CAD 도면마다 다른 철근재료표 헤더명을 OVIA 기본 헤더로 치환합니다. 형번·형상번호는 업체별 임의 코드이므로 매핑하지 않으며, 철근규격은 필수 항목으로 관리합니다.";
             }
         }
         public FrmBarListMappingManager(string companyId, string userId)
@@ -1041,6 +1041,11 @@ namespace OVIA.Desktop
 
                 for (i = 0; i < store.StandardColumns.Count; i++)
                 {
+                    if (store.StandardColumns[i] != null && String.Equals(store.StandardColumns[i].Key, "shape_no", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
                     List<string> aliases = GetEditableAliases(store.StandardColumns[i]);
 
                     if (aliases.Count > maxAliasCount)
@@ -1054,14 +1059,22 @@ namespace OVIA.Desktop
                     AddAliasColumn();
                 }
 
+                int visibleOrder = 0;
                 for (i = 0; i < store.StandardColumns.Count; i++)
                 {
                     OviaBarListMappingColumn col = store.StandardColumns[i];
+
+                    if (col != null && String.Equals(col.Key, "shape_no", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    visibleOrder++;
                     List<string> aliases = GetEditableAliases(col);
                     object[] values = new object[grid.Columns.Count];
                     int j;
 
-                    values[0] = (i + 1).ToString();
+                    values[0] = visibleOrder.ToString();
                     values[1] = col.DisplayName;
 
                     for (j = 0; j < aliases.Count && j + 2 < values.Length; j++)

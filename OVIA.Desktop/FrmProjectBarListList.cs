@@ -3370,19 +3370,19 @@ namespace OVIA.Desktop
 
     public static class OviaSessionSecurity
     {
-        private const string SystemAdminCompanyId = "celmon";
-        private const string SystemAdminUserId = "master";
-        private const string SystemAdminPassword = "cmcm2020!!";
+        public const int SystemAdministratorLevel = 99;
 
         private static string currentCompanyId = "";
         private static string currentUserId = "";
         private static string currentPassword = "";
+        private static int currentUserLevel = 1;
 
-        public static void SetCurrentLogin(string companyId, string userId, string password)
+        public static void SetCurrentLogin(string companyId, string userId, string password, int userLevel)
         {
             currentCompanyId = companyId == null ? "" : companyId.Trim();
             currentUserId = userId == null ? "" : userId.Trim();
             currentPassword = password == null ? "" : password;
+            currentUserLevel = NormalizeLoginLevel(userLevel);
         }
 
         public static bool ValidateCurrentLogin(string companyId, string userId, string password)
@@ -3401,12 +3401,28 @@ namespace OVIA.Desktop
                 && string.Equals(currentPassword, p, StringComparison.Ordinal);
         }
 
+        public static int GetCurrentUserLevel(string companyId, string userId)
+        {
+            if (!MatchesCurrentUser(companyId, userId))
+            {
+                return 1;
+            }
+
+            return currentUserLevel;
+        }
+
         public static bool IsCurrentSystemAdministrator(string companyId, string userId)
+        {
+            return MatchesCurrentUser(companyId, userId)
+                && currentUserLevel == SystemAdministratorLevel;
+        }
+
+        private static bool MatchesCurrentUser(string companyId, string userId)
         {
             string requestedCompanyId = companyId == null ? "" : companyId.Trim();
             string requestedUserId = userId == null ? "" : userId.Trim();
 
-            if (currentCompanyId == "" || currentUserId == "" || currentPassword == "")
+            if (currentCompanyId == "" || currentUserId == "")
             {
                 return false;
             }
@@ -3421,9 +3437,15 @@ namespace OVIA.Desktop
                 return false;
             }
 
-            return string.Equals(currentCompanyId, SystemAdminCompanyId, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(currentUserId, SystemAdminUserId, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(currentPassword, SystemAdminPassword, StringComparison.Ordinal);
+            return true;
+        }
+
+        private static int NormalizeLoginLevel(int value)
+        {
+            if (value == SystemAdministratorLevel) return SystemAdministratorLevel;
+            if (value < 1) return 1;
+            if (value > 10) return 10;
+            return value;
         }
     }
 
