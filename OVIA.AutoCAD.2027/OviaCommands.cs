@@ -1534,6 +1534,25 @@ namespace OVIA.AutoCAD_2027
                 }
             }
 
+            int rejectedMisalignedGridRowCount;
+
+            if (HasLikelyMisappliedGridSchema(tableRows, out rejectedMisalignedGridRowCount))
+            {
+                /*
+                 * 인접 표의 캐시 스키마가 잘못 적용된 결과를 그대로 CSV로 내보내지 않습니다.
+                 * 대표 증상은 모든 번호가 수량과 같고, 형상 원문이 실제 도형 치수가 아니라
+                 * 총길이·중량 두 값으로만 구성되는 경우입니다. 이때 grid 결과를 폐기하면 아래의
+                 * 문자 헤더 좌표 파서와 규격 앵커 파서가 현재 선택 표를 독립적으로 다시 복구합니다.
+                 */
+                tableRows = new List<OviaBarTableRow>();
+                diagnostic = AppendDiagnostic(
+                    diagnostic,
+                    "번호·철근형상 열 오정렬이 의심되는 "
+                    + rejectedMisalignedGridRowCount.ToString(CultureInfo.InvariantCulture)
+                    + "개 행을 폐기하고 현재 선택 표를 재분석합니다."
+                );
+            }
+
             int ignoredNonRebarRowCount;
             tableRows = FilterActualRebarDataRows(tableRows, out ignoredNonRebarRowCount);
 
@@ -1584,6 +1603,19 @@ namespace OVIA.AutoCAD_2027
                     out coordinateRepairedMarkCount,
                     out coordinateRejectedMarkCount
                 );
+
+                int coordinateMisalignedRowCount;
+
+                if (HasLikelyMisappliedGridSchema(coordinateRows, out coordinateMisalignedRowCount))
+                {
+                    coordinateRows = new List<OviaBarTableRow>();
+                    diagnostic = AppendDiagnostic(
+                        diagnostic,
+                        "좌표 재분석에서도 번호·철근형상 열 오정렬 "
+                        + coordinateMisalignedRowCount.ToString(CultureInfo.InvariantCulture)
+                        + "개 행을 차단했습니다."
+                    );
+                }
 
                 int coordinateIgnoredRowCount;
                 coordinateRows = FilterActualRebarDataRows(coordinateRows, out coordinateIgnoredRowCount);
@@ -3063,6 +3095,125 @@ namespace OVIA.AutoCAD_2027
             return filtered;
         }
 
+        private bool HasLikelyMisappliedGridSchema(List<OviaBarTableRow> rows, out int affectedRowCount)
+        {
+            affectedRowCount = 0;
+
+            if (rows == null || rows.Count == 0)
+            {
+                return false;
+            }
+
+            int dataRowCount = 0;
+            int markEqualsQuantityCount = 0;
+            int shapeEqualsTotalColumnsCount = 0;
+            int i;
+
+            for (i = 0; i < rows.Count; i++)
+            {
+                OviaBarTableRow row = rows[i];
+
+                if (row == null || !String.Equals(row.RowType, "DATA", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                dataRowCount++;
+
+                string markText = row.MarkNo == null || row.MarkNo.Trim() == ""
+                    ? row.BarNo
+                    : row.MarkNo;
+                decimal markValue;
+                decimal quantityValue;
+
+                if (TryParseDecimalText(markText, out markValue)
+                    && TryParseDecimalText(row.Qty, out quantityValue)
+                    && markValue == Decimal.Truncate(markValue)
+                    && AreDecimalValuesEqualAtThreeDecimals(markValue, quantityValue))
+                {
+                    markEqualsQuantityCount++;
+                }
+
+                string shapeSource = row.ShapeRawText;
+
+                if (shapeSource == null || shapeSource.Trim() == "")
+                {
+                    shapeSource = row.ShapeText;
+                }
+
+                if (ShapeSourceMatchesTotalColumns(shapeSource, row.TotalLength, row.TotalWeight))
+                {
+                    shapeEqualsTotalColumnsCount++;
+                }
+            }
+
+            if (dataRowCount < 3)
+            {
+                return false;
+            }
+
+            int markThreshold = Math.Max(3, (int)Math.Ceiling(dataRowCount * 0.80));
+            int shapeThreshold = Math.Max(3, (int)Math.Ceiling(dataRowCount * 0.70));
+
+            if (markEqualsQuantityCount < markThreshold || shapeEqualsTotalColumnsCount < shapeThreshold)
+            {
+                return false;
+            }
+
+            affectedRowCount = Math.Min(markEqualsQuantityCount, shapeEqualsTotalColumnsCount);
+            return true;
+        }
+
+        private bool ShapeSourceMatchesTotalColumns(string shapeSource, string totalLengthText, string totalWeightText)
+        {
+            if (shapeSource == null || shapeSource.Trim() == "")
+            {
+                return false;
+            }
+
+            decimal totalLength;
+            decimal totalWeight;
+
+            if (!TryParseDecimalText(totalLengthText, out totalLength)
+                || !TryParseDecimalText(totalWeightText, out totalWeight))
+            {
+                return false;
+            }
+
+            List<string> tokens = ExtractNumericTokensPreserveThousands(shapeSource);
+
+            if (tokens.Count < 2 || tokens.Count > 4)
+            {
+                return false;
+            }
+
+            bool containsTotalLength = false;
+            bool containsTotalWeight = false;
+            int i;
+
+            for (i = 0; i < tokens.Count; i++)
+            {
+                decimal tokenValue;
+
+                if (!TryParseDecimalText(tokens[i], out tokenValue))
+                {
+                    continue;
+                }
+
+                if (AreDecimalValuesEqualAtThreeDecimals(tokenValue, totalLength))
+                {
+                    containsTotalLength = true;
+                }
+
+                if (AreDecimalValuesEqualAtThreeDecimals(tokenValue, totalWeight))
+                {
+                    containsTotalWeight = true;
+                }
+            }
+
+            return containsTotalLength && containsTotalWeight;
+        }
+
         private bool RecoverBarTableMarkNumbersByPhysicalColumn(
             List<OviaBarTableRow> rows,
             List<OviaTextRow> analysisTextRows,
@@ -3807,6 +3958,25 @@ namespace OVIA.AutoCAD_2027
             string drawingIdentity = GetCurrentGridSchemaDrawingIdentity();
             double selectionMinX = Math.Min(minPoint.X, maxPoint.X);
             double selectionMaxX = Math.Max(minPoint.X, maxPoint.X);
+
+            /*
+             * 전달 좌표보다 현재 선택 표에서 실제 검출된 물리 세로선 범위를 우선합니다.
+             * 분석창은 인접 표 헤더를 찾기 위해 확장될 수 있지만, verticalXs는 이미
+             * LimitGridVerticalCoordinatesToSelectedTable을 통과한 현재 표 전용 좌표입니다.
+             */
+            if (verticalXs != null && verticalXs.Count >= 2)
+            {
+                selectionMinX = verticalXs[0];
+                selectionMaxX = verticalXs[0];
+                int detectedIndex;
+
+                for (detectedIndex = 1; detectedIndex < verticalXs.Count; detectedIndex++)
+                {
+                    selectionMinX = Math.Min(selectionMinX, verticalXs[detectedIndex]);
+                    selectionMaxX = Math.Max(selectionMaxX, verticalXs[detectedIndex]);
+                }
+            }
+
             double selectionWidth = Math.Max(selectionMaxX - selectionMinX, 0.0001);
 
             lock (GridSchemaCacheSync)
@@ -10808,7 +10978,17 @@ namespace OVIA.AutoCAD_2027
                 return result;
             }
 
-            bool reusedCachedGridSchema = TryApplyCachedGridSchema(minPoint, maxPoint, ref verticalXs);
+            /*
+             * OVIA 2026-07-20 인접 표 캐시 오적용 차단:
+             * minPoint/maxPoint는 헤더 탐색을 위해 좌우로 확장된 분석창이므로 인접 표까지 포함할
+             * 수 있습니다. 이 확장 좌표로 캐시 겹침을 계산하면 왼쪽 표의 컬럼 스키마가 오른쪽
+             * 52~77 표에 재사용되어 번호=수량, 형상=총길이/중량으로 밀릴 수 있습니다.
+             * 캐시 재사용 여부는 사용자가 실제 선택한 표 범위와 그 범위에서 검출한 세로선으로만
+             * 판정합니다. 중간 소계·끝 소계/총계는 이 X축 표 식별에 영향을 주지 않습니다.
+             */
+            bool selectionContainsSummaryRows = ContainsSummaryTextRows(selectedTableTextRows);
+            bool reusedCachedGridSchema = !selectionContainsSummaryRows
+                && TryApplyCachedGridSchema(selectedMinPoint, selectedMaxPoint, ref verticalXs);
             string[,] cellTexts = BuildGridCellTextMatrix(selectedTableTextRows, verticalXs, horizontalYs, mergeTolerance);
 
             if (cellTexts == null)
@@ -10931,7 +11111,16 @@ namespace OVIA.AutoCAD_2027
                 ApplyTextHeaderColumnBoundsIfAvailable(selectedTableTextRows, columns);
                 RestoreGridShapePhysicalBounds(columns);
                 ClampGridShapeBoundsFromTextHeader(selectedTableTextRows, columns);
-                CacheGridSchemaIfUsable(minPoint, maxPoint, verticalXs, columns);
+                /*
+                 * 소계·합계·총계 병합행이 포함된 선택은 행 구간마다 세로선 개수가 달라질 수 있습니다.
+                 * 이때 데이터 패턴 fallback으로 만든 임시 컬럼을 정상 스키마처럼 캐시하면, 같은 표의
+                 * 다음 일괄 선택에서 번호가 수량으로, 형상 셀이 총길이·중량으로 재사용될 수 있습니다.
+                 * 요약행 포함 선택은 현재 추출에만 사용하고 다음 선택용 스키마로 저장하지 않습니다.
+                 */
+                if (!selectionContainsSummaryRows)
+                {
+                    CacheGridSchemaIfUsable(selectedMinPoint, selectedMaxPoint, verticalXs, columns);
+                }
             }
             else
             {
@@ -14223,6 +14412,28 @@ namespace OVIA.AutoCAD_2027
             }
 
             return ((double)sequentialSteps / (double)totalSteps) >= 0.60;
+        }
+
+        private bool ContainsSummaryTextRows(List<OviaTextRow> rows)
+        {
+            if (rows == null || rows.Count == 0)
+            {
+                return false;
+            }
+
+            int i;
+
+            for (i = 0; i < rows.Count; i++)
+            {
+                OviaTextRow row = rows[i];
+
+                if (row != null && IsSummaryText(CleanCellText(row.TextValue)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private bool IsSummaryText(string value)
