@@ -236,7 +236,7 @@ namespace OVIA.Desktop
                 pathText,
                 delegate { NavigateToMain(); },
                 delegate { NavigateToMain(); },
-                delegate { BindProjects(); },
+                delegate { RefreshProjectListFromInitialSort(); },
                 delegate { RequestLogout(); },
                 true,
                 true,
@@ -245,6 +245,14 @@ namespace OVIA.Desktop
                     NavigateByWorkspacePath(target);
                 }
             );
+        }
+
+        private void RefreshProjectListFromInitialSort()
+        {
+            headerSortColumn = "";
+            headerSortAscending = true;
+            currentPage = 1;
+            BindProjects();
         }
 
         private void NavigateByWorkspacePath(string target)

@@ -23,8 +23,7 @@ namespace OVIA.Desktop
         private DataGridView grid;
         private Label lblStatus;
         private Panel pagerPanel;
-        private Label lblProjectTitle;
-        private Label lblProjectSub;
+        private OviaProjectContextHeader projectContextHeader;
         private ToolTip windowToolTip;
         private OviaSearchBox txtBarListSearch;
         private OviaSelectBox cboBarListSort;
@@ -638,56 +637,12 @@ namespace OVIA.Desktop
 
         private void BuildProjectInfo(Control parent)
         {
-            Panel titlePanel = new Panel();
-            titlePanel.Location = new Point(34, 156);
-            titlePanel.Size = new Size(1108, 58);
-            titlePanel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            titlePanel.BackColor = Color.Transparent;
-            titlePanel.Paint += ProjectTitlePanel_Paint;
-            parent.Controls.Add(titlePanel);
-
-            lblProjectTitle = new Label();
-            lblProjectTitle.Text = projectNo + "   " + projectName;
-            lblProjectTitle.AutoSize = false;
-            lblProjectTitle.Size = new Size(720, 28);
-            lblProjectTitle.Font = OviaFluentTheme.FontTitle(14F, FontStyle.Bold);
-            lblProjectTitle.ForeColor = Color.Black;
-            lblProjectTitle.BackColor = Color.Transparent;
-            lblProjectTitle.Location = new Point(0, 8);
-            lblProjectTitle.TextAlign = ContentAlignment.MiddleLeft;
-            lblProjectTitle.AutoEllipsis = true;
-            lblProjectTitle.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            titlePanel.Controls.Add(lblProjectTitle);
-
-            lblProjectSub = new Label();
-            lblProjectSub.Text = "거래처: " + clientName + "   |   진행상태: " + projectStatus;
-            lblProjectSub.AutoSize = false;
-            lblProjectSub.Size = new Size(360, 24);
-            lblProjectSub.Font = OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
-            lblProjectSub.ForeColor = TextSub;
-            lblProjectSub.BackColor = Color.Transparent;
-            lblProjectSub.Location = new Point(titlePanel.Width - 360, 11);
-            lblProjectSub.TextAlign = ContentAlignment.MiddleRight;
-            lblProjectSub.AutoEllipsis = true;
-            lblProjectSub.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            titlePanel.Controls.Add(lblProjectSub);
-        }
-
-
-
-        private void ProjectTitlePanel_Paint(object sender, PaintEventArgs e)
-        {
-            Control control = sender as Control;
-            if (control == null)
-            {
-                return;
-            }
-
-            using (Pen pen = new Pen(OviaFluentTheme.CardBorder, 1F))
-            {
-                int y = control.Height - 12;
-                e.Graphics.DrawLine(pen, 0, y, control.Width, y);
-            }
+            projectContextHeader = new OviaProjectContextHeader();
+            projectContextHeader.Location = new Point(34, 156);
+            projectContextHeader.Size = new Size(1108, 58);
+            projectContextHeader.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            projectContextHeader.SetContext(projectNo, projectName, "", "", "", clientName, projectStatus);
+            parent.Controls.Add(projectContextHeader);
         }
 
         private void BuildToolbar(Control parent)
@@ -782,6 +737,7 @@ namespace OVIA.Desktop
             grid.RowHeadersVisible = false;
             grid.ReadOnly = true;
             grid.CellDoubleClick += Grid_CellDoubleClick;
+            grid.SelectionChanged += Grid_SelectionChanged;
             grid.CellMouseDown += Grid_CellMouseDown;
             grid.CellPainting += Grid_CellPainting;
             grid.ColumnHeaderMouseClick += Grid_ColumnHeaderMouseClick;
@@ -827,8 +783,8 @@ namespace OVIA.Desktop
             AddColumn("출하", 56);
             AddColumn("미출하", 62);
             AddColumn("작성자", 70);
-            AddColumn("비고", 130);
-            AddColumn("FilePath", 0);
+            AddColumn("비고", 130, false);
+            AddColumn("FilePath", 0, false);
 
             grid.Columns["FilePath"].Visible = false;
 
@@ -880,7 +836,7 @@ namespace OVIA.Desktop
             grid.Columns[columnName].DefaultCellStyle.Alignment = alignment;
         }
 
-        private void AddColumn(string header, int width)
+        private void AddColumn(string header, int width, bool sortable = true)
         {
             DataGridViewTextBoxColumn column = new DataGridViewTextBoxColumn();
             column.Name = header;
@@ -889,8 +845,10 @@ namespace OVIA.Desktop
             column.Tag = width;
             column.FillWeight = Math.Max(1, width);
             column.MinimumWidth = GetGridColumnMinimumWidth(header, width);
-            column.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
-            column.SortMode = DataGridViewColumnSortMode.Programmatic;
+            column.AutoSizeMode = width <= 0
+                ? DataGridViewAutoSizeColumnMode.None
+                : DataGridViewAutoSizeColumnMode.Fill;
+            column.SortMode = sortable ? DataGridViewColumnSortMode.Programmatic : DataGridViewColumnSortMode.NotSortable;
             column.Resizable = DataGridViewTriState.True;
             grid.Columns.Add(column);
         }
@@ -935,77 +893,26 @@ namespace OVIA.Desktop
                 return;
             }
 
-            int visibleCount = 0;
-            int totalBase = 0;
-            int totalMin = 0;
-            int i;
-
-            for (i = 0; i < grid.Columns.Count; i++)
-            {
-                DataGridViewColumn column = grid.Columns[i];
-                if (!column.Visible)
-                {
-                    continue;
-                }
-
-                int baseWidth = column.Tag is int ? (int)column.Tag : column.Width;
-                int minWidth = GetGridColumnMinimumWidth(column.Name, baseWidth);
-                visibleCount++;
-                totalBase += baseWidth;
-                totalMin += minWidth;
-            }
-
-            if (visibleCount == 0)
-            {
-                return;
-            }
-
-            int availableWidth = Math.Max(1, grid.ClientSize.Width - 3);
             grid.SuspendLayout();
 
             try
             {
-                if (availableWidth >= totalBase)
+                int i;
+                for (i = 0; i < grid.Columns.Count; i++)
                 {
-                    for (i = 0; i < grid.Columns.Count; i++)
-                    {
-                        DataGridViewColumn column = grid.Columns[i];
-                        if (!column.Visible) continue;
-                        int baseWidth = column.Tag is int ? (int)column.Tag : column.Width;
-                        column.Width = Math.Max(column.MinimumWidth, baseWidth);
-                    }
-                }
-                else if (availableWidth >= totalMin)
-                {
-                    double ratio = (availableWidth - totalMin) / (double)Math.Max(1, totalBase - totalMin);
-                    int used = 0;
-                    DataGridViewColumn lastVisibleColumn = null;
+                    DataGridViewColumn column = grid.Columns[i];
+                    int baseWidth = column.Tag is int ? (int)column.Tag : column.Width;
 
-                    for (i = 0; i < grid.Columns.Count; i++)
-                    {
-                        DataGridViewColumn column = grid.Columns[i];
-                        if (!column.Visible) continue;
-                        int baseWidth = column.Tag is int ? (int)column.Tag : column.Width;
-                        int minWidth = GetGridColumnMinimumWidth(column.Name, baseWidth);
-                        int nextWidth = minWidth + (int)Math.Floor((baseWidth - minWidth) * ratio);
-                        column.Width = Math.Max(minWidth, nextWidth);
-                        used += column.Width;
-                        lastVisibleColumn = column;
-                    }
+                    column.MinimumWidth = GetGridColumnMinimumWidth(column.Name, baseWidth);
+                    column.FillWeight = Math.Max(1, baseWidth);
 
-                    if (lastVisibleColumn != null && used < availableWidth)
+                    if (column.Visible)
                     {
-                        lastVisibleColumn.Width += (availableWidth - used);
+                        column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
                     }
-                }
-                else
-                {
-                    for (i = 0; i < grid.Columns.Count; i++)
+                    else
                     {
-                        DataGridViewColumn column = grid.Columns[i];
-                        if (!column.Visible) continue;
-                        int baseWidth = column.Tag is int ? (int)column.Tag : column.Width;
-                        column.Width = GetGridColumnMinimumWidth(column.Name, baseWidth);
+                        column.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
                     }
                 }
             }
@@ -1037,10 +944,13 @@ namespace OVIA.Desktop
                 e.Graphics.DrawLine(pen, bounds.Right - 1, bounds.Top, bounds.Right - 1, bounds.Bottom);
             }
 
-            string headerText = grid.Columns[e.ColumnIndex].HeaderText;
+            DataGridViewColumn paintedColumn = grid.Columns[e.ColumnIndex];
+            string headerText = paintedColumn.HeaderText;
             Font font = grid.ColumnHeadersDefaultCellStyle.Font == null ? OviaFluentTheme.FontData(9F, FontStyle.Bold) : grid.ColumnHeadersDefaultCellStyle.Font;
             Size textSize = TextRenderer.MeasureText(e.Graphics, headerText, font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
-            int arrowWidth = string.Equals(grid.Columns[e.ColumnIndex].Name, headerSortColumn, StringComparison.OrdinalIgnoreCase) ? 8 : 0;
+            bool isActiveSortColumn = paintedColumn.SortMode == DataGridViewColumnSortMode.Programmatic
+                && string.Equals(paintedColumn.Name, headerSortColumn, StringComparison.OrdinalIgnoreCase);
+            int arrowWidth = isActiveSortColumn ? 8 : 0;
             int totalWidth = Math.Min(bounds.Width - 8, textSize.Width + arrowWidth + (arrowWidth > 0 ? 3 : 0));
             int startX = bounds.Left + Math.Max(4, (bounds.Width - totalWidth) / 2);
             Rectangle textRect = new Rectangle(startX, bounds.Top, Math.Max(1, Math.Min(textSize.Width + 2, bounds.Right - startX - 4)), bounds.Height);
@@ -1054,7 +964,7 @@ namespace OVIA.Desktop
                 TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding
             );
 
-            if (!string.IsNullOrWhiteSpace(headerSortColumn) && string.Equals(grid.Columns[e.ColumnIndex].Name, headerSortColumn, StringComparison.OrdinalIgnoreCase))
+            if (isActiveSortColumn)
             {
                 int arrowX = Math.Min(bounds.Right - 10, startX + textSize.Width + 3);
                 int arrowY = bounds.Top + (bounds.Height / 2) - 2;
@@ -1131,6 +1041,7 @@ namespace OVIA.Desktop
             List<ProjectBarListSummary> allRows = GetBarListSummaries();
             RefreshDynamicFilterOptions(allRows);
             currentBarListRows = GetFilteredBarListSummaries(allRows);
+            ApplyBarListHeaderSort(currentBarListRows);
             pageSize = GetConfiguredListPageSize();
 
             int maxPage = GetMaxPage();
@@ -1149,8 +1060,12 @@ namespace OVIA.Desktop
 
             for (i = start; i < end; i++)
             {
+                int displayNumber = string.Equals(headerSortColumn, "No.", StringComparison.OrdinalIgnoreCase)
+                    ? currentBarListRows[i].ListNumber
+                    : i + 1;
+
                 int rowIndex = grid.Rows.Add(
-                    (i + 1).ToString(),
+                    displayNumber.ToString(),
                     currentBarListRows[i].Status,
                     currentBarListRows[i].WriteStatus,
                     currentBarListRows[i].OrderNumber,
@@ -1183,6 +1098,14 @@ namespace OVIA.Desktop
                 grid.Rows[rowIndex].Cells["제목"].ToolTipText = currentBarListRows[i].Title;
             }
 
+            if (grid.Rows.Count > 0 && grid.SelectedRows.Count == 0)
+            {
+                grid.ClearSelection();
+                grid.Rows[0].Selected = true;
+                grid.CurrentCell = grid.Rows[0].Cells["No."];
+            }
+
+            UpdateProjectContextHeaderFromSelection();
             RenderPager();
             UpdateSortGlyph();
             ApplyResponsiveGridColumnWidths();
@@ -1684,20 +1607,33 @@ namespace OVIA.Desktop
                 list.Add(BuildSummary(files[i]));
             }
 
-            if (!string.IsNullOrWhiteSpace(headerSortColumn))
+            ApplyBarListDefaultSort(list);
+
+            for (i = 0; i < list.Count; i++)
             {
-                list.Sort(delegate (ProjectBarListSummary a, ProjectBarListSummary b)
-                {
-                    int result = CompareBarListRows(a, b, headerSortColumn);
-                    return headerSortAscending ? result : -result;
-                });
-            }
-            else
-            {
-                ApplyBarListDefaultSort(list);
+                list[i].ListNumber = i + 1;
             }
 
             return list;
+        }
+
+        private void ApplyBarListHeaderSort(List<ProjectBarListSummary> list)
+        {
+            if (list == null || string.IsNullOrWhiteSpace(headerSortColumn))
+            {
+                return;
+            }
+
+            list.Sort(delegate (ProjectBarListSummary a, ProjectBarListSummary b)
+            {
+                int result = CompareBarListRows(a, b, headerSortColumn);
+                if (result == 0 && headerSortColumn != "No.")
+                {
+                    return a.ListNumber.CompareTo(b.ListNumber);
+                }
+
+                return headerSortAscending ? result : -result;
+            });
         }
 
         private void ApplyBarListDefaultSort(List<ProjectBarListSummary> list)
@@ -1753,6 +1689,11 @@ namespace OVIA.Desktop
 
         private int CompareBarListRows(ProjectBarListSummary a, ProjectBarListSummary b, string columnName)
         {
+            if (columnName == "No.")
+            {
+                return a.ListNumber.CompareTo(b.ListNumber);
+            }
+
             if (columnName == "상태")
             {
                 return string.Compare(a.Status, b.Status, StringComparison.CurrentCultureIgnoreCase);
@@ -1888,11 +1829,6 @@ namespace OVIA.Desktop
             if (columnName == "작성자")
             {
                 return string.Compare(a.Writer, b.Writer, StringComparison.CurrentCultureIgnoreCase);
-            }
-
-            if (columnName == "비고")
-            {
-                return string.Compare(a.Memo, b.Memo, StringComparison.CurrentCultureIgnoreCase);
             }
 
             return 0;
@@ -2786,6 +2722,37 @@ namespace OVIA.Desktop
             return needsQuote ? "\"" + value + "\"" : value;
         }
 
+        private void Grid_SelectionChanged(object sender, EventArgs e)
+        {
+            UpdateProjectContextHeaderFromSelection();
+        }
+
+        private void UpdateProjectContextHeaderFromSelection()
+        {
+            if (projectContextHeader == null)
+            {
+                return;
+            }
+
+            ProjectBarListSummary summary = GetSelectedBarListSummary();
+
+            if (summary == null)
+            {
+                projectContextHeader.SetContext(projectNo, projectName, "", "", "", clientName, projectStatus);
+                return;
+            }
+
+            projectContextHeader.SetContext(
+                projectNo,
+                projectName,
+                summary.OrderNumber,
+                FormatDateFull(summary.DueDate),
+                summary.Title,
+                clientName,
+                projectStatus
+            );
+        }
+
         private void Grid_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
         {
             if (e.RowIndex < 0)
@@ -2879,8 +2846,9 @@ namespace OVIA.Desktop
                 return;
             }
 
-            string columnName = grid.Columns[e.ColumnIndex].Name;
-            if (string.IsNullOrWhiteSpace(columnName) || columnName == "FilePath")
+            DataGridViewColumn column = grid.Columns[e.ColumnIndex];
+            string columnName = column.Name;
+            if (string.IsNullOrWhiteSpace(columnName) || column.SortMode != DataGridViewColumnSortMode.Programmatic)
             {
                 return;
             }
@@ -2912,12 +2880,23 @@ namespace OVIA.Desktop
                 grid.Columns[i].HeaderCell.SortGlyphDirection = SortOrder.None;
             }
 
+            if (!string.IsNullOrWhiteSpace(headerSortColumn) && grid.Columns.Contains(headerSortColumn))
+            {
+                DataGridViewColumn sortedColumn = grid.Columns[headerSortColumn];
+                if (sortedColumn.SortMode == DataGridViewColumnSortMode.Programmatic)
+                {
+                    sortedColumn.HeaderCell.SortGlyphDirection = headerSortAscending ? SortOrder.Ascending : SortOrder.Descending;
+                }
+            }
+
             grid.Invalidate();
         }
 
 
         private void RefreshButton_Click(object sender, EventArgs e)
         {
+            headerSortColumn = "";
+            headerSortAscending = true;
             currentPage = 1;
             BindBarListRows();
         }
@@ -4322,13 +4301,14 @@ namespace OVIA.Desktop
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            RectangleF rect = new RectangleF(0.5F, 0.5F, Math.Max(1F, Width - 1F), Math.Max(1F, Height - 1F));
+            RectangleF rect = new RectangleF(0.5F, 0.5F, Math.Max(1F, Width - 1.5F), Math.Max(1F, Height - 1.5F));
             Color excelGreen = Color.FromArgb(33, 115, 70);
             Color fill = ClientRectangle.Contains(PointToClient(Control.MousePosition)) ? Color.FromArgb(238, 248, 241) : Color.White;
+            Color border = OviaFluentTheme.ButtonNeutralBorder;
 
             using (GraphicsPath path = OviaProjectBarListDrawHelper.RoundRect(Rectangle.Round(rect), OviaFluentTheme.ButtonRadius))
             using (SolidBrush brush = new SolidBrush(fill))
-            using (Pen pen = new Pen(excelGreen, 1F))
+            using (Pen pen = new Pen(border, 1F))
             {
                 e.Graphics.FillPath(brush, path);
                 e.Graphics.DrawPath(pen, path);
@@ -4340,6 +4320,7 @@ namespace OVIA.Desktop
 
     public class ProjectBarListSummary
     {
+        public int ListNumber = 0;
         public string FilePath = "";
         public string Status = "";
         public string WriteStatus = "";

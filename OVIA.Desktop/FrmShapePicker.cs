@@ -4,52 +4,53 @@ using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
 namespace OVIA.Desktop
 {
+    /// <summary>
+    /// 기존 2,000여 개 형상번호 선택창을 대체하는 CAD 원본 기반 철근 형상 확인·수정창입니다.
+    /// CAD 방향은 그대로 유지하며 좌우/상하 반전 또는 회전 판정을 수행하지 않습니다.
+    /// </summary>
     public class FrmShapePicker : Form
     {
-        private readonly RebarShapeRepository repository;
-        private readonly List<RebarShapeInfo> allShapes;
-        private readonly RebarShapeRenderer renderer;
-        private readonly CadShapeRenderer cadRenderer;
         private readonly string cadShapeJsonPath;
-        private readonly bool hasCadShapeOption;
-        private readonly Dictionary<string, TextBox> dimensionBoxes;
-        private readonly Dictionary<string, Label> dimensionLabels;
-        private readonly Dictionary<int, Dictionary<string, string>> dimensionValueCache;
-
-        private RebarShapeInfo currentEditingShape;
-        private int lastSelectedIndex;
-        private bool isApplyingShapeFields;
-        private string initialSelectedRawValue;
-        private bool initialSelectionApplied;
-
-        private TextBox txtSearch;
-        private Label lblShapeCodeValue;
-        private ShapeGridControl shapeGrid;
-        private RebarShapePreviewControl preview;
-        private Label lblInfo;
-        private Label lblTotalLength;
-        private CheckBox chkTotalFixed;
-        private CheckBox chkCoupler;
-        private CheckBox chkRound;
-        private CheckBox chkUpDown;
-        private CheckBox chkSleeve;
-        private TextBox txtPartCount;
-        private Button btnQuery;
-        private Button btnSelect;
+        private readonly string rawSourceJsonPath;
+        private readonly bool isManualDocument;
+        private readonly CadShapeEditDocument rawDocument;
+        private readonly CadShapeEditDocument workingDocument;
+        private CadShapeEditorControl editor;
+        private DataGridView textGrid;
+        private Label lblMode;
+        private Label lblSelectionType;
+        private Label lblSelectionId;
+        private Label lblStatistics;
+        private Label lblStatus;
+        private TextBox txtSelectedText;
+        private NumericUpDown numRotation;
+        private CheckBox chkSnap;
+        private Button btnSelectMode;
+        private Button btnLineMode;
+        private Button btnTextMode;
+        private Button btnUndo;
+        private Button btnRedo;
+        private Button btnDelete;
+        private Button btnSplit;
+        private Button btnUpdateText;
+        private Button btnApply;
         private Button btnCancel;
+        private bool suppressUiEvents;
+        private bool textGridCommitInProgress;
 
         public RebarShapeInfo SelectedShape { get; private set; }
         public bool SelectedCadShapeOriginal { get; private set; }
         public string SelectedDimensionText { get; private set; }
         public decimal SelectedTotalLength { get; private set; }
+        public string SelectedCadShapeJsonPath { get; private set; }
+        public string SelectedShapeSource { get; private set; }
 
         public FrmShapePicker(RebarShapeRepository repository, string currentValue)
-            : this(repository, currentValue, "")
+            : this(repository, currentValue, "", "")
         {
         }
 
@@ -60,656 +61,1049 @@ namespace OVIA.Desktop
 
         public FrmShapePicker(RebarShapeRepository repository, string currentValue, string currentDimensionText, string cadShapeJsonPath)
         {
-            this.repository = repository == null ? RebarShapeRepository.CreateDefault() : repository;
-            this.allShapes = this.repository.GetUserSelectableShapes();
             this.cadShapeJsonPath = cadShapeJsonPath == null ? "" : cadShapeJsonPath.Trim();
-            this.hasCadShapeOption = this.cadShapeJsonPath != "" && File.Exists(this.cadShapeJsonPath);
-            renderer = new RebarShapeRenderer();
-            cadRenderer = new CadShapeRenderer();
 
-            if (this.hasCadShapeOption)
+            CadShapeEditDocument loadedDocument = CadShapeEditDocument.Load(this.cadShapeJsonPath);
+            CadShapeEditDocument trueOriginalDocument = loadedDocument;
+            string originalSourcePath = loadedDocument.OriginalSourcePath == null ? "" : loadedDocument.OriginalSourcePath.Trim();
+            string resolvedRawSourcePath = "";
+
+            if (originalSourcePath != "" && !Path.IsPathRooted(originalSourcePath) && this.cadShapeJsonPath != "")
             {
-                this.allShapes.Insert(0, CreateCadImportedShape(this.cadShapeJsonPath));
+                string editDirectory = Path.GetDirectoryName(this.cadShapeJsonPath);
+
+                if (editDirectory != null && editDirectory.Trim() != "")
+                {
+                    originalSourcePath = Path.Combine(editDirectory, originalSourcePath.Replace('/', Path.DirectorySeparatorChar));
+                }
             }
 
-            dimensionBoxes = new Dictionary<string, TextBox>(StringComparer.OrdinalIgnoreCase);
-            dimensionLabels = new Dictionary<string, Label>(StringComparer.OrdinalIgnoreCase);
-            dimensionValueCache = new Dictionary<int, Dictionary<string, string>>();
+            if (originalSourcePath != "" && File.Exists(originalSourcePath))
+            {
+                resolvedRawSourcePath = Path.GetFullPath(originalSourcePath);
+                trueOriginalDocument = CadShapeEditDocument.Load(resolvedRawSourcePath);
+            }
+            else if (this.cadShapeJsonPath != "" && File.Exists(this.cadShapeJsonPath))
+            {
+                resolvedRawSourcePath = Path.GetFullPath(this.cadShapeJsonPath);
+            }
 
-            currentEditingShape = null;
-            lastSelectedIndex = -1;
-            isApplyingShapeFields = false;
-            initialSelectedRawValue = currentValue == null ? "" : currentValue.Trim();
-            initialSelectionApplied = false;
+            rawSourceJsonPath = resolvedRawSourcePath;
+            isManualDocument = this.cadShapeJsonPath == ""
+                || loadedDocument.Source.Equals("OVIA_MANUAL", StringComparison.OrdinalIgnoreCase)
+                || loadedDocument.Source.Equals("MANUAL", StringComparison.OrdinalIgnoreCase);
+            rawDocument = trueOriginalDocument.Clone();
+            workingDocument = loadedDocument.Clone();
+            ApplyDimensionOverrides(workingDocument, currentDimensionText);
 
             SelectedShape = null;
             SelectedCadShapeOriginal = false;
             SelectedDimensionText = "";
             SelectedTotalLength = 0M;
-
-            string safeCurrentValue = currentValue == null ? "" : currentValue.Trim();
-
-            if (this.hasCadShapeOption)
-            {
-                // CAD 원본 형상이 있는 행을 다시 수정할 때도 CAD 원본 항목과 이미지 없음 항목은 항상 보여야 합니다.
-                // 현재 행이 OVIA 형상코드로 교체된 상태라면 currentDimensionText는 OVIA 형상 입력값입니다.
-                // 이 값을 CAD 원본 형상 입력란에 재사용하면 CAD 원본값이 오염되므로,
-                // OVIA 형상 선택 상태에서는 CAD JSON 안의 원본 치수값을 우선 사용합니다.
-                RebarShapeInfo currentManualShape = this.repository.FindByRawValue(safeCurrentValue);
-                bool currentIsManualOviaShape = currentManualShape != null && currentManualShape.ShapeNo > 0;
-                PreloadCadDimensionValues(currentDimensionText, currentIsManualOviaShape);
-
-                if (safeCurrentValue != "")
-                {
-                    PreloadDimensionValues(safeCurrentValue, currentDimensionText);
-                }
-
-                safeCurrentValue = "";
-            }
-            else
-            {
-                PreloadDimensionValues(safeCurrentValue, currentDimensionText);
-            }
+            SelectedCadShapeJsonPath = "";
+            SelectedShapeSource = isManualDocument ? "MANUAL" : "CAD";
 
             BuildUI();
-            txtSearch.Text = safeCurrentValue;
-            lblShapeCodeValue.Text = "";
-            ApplyFilter();
+            editor.LoadDocument(workingDocument, rawDocument);
+            RefreshTextGrid();
+            RefreshSelectionPanel();
+            RefreshStatistics();
+            UpdateToolbarState();
         }
 
-
-        private RebarShapeInfo CreateCadImportedShape(string jsonPath)
+        private void BuildUI()
         {
-            RebarShapeInfo shape = new RebarShapeInfo();
-            shape.ShapeNo = -1000;
-            shape.ShapeCode = "CAD";
-            shape.ShapeName = "CAD에서 불러온 형상";
-            shape.Category = "CAD";
-            shape.SourceImagePath = jsonPath;
-            shape.VectorStatus = "CAD_IMPORTED";
-            shape.ApproveStatus = "CAD_CAPTURED";
-            shape.FieldsText = BuildCadFieldText(jsonPath);
-            shape.OptionText = "CAD";
-            shape.IsUserSelectable = true;
-            return shape;
+            Text = "철근 형상 확인·수정";
+            StartPosition = FormStartPosition.CenterParent;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true;
+            MinimizeBox = true;
+            MinimumSize = new Size(1180, 720);
+            ClientSize = new Size(1440, 860);
+            BackColor = Color.FromArgb(244, 246, 250);
+            Font = OviaFluentTheme.FontKorean(9F, FontStyle.Regular);
+            KeyPreview = true;
+
+            Panel header = new Panel();
+            header.Dock = DockStyle.Top;
+            header.Height = 82;
+            header.BackColor = Color.White;
+            header.Padding = new Padding(16, 10, 16, 8);
+            Controls.Add(header);
+
+            Label title = new Label();
+            title.Text = isManualDocument ? "철근 형상 직접 작성·수정" : "CAD 철근 형상 확인·수정";
+            title.Font = OviaFluentTheme.FontKorean(15F, FontStyle.Bold);
+            title.AutoSize = true;
+            title.Location = new Point(16, 10);
+            header.Controls.Add(title);
+
+            Label subtitle = new Label();
+            subtitle.Text = isManualDocument
+                ? "형상번호 없이 빈 캔버스에서 선과 문자를 직접 작성합니다. 작성한 방향 그대로 저장됩니다."
+                : "형상번호를 선택하지 않습니다. CAD 도면의 방향과 연결 구조를 그대로 유지하면서 누락·오인식된 선과 문자를 직접 보정합니다.";
+            subtitle.ForeColor = Color.FromArgb(92, 101, 116);
+            subtitle.AutoSize = true;
+            subtitle.Location = new Point(18, 42);
+            header.Controls.Add(subtitle);
+
+            Panel toolbar = new Panel();
+            toolbar.Dock = DockStyle.Top;
+            toolbar.Height = 54;
+            toolbar.BackColor = Color.FromArgb(248, 249, 252);
+            toolbar.Padding = new Padding(12, 10, 12, 8);
+            Controls.Add(toolbar);
+
+            FlowLayoutPanel toolFlow = new FlowLayoutPanel();
+            toolFlow.Dock = DockStyle.Fill;
+            toolFlow.WrapContents = false;
+            toolFlow.AutoScroll = true;
+            toolFlow.FlowDirection = FlowDirection.LeftToRight;
+            toolbar.Controls.Add(toolFlow);
+
+            btnSelectMode = CreateToolbarButton("선택·이동", 92, BtnSelectMode_Click);
+            btnLineMode = CreateToolbarButton("선 추가", 78, BtnLineMode_Click);
+            btnTextMode = CreateToolbarButton("문자 추가", 82, BtnTextMode_Click);
+            btnDelete = CreateToolbarButton("선택 삭제", 86, BtnDelete_Click);
+            btnSplit = CreateToolbarButton("선 분할", 74, BtnSplit_Click);
+            btnUndo = CreateToolbarButton("실행 취소", 86, BtnUndo_Click);
+            btnRedo = CreateToolbarButton("다시 실행", 86, BtnRedo_Click);
+            Button btnHorizontal = CreateToolbarButton("수평 맞춤", 86, BtnHorizontal_Click);
+            Button btnVertical = CreateToolbarButton("수직 맞춤", 86, BtnVertical_Click);
+            Button btnFit = CreateToolbarButton("화면 맞춤", 86, BtnFit_Click);
+            Button btnZoomIn = CreateToolbarButton("확대", 62, BtnZoomIn_Click);
+            Button btnZoomOut = CreateToolbarButton("축소", 62, BtnZoomOut_Click);
+            Button btnRestore = CreateToolbarButton(isManualDocument ? "초기 형상 복원" : "CAD 원본 복원", 112, BtnRestore_Click);
+
+            toolFlow.Controls.Add(btnSelectMode);
+            toolFlow.Controls.Add(btnLineMode);
+            toolFlow.Controls.Add(btnTextMode);
+            toolFlow.Controls.Add(CreateToolbarSeparator());
+            toolFlow.Controls.Add(btnDelete);
+            toolFlow.Controls.Add(btnSplit);
+            toolFlow.Controls.Add(btnUndo);
+            toolFlow.Controls.Add(btnRedo);
+            toolFlow.Controls.Add(CreateToolbarSeparator());
+            toolFlow.Controls.Add(btnHorizontal);
+            toolFlow.Controls.Add(btnVertical);
+            toolFlow.Controls.Add(btnFit);
+            toolFlow.Controls.Add(btnZoomIn);
+            toolFlow.Controls.Add(btnZoomOut);
+            toolFlow.Controls.Add(CreateToolbarSeparator());
+            toolFlow.Controls.Add(btnRestore);
+
+            chkSnap = new CheckBox();
+            chkSnap.Text = "15도 스냅";
+            chkSnap.Checked = true;
+            chkSnap.AutoSize = true;
+            chkSnap.Margin = new Padding(14, 8, 4, 0);
+            chkSnap.CheckedChanged += ChkSnap_CheckedChanged;
+            toolFlow.Controls.Add(chkSnap);
+
+            lblMode = new Label();
+            lblMode.AutoSize = true;
+            lblMode.ForeColor = Color.FromArgb(64, 76, 94);
+            lblMode.Font = OviaFluentTheme.FontKorean(9F, FontStyle.Bold);
+            lblMode.Margin = new Padding(18, 9, 0, 0);
+            toolFlow.Controls.Add(lblMode);
+
+            Panel bottom = new Panel();
+            bottom.Dock = DockStyle.Bottom;
+            bottom.Height = 58;
+            bottom.BackColor = Color.White;
+            bottom.Padding = new Padding(16, 10, 16, 10);
+            Controls.Add(bottom);
+
+            lblStatus = new Label();
+            lblStatus.Dock = DockStyle.Fill;
+            lblStatus.TextAlign = ContentAlignment.MiddleLeft;
+            lblStatus.ForeColor = Color.FromArgb(92, 101, 116);
+            bottom.Controls.Add(lblStatus);
+
+            btnCancel = new Button();
+            btnCancel.Text = "취소";
+            btnCancel.Dock = DockStyle.Right;
+            btnCancel.Width = 92;
+            btnCancel.Margin = new Padding(8, 0, 0, 0);
+            btnCancel.Click += BtnCancel_Click;
+            bottom.Controls.Add(btnCancel);
+
+            btnApply = new Button();
+            btnApply.Text = "수정 적용";
+            btnApply.Dock = DockStyle.Right;
+            btnApply.Width = 108;
+            btnApply.BackColor = Color.FromArgb(18, 103, 206);
+            btnApply.ForeColor = Color.White;
+            btnApply.FlatStyle = FlatStyle.Flat;
+            btnApply.FlatAppearance.BorderSize = 0;
+            btnApply.Click += BtnApply_Click;
+            bottom.Controls.Add(btnApply);
+
+            SplitContainer split = new SplitContainer();
+            split.Dock = DockStyle.Fill;
+            split.FixedPanel = FixedPanel.Panel2;
+            split.IsSplitterFixed = false;
+            split.SplitterWidth = 6;
+            split.SplitterDistance = 1080;
+            split.Panel1.Padding = new Padding(14, 12, 6, 12);
+            split.Panel2.Padding = new Padding(6, 12, 14, 12);
+            split.BackColor = Color.FromArgb(224, 229, 237);
+            Controls.Add(split);
+            split.SendToBack();
+            toolbar.BringToFront();
+            header.BringToFront();
+            bottom.BringToFront();
+
+            Panel editorFrame = new Panel();
+            editorFrame.Dock = DockStyle.Fill;
+            editorFrame.BackColor = Color.White;
+            editorFrame.BorderStyle = BorderStyle.FixedSingle;
+            split.Panel1.Controls.Add(editorFrame);
+
+            editor = new CadShapeEditorControl();
+            editor.Dock = DockStyle.Fill;
+            editor.SelectionChanged += Editor_SelectionChanged;
+            editor.DocumentChanged += Editor_DocumentChanged;
+            editor.ModeChanged += Editor_ModeChanged;
+            editor.TextEditRequested += Editor_TextEditRequested;
+            editorFrame.Controls.Add(editor);
+
+            BuildRightPanel(split.Panel2);
+
+            // Enter/Esc는 편집 캔버스의 연속 선 그리기 종료·취소에 사용하므로
+            // Form의 AcceptButton/CancelButton으로 가로채지 않습니다.
         }
 
-        private bool IsCadImportedShape(RebarShapeInfo shape)
+        private void BuildRightPanel(Control parent)
         {
-            return shape != null
-                && shape.VectorStatus != null
-                && shape.VectorStatus.Equals("CAD_IMPORTED", StringComparison.OrdinalIgnoreCase);
+            TableLayoutPanel right = new TableLayoutPanel();
+            right.Dock = DockStyle.Fill;
+            right.BackColor = Color.FromArgb(244, 246, 250);
+            right.ColumnCount = 1;
+            right.RowCount = 4;
+            right.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 190F));
+            right.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 126F));
+            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
+            parent.Controls.Add(right);
+
+            GroupBox selectedGroup = new GroupBox();
+            selectedGroup.Text = "선택 요소 속성";
+            selectedGroup.Dock = DockStyle.Fill;
+            selectedGroup.Padding = new Padding(12, 18, 12, 12);
+            right.Controls.Add(selectedGroup, 0, 0);
+
+            Label typeTitle = CreatePropertyLabel("종류", 18, 30, 62);
+            selectedGroup.Controls.Add(typeTitle);
+            lblSelectionType = CreatePropertyValueLabel(88, 28, 220);
+            selectedGroup.Controls.Add(lblSelectionType);
+
+            Label idTitle = CreatePropertyLabel("문자 ID", 18, 59, 62);
+            selectedGroup.Controls.Add(idTitle);
+            lblSelectionId = CreatePropertyValueLabel(88, 57, 220);
+            selectedGroup.Controls.Add(lblSelectionId);
+
+            Label textTitle = CreatePropertyLabel("문자값", 18, 91, 62);
+            selectedGroup.Controls.Add(textTitle);
+            txtSelectedText = new TextBox();
+            txtSelectedText.Location = new Point(88, 88);
+            txtSelectedText.Size = new Size(150, 25);
+            txtSelectedText.Leave += TxtSelectedText_Leave;
+            txtSelectedText.KeyDown += TxtSelectedText_KeyDown;
+            selectedGroup.Controls.Add(txtSelectedText);
+
+            btnUpdateText = new Button();
+            btnUpdateText.Text = "값 적용";
+            btnUpdateText.Location = new Point(244, 87);
+            btnUpdateText.Size = new Size(64, 27);
+            btnUpdateText.FlatStyle = FlatStyle.Flat;
+            btnUpdateText.FlatAppearance.BorderColor = Color.FromArgb(18, 103, 206);
+            btnUpdateText.BackColor = Color.FromArgb(18, 103, 206);
+            btnUpdateText.ForeColor = Color.White;
+            btnUpdateText.Enabled = false;
+            btnUpdateText.Click += BtnUpdateText_Click;
+            selectedGroup.Controls.Add(btnUpdateText);
+
+            Label rotationTitle = CreatePropertyLabel("회전각", 18, 124, 62);
+            selectedGroup.Controls.Add(rotationTitle);
+            numRotation = new NumericUpDown();
+            numRotation.Location = new Point(88, 121);
+            numRotation.Size = new Size(100, 25);
+            numRotation.Minimum = -360;
+            numRotation.Maximum = 360;
+            numRotation.DecimalPlaces = 1;
+            numRotation.Increment = 1;
+            numRotation.ValueChanged += NumRotation_ValueChanged;
+            selectedGroup.Controls.Add(numRotation);
+
+            Label selectedHelp = new Label();
+            selectedHelp.Text = "문자는 캔버스에서 더블클릭하거나 아래 현재값 셀을 클릭해 수정합니다. 선은 양 끝점 핸들을 끌어 보정합니다.";
+            selectedHelp.ForeColor = Color.FromArgb(103, 112, 126);
+            selectedHelp.Location = new Point(18, 153);
+            selectedHelp.Size = new Size(290, 30);
+            selectedGroup.Controls.Add(selectedHelp);
+
+            GroupBox textGroup = new GroupBox();
+            textGroup.Text = "형상 문자·치수값";
+            textGroup.Dock = DockStyle.Fill;
+            textGroup.Padding = new Padding(10, 18, 10, 10);
+            right.Controls.Add(textGroup, 0, 1);
+
+            textGrid = new DataGridView();
+            textGrid.Dock = DockStyle.Fill;
+            textGrid.AllowUserToAddRows = false;
+            textGrid.AllowUserToDeleteRows = false;
+            textGrid.AllowUserToResizeRows = false;
+            textGrid.RowHeadersVisible = false;
+            textGrid.MultiSelect = false;
+            textGrid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            textGrid.EditMode = DataGridViewEditMode.EditOnEnter;
+            textGrid.AutoGenerateColumns = false;
+            textGrid.BackgroundColor = Color.White;
+            textGrid.BorderStyle = BorderStyle.FixedSingle;
+            textGrid.CellEndEdit += TextGrid_CellEndEdit;
+            textGrid.CellDoubleClick += TextGrid_CellDoubleClick;
+            textGrid.SelectionChanged += TextGrid_SelectionChanged;
+
+            DataGridViewTextBoxColumn idColumn = new DataGridViewTextBoxColumn();
+            idColumn.Name = "TextId";
+            idColumn.HeaderText = "ID";
+            idColumn.Width = 52;
+            idColumn.ReadOnly = true;
+            idColumn.SortMode = DataGridViewColumnSortMode.NotSortable;
+            textGrid.Columns.Add(idColumn);
+
+            DataGridViewTextBoxColumn valueColumn = new DataGridViewTextBoxColumn();
+            valueColumn.Name = "TextValue";
+            valueColumn.HeaderText = "현재값";
+            valueColumn.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+            valueColumn.ReadOnly = false;
+            valueColumn.SortMode = DataGridViewColumnSortMode.NotSortable;
+            textGrid.Columns.Add(valueColumn);
+
+            DataGridViewTextBoxColumn kindColumn = new DataGridViewTextBoxColumn();
+            kindColumn.Name = "TextKind";
+            kindColumn.HeaderText = "분류";
+            kindColumn.Width = 72;
+            kindColumn.ReadOnly = true;
+            kindColumn.SortMode = DataGridViewColumnSortMode.NotSortable;
+            textGrid.Columns.Add(kindColumn);
+
+            textGroup.Controls.Add(textGrid);
+
+            Panel statisticsPanel = new Panel();
+            statisticsPanel.Dock = DockStyle.Fill;
+            statisticsPanel.BackColor = Color.White;
+            statisticsPanel.BorderStyle = BorderStyle.FixedSingle;
+            statisticsPanel.Padding = new Padding(12);
+            right.Controls.Add(statisticsPanel, 0, 2);
+
+            Label statisticsTitle = new Label();
+            statisticsTitle.Text = "형상 정보";
+            statisticsTitle.Font = OviaFluentTheme.FontKorean(9F, FontStyle.Bold);
+            statisticsTitle.Dock = DockStyle.Top;
+            statisticsTitle.Height = 24;
+            statisticsPanel.Controls.Add(statisticsTitle);
+
+            lblStatistics = new Label();
+            lblStatistics.Dock = DockStyle.Fill;
+            lblStatistics.ForeColor = Color.FromArgb(82, 91, 105);
+            statisticsPanel.Controls.Add(lblStatistics);
+
+            Label policy = new Label();
+            policy.Dock = DockStyle.Fill;
+            policy.ForeColor = Color.FromArgb(103, 112, 126);
+            policy.Text = isManualDocument
+                ? "※ 신규 수동 형상도 형상번호 없이 현재 그려진 방향 그대로 벡터 JSON으로 저장합니다."
+                : "※ OVIA는 형상번호·업체별 코드·반전·회전 판정 없이 CAD에 그려진 방향 그대로 저장합니다.";
+            policy.Padding = new Padding(2, 8, 2, 0);
+            right.Controls.Add(policy, 0, 3);
         }
 
-        private string BuildCadFieldText(string jsonPath)
+        private Button CreateToolbarButton(string text, int width, EventHandler clickHandler)
         {
-            int count = CountCadTextElements(jsonPath);
-            string[] keys = new string[] { "A", "B", "C", "D", "E", "F", "G", "H", "R1", "R2", "R3", "R4" };
+            Button button = new Button();
+            button.Text = text;
+            button.Width = width;
+            button.Height = 31;
+            button.Margin = new Padding(3, 0, 3, 0);
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderColor = Color.FromArgb(197, 203, 213);
+            button.BackColor = Color.White;
+            button.Click += clickHandler;
+            return button;
+        }
 
-            if (count <= 0)
+        private Control CreateToolbarSeparator()
+        {
+            Panel separator = new Panel();
+            separator.Width = 1;
+            separator.Height = 26;
+            separator.Margin = new Padding(8, 3, 8, 0);
+            separator.BackColor = Color.FromArgb(218, 223, 231);
+            return separator;
+        }
+
+        private Label CreatePropertyLabel(string text, int x, int y, int width)
+        {
+            Label label = new Label();
+            label.Text = text;
+            label.Location = new Point(x, y);
+            label.Size = new Size(width, 22);
+            label.ForeColor = Color.FromArgb(75, 84, 99);
+            return label;
+        }
+
+        private Label CreatePropertyValueLabel(int x, int y, int width)
+        {
+            Label label = new Label();
+            label.Location = new Point(x, y);
+            label.Size = new Size(width, 24);
+            label.TextAlign = ContentAlignment.MiddleLeft;
+            label.BackColor = Color.FromArgb(246, 248, 251);
+            label.BorderStyle = BorderStyle.FixedSingle;
+            return label;
+        }
+
+        private void ApplyDimensionOverrides(CadShapeEditDocument document, string dimensionText)
+        {
+            if (document == null || dimensionText == null || dimensionText.Trim() == "")
             {
-                count = 1;
+                return;
             }
 
-            if (count > keys.Length)
-            {
-                count = keys.Length;
-            }
-
-            StringBuilder sb = new StringBuilder();
+            Dictionary<string, string> values = ParseDimensionText(dimensionText);
+            List<CadShapeEditElement> texts = document.GetTextElements();
+            string[] legacyKeys = new string[] { "A", "B", "C", "D", "E", "F", "G", "H", "R1", "R2", "R3", "R4" };
             int i;
 
-            for (i = 0; i < count; i++)
+            for (i = 0; i < texts.Count; i++)
             {
-                if (sb.Length > 0)
+                string value;
+
+                if (values.TryGetValue(texts[i].TextId, out value))
                 {
-                    sb.Append("|");
+                    texts[i].Text = value;
+                    texts[i].HasBounds = false;
+                    continue;
                 }
 
-                sb.Append(keys[i]);
-            }
-
-            return sb.ToString();
-        }
-
-        private int CountCadTextElements(string jsonPath)
-        {
-            if (jsonPath == null || jsonPath.Trim() == "" || !File.Exists(jsonPath))
-            {
-                return 0;
-            }
-
-            try
-            {
-                string json = File.ReadAllText(jsonPath);
-                MatchCollection matches = Regex.Matches(json, "\\{[^\\{\\}]*\\\"type\\\"[^\\{\\}]*\\}", RegexOptions.Singleline);
-                int count = 0;
-                int i;
-
-                for (i = 0; i < matches.Count; i++)
+                if (i < legacyKeys.Length && values.TryGetValue(legacyKeys[i], out value))
                 {
-                    string item = matches[i].Value;
-                    string type = GetJsonString(item, "type").ToUpperInvariant();
-                    string text = GetJsonString(item, "text").Trim();
-
-                    if (type == "TEXT" && text != "")
-                    {
-                        count++;
-                    }
+                    texts[i].Text = value;
+                    texts[i].HasBounds = false;
                 }
-
-                return count;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
-        private void PreloadCadDimensionValues(string currentDimensionText, bool forceCadJsonValues)
-        {
-            RebarShapeInfo shape = null;
-
-            if (allShapes != null && allShapes.Count > 0 && IsCadImportedShape(allShapes[0]))
-            {
-                shape = allShapes[0];
-            }
-
-            if (shape == null)
-            {
-                return;
-            }
-
-            Dictionary<string, string> values;
-
-            if (forceCadJsonValues)
-            {
-                values = BuildDimensionValuesFromCadJson(shape.SourceImagePath, shape.FieldsText);
-            }
-            else
-            {
-                values = ParseDimensionText(currentDimensionText);
-
-                if (values.Count == 0)
-                {
-                    values = BuildDimensionValuesFromCadJson(shape.SourceImagePath, shape.FieldsText);
-                }
-            }
-
-            if (values.Count > 0)
-            {
-                dimensionValueCache[shape.ShapeNo] = values;
-            }
-        }
-
-        private Dictionary<string, string> BuildDimensionValuesFromCadJson(string jsonPath, string fieldsText)
-        {
-            Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            List<string> keys = SplitFieldKeys(fieldsText);
-
-            if (jsonPath == null || jsonPath.Trim() == "" || !File.Exists(jsonPath) || keys.Count == 0)
-            {
-                return values;
-            }
-
-            try
-            {
-                string json = File.ReadAllText(jsonPath);
-                MatchCollection matches = Regex.Matches(json, "\\{[^\\{\\}]*\\\"type\\\"[^\\{\\}]*\\}", RegexOptions.Singleline);
-                int fallbackTextIndex = 0;
-                int i;
-
-                for (i = 0; i < matches.Count; i++)
-                {
-                    string item = matches[i].Value;
-                    string type = GetJsonString(item, "type").ToUpperInvariant();
-                    string textValue = GetJsonString(item, "text").Trim();
-
-                    if (type != "TEXT" || textValue == "")
-                    {
-                        continue;
-                    }
-
-                    string textId = GetJsonString(item, "textId").Trim().ToUpperInvariant();
-                    int mappedIndex = ParseCadTextIdIndex(textId);
-
-                    if (mappedIndex < 0)
-                    {
-                        mappedIndex = fallbackTextIndex;
-                    }
-
-                    fallbackTextIndex++;
-
-                    if (mappedIndex < 0 || mappedIndex >= keys.Count)
-                    {
-                        continue;
-                    }
-
-                    values[keys[mappedIndex]] = textValue;
-                }
-            }
-            catch
-            {
-            }
-
-            return values;
-        }
-
-        private int ParseCadTextIdIndex(string textId)
-        {
-            if (textId == null || textId.Length < 2 || Char.ToUpperInvariant(textId[0]) != 'T')
-            {
-                return -1;
-            }
-
-            int number;
-
-            if (!Int32.TryParse(textId.Substring(1), NumberStyles.Integer, CultureInfo.InvariantCulture, out number))
-            {
-                return -1;
-            }
-
-            return number <= 0 ? -1 : number - 1;
-        }
-
-        private List<string> SplitFieldKeys(string fieldsText)
-        {
-            List<string> list = new List<string>();
-
-            if (fieldsText == null || fieldsText.Trim() == "")
-            {
-                return list;
-            }
-
-            string[] parts = fieldsText.Replace(",", "|").Replace("/", "|").Split('|');
-            int i;
-
-            for (i = 0; i < parts.Length; i++)
-            {
-                string key = RebarShapeInfo.NormalizeFieldKey(parts[i]);
-
-                if (key != "" && !ContainsField(list, key))
-                {
-                    list.Add(key);
-                }
-            }
-
-            return list;
-        }
-
-        private string GetJsonString(string json, string key)
-        {
-            Match match = Regex.Match(json, "\\\"" + Regex.Escape(key) + "\\\"\\s*:\\s*\\\"((?:\\\\.|[^\\\\\"])*)\\\"", RegexOptions.Singleline);
-
-            if (!match.Success)
-            {
-                return "";
-            }
-
-            return match.Groups[1].Value.Replace("\\\"", "\"").Replace("\\\\", "\\");
-        }
-
-
-        private void PreloadDimensionValues(string currentValue, string currentDimensionText)
-        {
-            if (currentDimensionText == null || currentDimensionText.Trim() == "")
-            {
-                return;
-            }
-
-            RebarShapeInfo shape = repository.FindByRawValue(currentValue);
-
-            if (shape == null || shape.ShapeNo <= 0)
-            {
-                return;
-            }
-
-            Dictionary<string, string> parsed = ParseDimensionText(currentDimensionText);
-
-            if (parsed.Count == 0)
-            {
-                return;
-            }
-
-            if (dimensionValueCache.ContainsKey(shape.ShapeNo))
-            {
-                dimensionValueCache[shape.ShapeNo] = parsed;
-            }
-            else
-            {
-                dimensionValueCache.Add(shape.ShapeNo, parsed);
             }
         }
 
         private Dictionary<string, string> ParseDimensionText(string text)
         {
             Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-            if (text == null)
-            {
-                return values;
-            }
-
-            string[] parts = text.Split(new char[] { ';', '|' }, StringSplitOptions.RemoveEmptyEntries);
+            string[] parts = (text == null ? "" : text).Split(new char[] { ';', '|' }, StringSplitOptions.RemoveEmptyEntries);
             int i;
 
             for (i = 0; i < parts.Length; i++)
             {
-                string part = parts[i] == null ? "" : parts[i].Trim();
-
-                if (part == "")
-                {
-                    continue;
-                }
-
-                int eq = part.IndexOf('=');
+                string item = parts[i] == null ? "" : parts[i].Trim();
+                int eq = item.IndexOf('=');
 
                 if (eq <= 0)
                 {
                     continue;
                 }
 
-                string key = part.Substring(0, eq).Trim().ToUpperInvariant();
-                string value = part.Substring(eq + 1).Trim();
+                string key = item.Substring(0, eq).Trim().ToUpperInvariant();
+                string value = item.Substring(eq + 1).Trim();
 
-                if (key == "" || value == "")
+                if (key != "")
                 {
-                    continue;
+                    values[key] = value;
                 }
-
-                values[key] = value;
             }
 
             return values;
         }
 
-        private void BuildUI()
+        private void RefreshTextGrid()
         {
-            Text = "철근 형상 선택";
-            StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false;
-            MinimizeBox = false;
-            ClientSize = new Size(1040, 760);
-            BackColor = Color.FromArgb(246, 248, 252);
-            Font = OviaFluentTheme.FontKorean(9F, FontStyle.Regular);
-
-            BuildLeftPanel();
-            BuildCenterPanel();
-            BuildBottomButtons();
-        }
-
-        private void BuildLeftPanel()
-        {
-            Panel left = new Panel();
-            left.Location = new Point(12, 12);
-            left.Size = new Size(260, 690);
-            left.BackColor = Color.FromArgb(240, 242, 246);
-            left.BorderStyle = BorderStyle.FixedSingle;
-            Controls.Add(left);
-
-            Label codeLabel = new Label();
-            codeLabel.Text = "형상코드";
-            codeLabel.Font = OviaFluentTheme.FontKorean(14F, FontStyle.Bold);
-            codeLabel.Location = new Point(14, 14);
-            codeLabel.Size = new Size(112, 30);
-            left.Controls.Add(codeLabel);
-
-            lblShapeCodeValue = new Label();
-            lblShapeCodeValue.Font = OviaFluentTheme.FontKorean(14F, FontStyle.Bold);
-            lblShapeCodeValue.TextAlign = ContentAlignment.MiddleLeft;
-            lblShapeCodeValue.Location = new Point(142, 14);
-            lblShapeCodeValue.Size = new Size(92, 30);
-            lblShapeCodeValue.BackColor = Color.Transparent;
-            lblShapeCodeValue.BorderStyle = BorderStyle.None;
-            lblShapeCodeValue.Text = "";
-            left.Controls.Add(lblShapeCodeValue);
-
-            preview = new RebarShapePreviewControl();
-            preview.Location = new Point(12, 62);
-            preview.Size = new Size(230, 84);
-            preview.BackColor = Color.White;
-            left.Controls.Add(preview);
-
-            chkTotalFixed = new CheckBox();
-            chkTotalFixed.Text = "총길이 고정";
-            chkTotalFixed.Location = new Point(18, 156);
-            chkTotalFixed.Size = new Size(120, 24);
-            chkTotalFixed.CheckedChanged += DimensionBox_TextChanged;
-            left.Controls.Add(chkTotalFixed);
-
-            Label totalTitle = new Label();
-            totalTitle.Text = "합계 길이";
-            totalTitle.ForeColor = Color.Firebrick;
-            totalTitle.Font = OviaFluentTheme.FontKorean(9F, FontStyle.Bold);
-            totalTitle.Location = new Point(18, 190);
-            totalTitle.Size = new Size(70, 22);
-            left.Controls.Add(totalTitle);
-
-            lblTotalLength = new Label();
-            lblTotalLength.Text = "0";
-            lblTotalLength.TextAlign = ContentAlignment.MiddleRight;
-            lblTotalLength.BackColor = Color.White;
-            lblTotalLength.BorderStyle = BorderStyle.FixedSingle;
-            lblTotalLength.Font = OviaFluentTheme.FontKorean(12F, FontStyle.Bold);
-            lblTotalLength.Location = new Point(92, 186);
-            lblTotalLength.Size = new Size(150, 30);
-            left.Controls.Add(lblTotalLength);
-
-            string[] fields = new string[] { "A", "B", "C", "D", "E", "F", "G", "H", "R1", "R2", "R3", "R4" };
-            int y = 230;
-            int i;
-
-            for (i = 0; i < fields.Length; i++)
-            {
-                string key = fields[i];
-
-                Label label = new Label();
-                label.Text = key + " 값";
-                label.Location = new Point(22, y + 4);
-                label.Size = new Size(58, 22);
-                left.Controls.Add(label);
-
-                TextBox box = new TextBox();
-                box.Location = new Point(82, y);
-                box.Size = new Size(160, 25);
-                box.Enabled = false;
-                box.Text = "";
-                box.Tag = key;
-                box.TextChanged += DimensionBox_TextChanged;
-                left.Controls.Add(box);
-
-                dimensionLabels.Add(key, label);
-                dimensionBoxes.Add(key, box);
-                y += 31;
-            }
-
-            Label note = new Label();
-            note.Text = "CAD 원본 형상은 숫자·알파벳·기호·각도 표시를 화면 읽기 순서대로 수정하며, 입력 즉시 미리보기에 반영됩니다.";
-            note.ForeColor = Color.FromArgb(92, 98, 110);
-            note.Location = new Point(18, 620);
-            note.Size = new Size(224, 52);
-            left.Controls.Add(note);
-        }
-
-        private void BuildCenterPanel()
-        {
-            Label searchLabel = new Label();
-            searchLabel.Text = "형상번호 / 이름 / 분류 검색";
-            searchLabel.Location = new Point(290, 15);
-            searchLabel.Size = new Size(180, 22);
-            Controls.Add(searchLabel);
-
-            txtSearch = new TextBox();
-            txtSearch.Location = new Point(290, 40);
-            txtSearch.Size = new Size(260, 25);
-            txtSearch.TextChanged += TxtSearch_TextChanged;
-            Controls.Add(txtSearch);
-
-            Label partLabel = new Label();
-            partLabel.Text = "부위갯수";
-            partLabel.Location = new Point(565, 15);
-            partLabel.Size = new Size(70, 22);
-            Controls.Add(partLabel);
-
-            txtPartCount = new TextBox();
-            txtPartCount.Location = new Point(565, 40);
-            txtPartCount.Size = new Size(70, 25);
-            txtPartCount.BackColor = Color.Yellow;
-            txtPartCount.TextAlign = HorizontalAlignment.Center;
-            txtPartCount.TextChanged += TxtFilter_TextChanged;
-            Controls.Add(txtPartCount);
-
-            btnQuery = new Button();
-            btnQuery.Text = "조회";
-            btnQuery.Location = new Point(645, 38);
-            btnQuery.Size = new Size(74, 28);
-            btnQuery.Click += BtnQuery_Click;
-            Controls.Add(btnQuery);
-
-            chkCoupler = new CheckBox();
-            chkCoupler.Text = "커플러";
-            chkCoupler.Location = new Point(290, 76);
-            chkCoupler.Size = new Size(74, 24);
-            chkCoupler.CheckedChanged += TxtFilter_TextChanged;
-            Controls.Add(chkCoupler);
-
-            chkRound = new CheckBox();
-            chkRound.Text = "라운드(R=)";
-            chkRound.Location = new Point(370, 76);
-            chkRound.Size = new Size(104, 24);
-            chkRound.CheckedChanged += TxtFilter_TextChanged;
-            Controls.Add(chkRound);
-
-            chkUpDown = new CheckBox();
-            chkUpDown.Text = "Up/Down";
-            chkUpDown.Location = new Point(480, 76);
-            chkUpDown.Size = new Size(86, 24);
-            chkUpDown.CheckedChanged += TxtFilter_TextChanged;
-            Controls.Add(chkUpDown);
-
-            chkSleeve = new CheckBox();
-            chkSleeve.Text = "SLEEVE";
-            chkSleeve.Location = new Point(575, 76);
-            chkSleeve.Size = new Size(86, 24);
-            chkSleeve.CheckedChanged += TxtFilter_TextChanged;
-            Controls.Add(chkSleeve);
-
-            shapeGrid = new ShapeGridControl(renderer);
-            shapeGrid.Location = new Point(290, 108);
-            shapeGrid.Size = new Size(732, 594);
-            shapeGrid.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
-            shapeGrid.SelectedIndexChanged += ShapeGrid_SelectedIndexChanged;
-            shapeGrid.ShapeDoubleClick += ShapeGrid_ShapeDoubleClick;
-            Controls.Add(shapeGrid);
-        }
-
-        private void BuildRightPanel()
-        {
-            // 우측 형상정보/사용기준 박스는 대표님 요청에 따라 제거했습니다.
-        }
-
-        private void BuildBottomButtons()
-        {
-            btnSelect = new Button();
-            btnSelect.Text = "선택";
-            btnSelect.Location = new Point(852, 712);
-            btnSelect.Size = new Size(78, 32);
-            btnSelect.Click += BtnSelect_Click;
-            Controls.Add(btnSelect);
-
-            btnCancel = new Button();
-            btnCancel.Text = "취소";
-            btnCancel.Location = new Point(944, 712);
-            btnCancel.Size = new Size(78, 32);
-            btnCancel.Click += BtnCancel_Click;
-            Controls.Add(btnCancel);
-
-            AcceptButton = btnSelect;
-            CancelButton = btnCancel;
-        }
-
-        private void TxtSearch_TextChanged(object sender, EventArgs e)
-        {
-            ApplyFilter();
-        }
-
-        private void TxtFilter_TextChanged(object sender, EventArgs e)
-        {
-            ApplyFilter();
-        }
-
-        private void BtnQuery_Click(object sender, EventArgs e)
-        {
-            ApplyFilter();
-        }
-
-        private void DimensionBox_TextChanged(object sender, EventArgs e)
-        {
-            if (isApplyingShapeFields)
+            if (textGrid == null || editor == null || editor.Document == null)
             {
                 return;
             }
 
-            StoreCurrentDimensionValues();
-            RecalculateTotalLength();
+            string selectedId = GetSelectedTextGridId();
+            suppressUiEvents = true;
 
-            if (preview != null)
+            try
             {
-                preview.DimensionText = BuildSelectedDimensionText();
+                textGrid.Rows.Clear();
+                List<CadShapeEditElement> texts = editor.Document.GetTextElements();
+                int selectedRowIndex = -1;
+                int i;
+
+                for (i = 0; i < texts.Count; i++)
+                {
+                    int rowIndex = textGrid.Rows.Add(texts[i].TextId, texts[i].Text, ClassifyText(texts[i].Text));
+                    textGrid.Rows[rowIndex].Tag = texts[i].TextId;
+
+                    if (selectedId != "" && texts[i].TextId.Equals(selectedId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        selectedRowIndex = rowIndex;
+                    }
+                }
+
+                if (selectedRowIndex >= 0)
+                {
+                    textGrid.ClearSelection();
+                    textGrid.Rows[selectedRowIndex].Selected = true;
+                }
+            }
+            finally
+            {
+                suppressUiEvents = false;
             }
         }
 
-        private void ShapeGrid_SelectedIndexChanged(object sender, EventArgs e)
+        private string GetSelectedTextGridId()
         {
-            RebarShapeInfo shape = shapeGrid == null ? null : shapeGrid.SelectedShape;
-
-            if (shape == null)
-            {
-                return;
-            }
-
-            StoreCurrentDimensionValues();
-
-            currentEditingShape = shape;
-            lastSelectedIndex = shapeGrid.SelectedIndex;
-            preview.Shape = shape;
-            preview.RawText = IsCadImportedShape(shape) ? "" : txtSearch.Text;
-
-            lblShapeCodeValue.Text = shape.ShapeNo <= 0 ? "" : shape.DisplayCode;
-            ApplyShapeFields(shape);
-            preview.DimensionText = BuildSelectedDimensionText();
-            SetInfoText(shape);
-        }
-
-        private string GetSafeShapeListTitle(RebarShapeInfo shape)
-        {
-            if (shape == null)
+            if (textGrid == null || textGrid.SelectedRows.Count == 0)
             {
                 return "";
             }
 
-            if (IsCadImportedShape(shape))
-            {
-                return "CAD에서 불러온 형상";
-            }
-
-            if (shape.ShapeNo <= 0)
-            {
-                return "이미지 없음";
-            }
-
-            return "형상 " + shape.DisplayCode;
+            object tag = textGrid.SelectedRows[0].Tag;
+            return tag == null ? "" : tag.ToString();
         }
 
-        private void ShapeGrid_ShapeDoubleClick(object sender, EventArgs e)
+        private string ClassifyText(string value)
         {
-            SelectCurrentShape();
+            string text = value == null ? "" : value.Trim();
+            string upper = text.ToUpperInvariant();
+
+            if (upper == "UP" || upper == "DOWN" || upper == "(UP)" || upper == "(DOWN)") return "방향";
+            if (upper.StartsWith("R", StringComparison.OrdinalIgnoreCase)) return "R값";
+            if (text.IndexOf("°", StringComparison.Ordinal) >= 0 || text.IndexOf("도", StringComparison.Ordinal) >= 0) return "각도";
+
+            decimal number;
+            if (Decimal.TryParse(text.Replace(",", ""), NumberStyles.Any, CultureInfo.InvariantCulture, out number)) return "치수";
+            return "문자";
         }
 
-        private void BtnSelect_Click(object sender, EventArgs e)
+        private void RefreshSelectionPanel()
         {
-            SelectCurrentShape();
+            if (editor == null)
+            {
+                return;
+            }
+
+            CadShapeEditElement selected = editor.SelectedElement;
+            suppressUiEvents = true;
+
+            try
+            {
+                if (selected == null)
+                {
+                    lblSelectionType.Text = "선택 없음";
+                    lblSelectionId.Text = "";
+                    txtSelectedText.Text = "";
+                    txtSelectedText.Enabled = false;
+                    btnUpdateText.Enabled = false;
+                    numRotation.Value = 0;
+                    numRotation.Enabled = false;
+                }
+                else
+                {
+                    lblSelectionType.Text = GetElementTypeName(selected.Type);
+                    lblSelectionId.Text = selected.Type == "TEXT" ? selected.TextId : "";
+                    txtSelectedText.Enabled = selected.Type == "TEXT";
+                    btnUpdateText.Enabled = selected.Type == "TEXT";
+                    txtSelectedText.Text = selected.Type == "TEXT" ? selected.Text : "";
+                    numRotation.Enabled = selected.Type == "TEXT";
+                    decimal rotation = (decimal)Math.Max(-360D, Math.Min(360D, selected.Rotation));
+                    numRotation.Value = rotation;
+                }
+            }
+            finally
+            {
+                suppressUiEvents = false;
+            }
+        }
+
+        private string GetElementTypeName(string type)
+        {
+            if (type == "LINE") return "선";
+            if (type == "TEXT") return "문자";
+            if (type == "ARC") return "원호";
+            if (type == "CIRCLE") return "원";
+            return type == null ? "" : type;
+        }
+
+        private void RefreshStatistics()
+        {
+            if (editor == null || editor.Document == null)
+            {
+                return;
+            }
+
+            int lineCount = 0;
+            int arcCount = 0;
+            int circleCount = 0;
+            int textCount = 0;
+            int i;
+
+            for (i = 0; i < editor.Document.Elements.Count; i++)
+            {
+                CadShapeEditElement element = editor.Document.Elements[i];
+                if (element == null) continue;
+                if (element.Type == "LINE") lineCount++;
+                else if (element.Type == "ARC") arcCount++;
+                else if (element.Type == "CIRCLE") circleCount++;
+                else if (element.Type == "TEXT") textCount++;
+            }
+
+            lblStatistics.Text = "선 " + lineCount.ToString(CultureInfo.InvariantCulture)
+                + "개   원호 " + arcCount.ToString(CultureInfo.InvariantCulture)
+                + "개   원 " + circleCount.ToString(CultureInfo.InvariantCulture)
+                + "개\r\n문자·치수 " + textCount.ToString(CultureInfo.InvariantCulture)
+                + "개\r\n원본: " + (cadShapeJsonPath == "" ? "신규 수동 작성" : Path.GetFileName(cadShapeJsonPath));
+        }
+
+        private void UpdateToolbarState()
+        {
+            if (editor == null)
+            {
+                return;
+            }
+
+            SetModeButtonStyle(btnSelectMode, editor.Mode == CadShapeEditorMode.Select);
+            SetModeButtonStyle(btnLineMode, editor.Mode == CadShapeEditorMode.AddLine);
+            SetModeButtonStyle(btnTextMode, editor.Mode == CadShapeEditorMode.AddText);
+            btnUndo.Enabled = editor.CanUndo;
+            btnRedo.Enabled = editor.CanRedo;
+            btnDelete.Enabled = editor.SelectedElement != null;
+            btnSplit.Enabled = editor.SelectedElement != null && editor.SelectedElement.Type == "LINE";
+            lblMode.Text = editor.Mode == CadShapeEditorMode.Select
+                ? "현재: 선택·이동"
+                : editor.Mode == CadShapeEditorMode.AddLine ? "현재: 연속 선 그리기" : "현재: 문자 추가";
+        }
+
+        private void SetModeButtonStyle(Button button, bool active)
+        {
+            if (button == null) return;
+            button.BackColor = active ? Color.FromArgb(18, 103, 206) : Color.White;
+            button.ForeColor = active ? Color.White : Color.FromArgb(35, 43, 57);
+            button.FlatAppearance.BorderColor = active ? Color.FromArgb(18, 103, 206) : Color.FromArgb(197, 203, 213);
+        }
+
+        private void Editor_SelectionChanged(object sender, EventArgs e)
+        {
+            RefreshSelectionPanel();
+            UpdateToolbarState();
+
+            CadShapeEditElement selected = editor.SelectedElement;
+            if (selected != null && selected.Type == "TEXT")
+            {
+                SelectTextGridRow(selected.TextId);
+            }
+        }
+
+        private void Editor_DocumentChanged(object sender, EventArgs e)
+        {
+            if (!textGridCommitInProgress)
+            {
+                RefreshTextGrid();
+            }
+
+            RefreshSelectionPanel();
+            RefreshStatistics();
+            UpdateToolbarState();
+            lblStatus.Text = "수정 내용은 아직 원본 CAD JSON에 덮어쓰지 않았습니다. ‘수정 적용’을 누르면 별도 편집 JSON으로 저장됩니다.";
+        }
+
+        private void Editor_ModeChanged(object sender, EventArgs e)
+        {
+            UpdateToolbarState();
+        }
+
+        private void Editor_TextEditRequested(object sender, EventArgs e)
+        {
+            CadShapeEditElement selected = editor == null ? null : editor.SelectedElement;
+
+            if (selected == null || selected.Type != "TEXT")
+            {
+                return;
+            }
+
+            SelectTextGridRow(selected.TextId);
+            RefreshSelectionPanel();
+            txtSelectedText.Focus();
+            txtSelectedText.SelectAll();
+            lblStatus.Text = "문자값을 입력한 뒤 Enter 또는 ‘값 적용’을 누르세요.";
+        }
+
+        private void SelectTextGridRow(string textId)
+        {
+            if (textGrid == null || textId == null || textId.Trim() == "")
+            {
+                return;
+            }
+
+            suppressUiEvents = true;
+            try
+            {
+                int i;
+                for (i = 0; i < textGrid.Rows.Count; i++)
+                {
+                    object tag = textGrid.Rows[i].Tag;
+                    if (tag != null && tag.ToString().Equals(textId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        textGrid.ClearSelection();
+                        textGrid.Rows[i].Selected = true;
+                        if (textGrid.Rows[i].Cells.Count > 1)
+                        {
+                            textGrid.CurrentCell = textGrid.Rows[i].Cells[1];
+                        }
+                        break;
+                    }
+                }
+            }
+            finally
+            {
+                suppressUiEvents = false;
+            }
+        }
+
+        private void TextGrid_CellEndEdit(object sender, DataGridViewCellEventArgs e)
+        {
+            if (suppressUiEvents || e.RowIndex < 0 || e.ColumnIndex != 1)
+            {
+                return;
+            }
+
+            DataGridViewRow row = textGrid.Rows[e.RowIndex];
+            string id = row.Tag == null ? "" : row.Tag.ToString();
+            object value = row.Cells[e.ColumnIndex].Value;
+            string textValue = value == null ? "" : value.ToString();
+
+            textGridCommitInProgress = true;
+
+            try
+            {
+                editor.SetTextValue(id, textValue);
+                row.Cells[2].Value = ClassifyText(textValue);
+            }
+            finally
+            {
+                textGridCommitInProgress = false;
+            }
+        }
+
+        private void TextGrid_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex != 1)
+            {
+                return;
+            }
+
+            textGrid.CurrentCell = textGrid.Rows[e.RowIndex].Cells[e.ColumnIndex];
+            textGrid.BeginEdit(true);
+        }
+
+        private void TextGrid_SelectionChanged(object sender, EventArgs e)
+        {
+            if (suppressUiEvents)
+            {
+                return;
+            }
+
+            string id = GetSelectedTextGridId();
+            if (id != "")
+            {
+                editor.SelectTextElement(id);
+            }
+        }
+
+        private void BtnUpdateText_Click(object sender, EventArgs e)
+        {
+            if (!txtSelectedText.Enabled)
+            {
+                return;
+            }
+
+            editor.SetSelectedText(txtSelectedText.Text);
+            txtSelectedText.Focus();
+            txtSelectedText.SelectAll();
+        }
+
+        private void TxtSelectedText_Leave(object sender, EventArgs e)
+        {
+            if (!suppressUiEvents && txtSelectedText.Enabled)
+            {
+                editor.SetSelectedText(txtSelectedText.Text);
+            }
+        }
+
+        private void TxtSelectedText_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter && txtSelectedText.Enabled)
+            {
+                editor.SetSelectedText(txtSelectedText.Text);
+                editor.Focus();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+        }
+
+        private void NumRotation_ValueChanged(object sender, EventArgs e)
+        {
+            if (!suppressUiEvents && numRotation.Enabled)
+            {
+                editor.SetSelectedRotation((double)numRotation.Value);
+            }
+        }
+
+        private void BtnSelectMode_Click(object sender, EventArgs e)
+        {
+            editor.Mode = CadShapeEditorMode.Select;
+            editor.Focus();
+        }
+
+        private void BtnLineMode_Click(object sender, EventArgs e)
+        {
+            editor.Mode = CadShapeEditorMode.AddLine;
+            editor.Focus();
+        }
+
+        private void BtnTextMode_Click(object sender, EventArgs e)
+        {
+            editor.Mode = CadShapeEditorMode.AddText;
+            editor.Focus();
+        }
+
+        private void BtnDelete_Click(object sender, EventArgs e)
+        {
+            editor.DeleteSelected();
+            editor.Focus();
+        }
+
+        private void BtnSplit_Click(object sender, EventArgs e)
+        {
+            editor.SplitSelectedLine();
+            editor.Focus();
+        }
+
+        private void BtnUndo_Click(object sender, EventArgs e)
+        {
+            editor.Undo();
+            editor.Focus();
+        }
+
+        private void BtnRedo_Click(object sender, EventArgs e)
+        {
+            editor.Redo();
+            editor.Focus();
+        }
+
+        private void BtnHorizontal_Click(object sender, EventArgs e)
+        {
+            editor.AlignSelectedHorizontal();
+            editor.Focus();
+        }
+
+        private void BtnVertical_Click(object sender, EventArgs e)
+        {
+            editor.AlignSelectedVertical();
+            editor.Focus();
+        }
+
+        private void BtnFit_Click(object sender, EventArgs e)
+        {
+            editor.FitToScreen();
+            editor.Focus();
+        }
+
+        private void BtnZoomIn_Click(object sender, EventArgs e)
+        {
+            editor.ZoomIn();
+            editor.Focus();
+        }
+
+        private void BtnZoomOut_Click(object sender, EventArgs e)
+        {
+            editor.ZoomOut();
+            editor.Focus();
+        }
+
+        private void BtnRestore_Click(object sender, EventArgs e)
+        {
+            DialogResult result = MessageBox.Show(
+                isManualDocument
+                    ? "현재 수정사항을 모두 취소하고 편집창을 처음 열었을 때의 형상으로 복원하시겠습니까?"
+                    : "현재 수정사항을 모두 취소하고 CAD에서 처음 추출한 원본 형상으로 복원하시겠습니까?",
+                isManualDocument ? "초기 형상 복원" : "CAD 원본 복원",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question
+            );
+
+            if (result == DialogResult.Yes)
+            {
+                editor.RestoreOriginal();
+                lblStatus.Text = isManualDocument
+                    ? "편집 시작 당시의 형상으로 복원했습니다. 적용 전까지 저장되지 않습니다."
+                    : "CAD 원본 형상으로 복원했습니다. 적용 전까지 저장되지 않습니다.";
+            }
+        }
+
+        private void ChkSnap_CheckedChanged(object sender, EventArgs e)
+        {
+            editor.SnapEnabled = chkSnap.Checked;
+            editor.Focus();
+        }
+
+        private void BtnApply_Click(object sender, EventArgs e)
+        {
+            if (editor.Document.CountGeometryElements() <= 0)
+            {
+                MessageBox.Show("철근 형상선이 없습니다. 선 추가 도구로 형상을 그린 후 적용해주세요.", "철근 형상 확인", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                CadShapeEditDocument resultDocument = editor.Document.Clone();
+                string outputPath = CadShapeEditDocument.BuildEditablePath(cadShapeJsonPath);
+
+                if (!isManualDocument && cadShapeJsonPath != "")
+                {
+                    // 편집 JSON과 같은 폴더에 CAD 최초 원본의 동반 파일을 보관합니다.
+                    // 편집 JSON에는 파일명만 기록하여 프로젝트 폴더가 이동되어도 원본 복원이 가능합니다.
+                    string rawCopyPath = CadShapeEditDocument.BuildRawCopyPath(outputPath);
+
+                    // 최초 AutoCAD JSON의 바이트를 그대로 복사하여 메타데이터와 좌표 정밀도까지 보존합니다.
+                    // 원본 파일을 찾을 수 없는 예외 상황에서만 메모리 모델을 CAD_RAW JSON으로 저장합니다.
+                    if (rawSourceJsonPath != "" && File.Exists(rawSourceJsonPath))
+                    {
+                        if (!IsSameFullPath(rawSourceJsonPath, rawCopyPath))
+                        {
+                            File.Copy(rawSourceJsonPath, rawCopyPath, true);
+                        }
+                    }
+                    else
+                    {
+                        CadShapeEditDocument rawCopy = rawDocument.Clone();
+                        rawCopy.Source = "CAD_RAW";
+                        rawCopy.OriginalSourcePath = "";
+                        rawCopy.Save(rawCopyPath);
+                    }
+
+                    resultDocument.OriginalSourcePath = Path.GetFileName(rawCopyPath);
+                    resultDocument.Source = "OVIA_EDIT";
+                }
+                else
+                {
+                    resultDocument.OriginalSourcePath = "";
+                    resultDocument.Source = "OVIA_MANUAL";
+                }
+
+                resultDocument.Save(outputPath);
+
+                SelectedCadShapeJsonPath = outputPath;
+                SelectedShapeSource = isManualDocument ? "MANUAL" : "CAD";
+                SelectedShape = CreateCadImportedShape(outputPath, SelectedShapeSource);
+                // 레거시 호출부와의 호환을 위해 벡터 편집 결과는 이 분기로 전달합니다.
+                SelectedCadShapeOriginal = true;
+                SelectedDimensionText = BuildSelectedDimensionText(resultDocument);
+                SelectedTotalLength = CalculateNumericTextTotal(resultDocument);
+                DialogResult = DialogResult.OK;
+                Close();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("철근 형상 저장 중 오류가 발생했습니다.\r\n" + ex.Message, "OVIA", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+
+        private bool IsSameFullPath(string pathA, string pathB)
+        {
+            if (pathA == null || pathB == null || pathA.Trim() == "" || pathB.Trim() == "")
+            {
+                return false;
+            }
+
+            try
+            {
+                string a = Path.GetFullPath(pathA).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string b = Path.GetFullPath(pathB).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                return a.Equals(b, StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private RebarShapeInfo CreateCadImportedShape(string jsonPath, string shapeSource)
+        {
+            bool manual = shapeSource != null && shapeSource.Equals("MANUAL", StringComparison.OrdinalIgnoreCase);
+            RebarShapeInfo shape = new RebarShapeInfo();
+            shape.ShapeNo = -1000;
+            shape.ShapeCode = manual ? "MANUAL" : "CAD";
+            shape.ShapeName = manual ? "직접 작성 철근 형상" : "CAD 철근 형상";
+            shape.Category = manual ? "MANUAL" : "CAD";
+            shape.SourceImagePath = jsonPath;
+            shape.VectorStatus = "CAD_IMPORTED";
+            shape.ApproveStatus = manual ? "MANUAL_EDITED" : "CAD_EDITED";
+            shape.FieldsText = "";
+            shape.OptionText = manual ? "MANUAL" : "CAD";
+            shape.IsUserSelectable = true;
+            return shape;
+        }
+
+        private string BuildSelectedDimensionText(CadShapeEditDocument document)
+        {
+            StringBuilder sb = new StringBuilder();
+            List<CadShapeEditElement> texts = document.GetTextElements();
+            int i;
+
+            for (i = 0; i < texts.Count; i++)
+            {
+                if (texts[i].TextId == null || texts[i].TextId.Trim() == "")
+                {
+                    continue;
+                }
+
+                if (sb.Length > 0)
+                {
+                    sb.Append("; ");
+                }
+
+                sb.Append(texts[i].TextId.Trim().ToUpperInvariant());
+                sb.Append("=");
+                sb.Append(texts[i].Text == null ? "" : texts[i].Text.Trim());
+            }
+
+            return sb.ToString();
+        }
+
+        private decimal CalculateNumericTextTotal(CadShapeEditDocument document)
+        {
+            decimal total = 0M;
+            List<CadShapeEditElement> texts = document.GetTextElements();
+            int i;
+
+            for (i = 0; i < texts.Count; i++)
+            {
+                string value = texts[i].Text == null ? "" : texts[i].Text.Trim().Replace(",", "");
+                decimal number;
+                if (Decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out number))
+                {
+                    total += number;
+                }
+            }
+
+            return total;
         }
 
         private void BtnCancel_Click(object sender, EventArgs e)
@@ -717,821 +1111,5 @@ namespace OVIA.Desktop
             DialogResult = DialogResult.Cancel;
             Close();
         }
-
-        private void ApplyFilter()
-        {
-            string keyword = txtSearch == null ? "" : txtSearch.Text.Trim();
-            string normalized = Normalize(keyword);
-            int partCount = ParseInt(txtPartCount == null ? "" : txtPartCount.Text.Trim());
-
-            StoreCurrentDimensionValues();
-            List<RebarShapeInfo> filteredShapes = new List<RebarShapeInfo>();
-            lastSelectedIndex = -1;
-
-            int i;
-
-            for (i = 0; i < allShapes.Count; i++)
-            {
-                RebarShapeInfo shape = allShapes[i];
-
-                if (shape == null)
-                {
-                    continue;
-                }
-
-                bool alwaysVisibleTopItem = IsCadImportedShape(shape) || shape.ShapeNo <= 0;
-
-                if (!alwaysVisibleTopItem && !MatchesKeyword(shape, normalized))
-                {
-                    continue;
-                }
-
-                if (!alwaysVisibleTopItem && partCount > 0 && shape.GetLengthFieldCount() != partCount)
-                {
-                    continue;
-                }
-
-                if (!alwaysVisibleTopItem && chkCoupler.Checked && !shape.HasOption("COUPLER"))
-                {
-                    continue;
-                }
-
-                if (!alwaysVisibleTopItem && chkRound.Checked && !shape.HasOption("ROUND"))
-                {
-                    continue;
-                }
-
-                if (!alwaysVisibleTopItem && chkUpDown.Checked && !shape.HasOption("UPDOWN"))
-                {
-                    continue;
-                }
-
-                if (!alwaysVisibleTopItem && chkSleeve.Checked && !shape.HasOption("SLEEVE"))
-                {
-                    continue;
-                }
-
-                filteredShapes.Add(shape);
-            }
-
-            if (shapeGrid != null)
-            {
-                shapeGrid.SetShapes(filteredShapes);
-            }
-
-            if (filteredShapes.Count > 0)
-            {
-                int selectIndex;
-
-                if (!initialSelectionApplied && initialSelectedRawValue != null && initialSelectedRawValue.Trim() != "")
-                {
-                    selectIndex = FindBestSelectIndexByRawValue(filteredShapes, initialSelectedRawValue);
-                    initialSelectionApplied = true;
-                }
-                else
-                {
-                    selectIndex = FindBestSelectIndex(filteredShapes, normalized);
-                }
-
-                if (shapeGrid != null)
-                {
-                    shapeGrid.SelectedIndex = selectIndex;
-                }
-            }
-            else
-            {
-                currentEditingShape = null;
-                lastSelectedIndex = -1;
-                preview.Shape = null;
-                preview.RawText = keyword;
-
-                if (lblInfo != null)
-                {
-                    lblInfo.Text = "검색 결과가 없습니다. 관리자에게 형상 등록/승인을 요청하세요.\r\n전체 등록 형상 수: " + allShapes.Count.ToString();
-                }
-
-                ApplyShapeFields(null);
-            }
-        }
-
-        private int FindBestSelectIndexByRawValue(List<RebarShapeInfo> shapes, string rawValue)
-        {
-            if (shapes == null || shapes.Count == 0)
-            {
-                return -1;
-            }
-
-            string normalized = Normalize(rawValue);
-
-            if (normalized == "")
-            {
-                return 0;
-            }
-
-            int i;
-
-            for (i = 0; i < shapes.Count; i++)
-            {
-                RebarShapeInfo shape = shapes[i];
-
-                if (shape == null || IsCadImportedShape(shape))
-                {
-                    continue;
-                }
-
-                if (Normalize(shape.DisplayCode).Equals(normalized, StringComparison.OrdinalIgnoreCase)
-                    || Normalize(shape.ShapeCode).Equals(normalized, StringComparison.OrdinalIgnoreCase))
-                {
-                    return i;
-                }
-            }
-
-            return 0;
-        }
-
-        private int FindBestSelectIndex(List<RebarShapeInfo> shapes, string normalized)
-        {
-            if (shapes == null || shapes.Count == 0)
-            {
-                return -1;
-            }
-
-            if (normalized == "")
-            {
-                return 0;
-            }
-
-            int i;
-
-            for (i = 0; i < shapes.Count; i++)
-            {
-                RebarShapeInfo shape = shapes[i];
-
-                if (shape == null)
-                {
-                    continue;
-                }
-
-                if (Normalize(shape.DisplayCode).Equals(normalized, StringComparison.OrdinalIgnoreCase)
-                    || Normalize(shape.ShapeCode).Equals(normalized, StringComparison.OrdinalIgnoreCase))
-                {
-                    return i;
-                }
-            }
-
-            return 0;
-        }
-
-        private bool MatchesKeyword(RebarShapeInfo shape, string normalized)
-        {
-            if (normalized == "")
-            {
-                return true;
-            }
-
-            return Normalize(shape.DisplayCode).IndexOf(normalized, StringComparison.OrdinalIgnoreCase) >= 0
-                || Normalize(shape.ShapeCode).IndexOf(normalized, StringComparison.OrdinalIgnoreCase) >= 0
-                || Normalize(shape.ShapeName).IndexOf(normalized, StringComparison.OrdinalIgnoreCase) >= 0
-                || Normalize(shape.Category).IndexOf(normalized, StringComparison.OrdinalIgnoreCase) >= 0
-                || Normalize(shape.FieldsText).IndexOf(normalized, StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private void ApplyShapeFields(RebarShapeInfo shape)
-        {
-            string[] allKeys = new string[] { "A", "B", "C", "D", "E", "F", "G", "H", "R1", "R2", "R3", "R4" };
-            List<string> activeKeys = shape == null ? new List<string>() : shape.GetFieldKeys();
-            bool cadImported = IsCadImportedShape(shape);
-            int i;
-
-            isApplyingShapeFields = true;
-
-            try
-            {
-                for (i = 0; i < allKeys.Length; i++)
-                {
-                    string key = allKeys[i];
-                    bool enabled = ContainsField(activeKeys, key);
-
-                    TextBox box;
-                    Label label;
-
-                    if (dimensionBoxes.TryGetValue(key, out box))
-                    {
-                        box.Enabled = enabled;
-                        box.ReadOnly = false;
-                        box.BackColor = enabled ? Color.White : Color.FromArgb(226, 226, 226);
-                        box.Text = enabled ? GetCachedDimensionValue(shape, key) : "";
-                    }
-
-                    if (dimensionLabels.TryGetValue(key, out label))
-                    {
-                        label.Text = cadImported && enabled
-                            ? (i + 1).ToString(CultureInfo.InvariantCulture) + "번 값"
-                            : key + " 값";
-                        label.ForeColor = enabled ? Color.FromArgb(35, 35, 35) : Color.FromArgb(150, 150, 150);
-                    }
-                }
-            }
-            finally
-            {
-                isApplyingShapeFields = false;
-            }
-
-            RecalculateTotalLength();
-
-            if (preview != null)
-            {
-                preview.DimensionText = BuildSelectedDimensionText();
-            }
-        }
-
-        private void StoreCurrentDimensionValues()
-        {
-            if (currentEditingShape == null)
-            {
-                return;
-            }
-
-            Dictionary<string, string> values;
-
-            if (!dimensionValueCache.TryGetValue(currentEditingShape.ShapeNo, out values))
-            {
-                values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                dimensionValueCache.Add(currentEditingShape.ShapeNo, values);
-            }
-
-            foreach (KeyValuePair<string, TextBox> pair in dimensionBoxes)
-            {
-                if (pair.Value == null || !pair.Value.Enabled)
-                {
-                    continue;
-                }
-
-                values[pair.Key] = pair.Value.Text == null ? "" : pair.Value.Text.Trim();
-            }
-        }
-
-        private string GetCachedDimensionValue(RebarShapeInfo shape, string key)
-        {
-            if (shape == null || key == null)
-            {
-                return "";
-            }
-
-            Dictionary<string, string> values;
-            string value;
-
-            if (dimensionValueCache.TryGetValue(shape.ShapeNo, out values) && values.TryGetValue(key, out value))
-            {
-                return value == null ? "" : value;
-            }
-
-            return "";
-        }
-
-        private bool ContainsField(List<string> fields, string key)
-        {
-            int i;
-
-            for (i = 0; i < fields.Count; i++)
-            {
-                if (fields[i].Equals(key, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private void RecalculateTotalLength()
-        {
-            string[] lengthKeys = new string[] { "A", "B", "C", "D", "E", "F", "G", "H" };
-            decimal total = 0M;
-            int i;
-
-            for (i = 0; i < lengthKeys.Length; i++)
-            {
-                TextBox box;
-
-                if (dimensionBoxes.TryGetValue(lengthKeys[i], out box) && box.Enabled)
-                {
-                    total += ParseDecimal(box.Text);
-                }
-            }
-
-            SelectedTotalLength = total;
-            lblTotalLength.Text = total.ToString("0.###", CultureInfo.InvariantCulture);
-        }
-
-        private string BuildSelectedDimensionText()
-        {
-            StringBuilder sb = new StringBuilder();
-            string[] allKeys = new string[] { "A", "B", "C", "D", "E", "F", "G", "H", "R1", "R2", "R3", "R4" };
-            int i;
-
-            for (i = 0; i < allKeys.Length; i++)
-            {
-                string key = allKeys[i];
-                TextBox box;
-
-                if (dimensionBoxes.TryGetValue(key, out box) && box.Enabled)
-                {
-                    string value = box.Text == null ? "" : box.Text.Trim();
-
-                    if (value != "")
-                    {
-                        if (sb.Length > 0)
-                        {
-                            sb.Append("; ");
-                        }
-
-                        sb.Append(key);
-                        sb.Append("=");
-                        sb.Append(value);
-                    }
-                }
-            }
-
-            if (chkTotalFixed.Checked)
-            {
-                if (sb.Length > 0)
-                {
-                    sb.Append("; ");
-                }
-
-                sb.Append("총길이고정=Y");
-            }
-
-            return sb.ToString();
-        }
-
-        private void SelectCurrentShape()
-        {
-            RebarShapeInfo shape = shapeGrid == null ? null : shapeGrid.SelectedShape;
-
-            if (shape == null)
-            {
-                MessageBox.Show("선택할 형상이 없습니다.", "OVIA", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            StoreCurrentDimensionValues();
-            List<string> missingKeys = GetMissingRequiredKeys(shape);
-
-            if (missingKeys.Count > 0)
-            {
-                string firstKey = missingKeys[0];
-                TextBox firstBox;
-
-                if (dimensionBoxes.TryGetValue(firstKey, out firstBox))
-                {
-                    firstBox.Focus();
-                    firstBox.SelectAll();
-                }
-
-                MessageBox.Show("다음 항목의 값을 입력해주세요.\r\n- " + String.Join(", ", missingKeys.ToArray()), "입력값 누락", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            SelectedShape = shape;
-            SelectedCadShapeOriginal = IsCadImportedShape(shape);
-            SelectedDimensionText = BuildSelectedDimensionText();
-            RecalculateTotalLength();
-            DialogResult = DialogResult.OK;
-            Close();
-        }
-
-        private List<string> GetMissingRequiredKeys(RebarShapeInfo shape)
-        {
-            List<string> list = new List<string>();
-
-            if (shape == null)
-            {
-                return list;
-            }
-
-            if (shape.ShapeNo <= 0 && !IsCadImportedShape(shape))
-            {
-                return list;
-            }
-
-            List<string> keys = shape.GetFieldKeys();
-            int i;
-
-            for (i = 0; i < keys.Count; i++)
-            {
-                string key = keys[i];
-                TextBox box;
-
-                if (!dimensionBoxes.TryGetValue(key, out box) || !box.Enabled)
-                {
-                    continue;
-                }
-
-                string value = box.Text == null ? "" : box.Text.Trim();
-
-                if (value == "")
-                {
-                    list.Add(key);
-                }
-            }
-
-            return list;
-        }
-
-        private void SetInfoText(RebarShapeInfo shape)
-        {
-            if (lblInfo == null)
-            {
-                return;
-            }
-
-            if (shape == null)
-            {
-                lblInfo.Text = "";
-                return;
-            }
-
-            if (IsCadImportedShape(shape))
-            {
-                lblInfo.Text = "형상구분: CAD에서 불러온 형상\r\n"
-                    + "표시명: CAD 원본 문자 수정\r\n"
-                    + "입력필드: " + shape.GetFieldKeys().Count.ToString(CultureInfo.InvariantCulture) + "개 (위→아래, 같은 줄은 좌→우)\r\n"
-                    + "사용기준: 선과 위치는 유지하고 숫자·문자·기호만 수정합니다.";
-                return;
-            }
-
-            lblInfo.Text = "형상번호: " + (shape.ShapeNo <= 0 ? "이미지 없음" : shape.DisplayCode) + "\r\n"
-                + "표시명: " + (shape.ShapeNo <= 0 ? "이미지 없음" : "형상 " + shape.DisplayCode) + "\r\n"
-                + "입력필드: " + (shape.FieldsText == null || shape.FieldsText.Trim() == "" ? "미정의" : shape.FieldsText.Replace("|", ", ")) + "\r\n"
-                + "부위갯수: " + shape.GetLengthFieldCount().ToString() + "\r\n"
-                + "상태: " + shape.ApproveStatus + "\r\n"
-                + "자료: " + (shape.VectorStatus == null || shape.VectorStatus.Trim() == "" ? "OVIA" : shape.VectorStatus) + "\r\n"
-                + "비고: 명칭/분류/옵션은 관리자 검수 후 표시";
-        }
-
-        private int ParseInt(string value)
-        {
-            int result;
-
-            if (Int32.TryParse(value, out result))
-            {
-                return result;
-            }
-
-            return 0;
-        }
-
-        private decimal ParseDecimal(string value)
-        {
-            if (value == null)
-            {
-                return 0M;
-            }
-
-            value = value.Trim().Replace(",", "");
-
-            if (value == "")
-            {
-                return 0M;
-            }
-
-            decimal result;
-
-            if (Decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out result))
-            {
-                return result;
-            }
-
-            if (Decimal.TryParse(value, out result))
-            {
-                return result;
-            }
-
-            return 0M;
-        }
-
-        private string Normalize(string value)
-        {
-            if (value == null)
-            {
-                return "";
-            }
-
-            return value.Trim().Replace(" ", "").ToUpperInvariant();
-        }
     }
-
-    internal class ShapeGridControl : Panel
-    {
-        private readonly List<RebarShapeInfo> shapes;
-        private readonly RebarShapeRenderer renderer;
-        private readonly CadShapeRenderer cadRenderer;
-        private int selectedIndex;
-        private int hoveredIndex;
-
-        public event EventHandler SelectedIndexChanged;
-        public event EventHandler ShapeDoubleClick;
-
-        public ShapeGridControl(RebarShapeRenderer renderer)
-        {
-            this.renderer = renderer == null ? new RebarShapeRenderer() : renderer;
-            cadRenderer = new CadShapeRenderer();
-            shapes = new List<RebarShapeInfo>();
-            selectedIndex = -1;
-            hoveredIndex = -1;
-
-            BackColor = Color.White;
-            BorderStyle = BorderStyle.FixedSingle;
-            AutoScroll = true;
-            DoubleBuffered = true;
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-        }
-
-        public int SelectedIndex
-        {
-            get { return selectedIndex; }
-            set
-            {
-                int newValue = value;
-
-                if (newValue < -1)
-                {
-                    newValue = -1;
-                }
-
-                if (newValue >= shapes.Count)
-                {
-                    newValue = shapes.Count - 1;
-                }
-
-                if (selectedIndex == newValue)
-                {
-                    return;
-                }
-
-                selectedIndex = newValue;
-                EnsureSelectedVisible();
-                Invalidate();
-                OnSelectedIndexChanged();
-            }
-        }
-
-        public RebarShapeInfo SelectedShape
-        {
-            get
-            {
-                if (selectedIndex < 0 || selectedIndex >= shapes.Count)
-                {
-                    return null;
-                }
-
-                return shapes[selectedIndex];
-            }
-        }
-
-        public void SetShapes(List<RebarShapeInfo> source)
-        {
-            shapes.Clear();
-
-            if (source != null)
-            {
-                shapes.AddRange(source);
-            }
-
-            selectedIndex = -1;
-            hoveredIndex = -1;
-            UpdateScrollSize();
-            Invalidate();
-        }
-
-        protected override void OnResize(EventArgs e)
-        {
-            base.OnResize(e);
-            UpdateScrollSize();
-        }
-
-        protected override void OnMouseMove(MouseEventArgs e)
-        {
-            base.OnMouseMove(e);
-            int index = HitTest(e.Location);
-
-            if (hoveredIndex != index)
-            {
-                hoveredIndex = index;
-                Invalidate();
-            }
-        }
-
-        protected override void OnMouseLeave(EventArgs e)
-        {
-            base.OnMouseLeave(e);
-            hoveredIndex = -1;
-            Invalidate();
-        }
-
-        protected override void OnMouseDown(MouseEventArgs e)
-        {
-            base.OnMouseDown(e);
-
-            int index = HitTest(e.Location);
-
-            if (index >= 0 && index < shapes.Count)
-            {
-                SelectedIndex = index;
-                Focus();
-            }
-            else
-            {
-                // 빈 여백 클릭 시 선택/입력값을 초기화하지 않습니다.
-                Focus();
-            }
-        }
-
-        protected override void OnDoubleClick(EventArgs e)
-        {
-            base.OnDoubleClick(e);
-
-            if (SelectedShape != null && ShapeDoubleClick != null)
-            {
-                ShapeDoubleClick(this, EventArgs.Empty);
-            }
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            base.OnPaint(e);
-
-            e.Graphics.TranslateTransform(AutoScrollPosition.X, AutoScrollPosition.Y);
-
-            int columns = 3;
-            int cellWidth = GetCellWidth();
-            int cellHeight = GetCellHeight();
-            int i;
-
-            using (Pen borderPen = new Pen(Color.FromArgb(220, 224, 232)))
-            using (SolidBrush selectedBrush = new SolidBrush(Color.FromArgb(229, 243, 255)))
-            using (SolidBrush hoverBrush = new SolidBrush(Color.FromArgb(246, 249, 253)))
-            using (SolidBrush normalBrush = new SolidBrush(Color.White))
-            using (SolidBrush textBrush = new SolidBrush(Color.FromArgb(32, 38, 58)))
-            using (SolidBrush selectedTextBrush = new SolidBrush(Color.FromArgb(12, 66, 120)))
-            using (Pen selectedPen = new Pen(Color.FromArgb(0, 122, 204), 2F))
-            {
-                for (i = 0; i < shapes.Count; i++)
-                {
-                    int row = i / columns;
-                    int col = i % columns;
-                    Rectangle rect = new Rectangle(col * cellWidth + 8, row * cellHeight + 8, cellWidth - 14, cellHeight - 12);
-
-                    if (rect.Bottom < -AutoScrollPosition.Y || rect.Top > -AutoScrollPosition.Y + Height)
-                    {
-                        continue;
-                    }
-
-                    bool selected = i == selectedIndex;
-                    bool hovered = i == hoveredIndex;
-                    RebarShapeInfo shape = shapes[i];
-
-                    e.Graphics.FillRectangle(selected ? selectedBrush : (hovered ? hoverBrush : normalBrush), rect);
-                    e.Graphics.DrawRectangle(selected ? selectedPen : borderPen, rect);
-
-                    Rectangle previewRect = new Rectangle(rect.Left + 12, rect.Top + 8, rect.Width - 24, 68);
-
-                    if (IsCadImportedShape(shape))
-                    {
-                        cadRenderer.DrawCadShape(e.Graphics, previewRect, shape.SourceImagePath, selected);
-                    }
-                    else
-                    {
-                        renderer.DrawShape(e.Graphics, previewRect, shape, "", selected);
-                    }
-
-                    string label = GetShapeLabel(shape);
-                    SizeF size = e.Graphics.MeasureString(label, Font);
-                    float x = rect.Left + (rect.Width - size.Width) / 2F;
-                    float y = rect.Top + 82;
-                    e.Graphics.DrawString(label, Font, selected ? selectedTextBrush : textBrush, x, y);
-                }
-            }
-        }
-
-        private int HitTest(Point location)
-        {
-            int columns = 3;
-            int cellWidth = GetCellWidth();
-            int cellHeight = GetCellHeight();
-            int x = location.X - AutoScrollPosition.X;
-            int y = location.Y - AutoScrollPosition.Y;
-
-            if (x < 0 || y < 0)
-            {
-                return -1;
-            }
-
-            int col = x / cellWidth;
-            int row = y / cellHeight;
-
-            if (col < 0 || col >= columns)
-            {
-                return -1;
-            }
-
-            int index = row * columns + col;
-
-            if (index < 0 || index >= shapes.Count)
-            {
-                return -1;
-            }
-
-            Rectangle rect = new Rectangle(col * cellWidth + 8, row * cellHeight + 8, cellWidth - 14, cellHeight - 12);
-
-            if (!rect.Contains(x, y))
-            {
-                return -1;
-            }
-
-            return index;
-        }
-
-        private string GetShapeLabel(RebarShapeInfo shape)
-        {
-            if (IsCadImportedShape(shape))
-            {
-                return "CAD에서 불러온 형상";
-            }
-
-            if (shape == null || shape.ShapeNo <= 0)
-            {
-                return "이미지 없음";
-            }
-
-            return "형상 " + shape.DisplayCode;
-        }
-
-
-        private bool IsCadImportedShape(RebarShapeInfo shape)
-        {
-            return shape != null
-                && shape.VectorStatus != null
-                && shape.VectorStatus.Equals("CAD_IMPORTED", StringComparison.OrdinalIgnoreCase)
-                && shape.SourceImagePath != null
-                && shape.SourceImagePath.Trim() != "";
-        }
-
-        private int GetCellWidth()
-        {
-            int width = ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 4;
-
-            if (width < 360)
-            {
-                width = ClientSize.Width - 4;
-            }
-
-            return Math.Max(180, width / 3);
-        }
-
-        private int GetCellHeight()
-        {
-            return 116;
-        }
-
-        private void UpdateScrollSize()
-        {
-            int rows = (int)Math.Ceiling(shapes.Count / 3.0);
-            AutoScrollMinSize = new Size(0, rows * GetCellHeight() + 16);
-        }
-
-        private void EnsureSelectedVisible()
-        {
-            if (selectedIndex < 0)
-            {
-                return;
-            }
-
-            int row = selectedIndex / 3;
-            int top = row * GetCellHeight();
-            int bottom = top + GetCellHeight();
-            int viewTop = -AutoScrollPosition.Y;
-            int viewBottom = viewTop + ClientSize.Height;
-
-            if (top < viewTop)
-            {
-                AutoScrollPosition = new Point(0, top);
-            }
-            else if (bottom > viewBottom)
-            {
-                AutoScrollPosition = new Point(0, bottom - ClientSize.Height + 8);
-            }
-        }
-
-        private void OnSelectedIndexChanged()
-        {
-            if (SelectedIndexChanged != null)
-            {
-                SelectedIndexChanged(this, EventArgs.Empty);
-            }
-        }
-    }
-
 }

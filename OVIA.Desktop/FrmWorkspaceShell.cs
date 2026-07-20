@@ -261,21 +261,6 @@ namespace OVIA.Desktop
                 left += shipping.Width + gap;
             }
 
-            if (CanAccessMenu("ERP", currentCompanyId, currentUserId))
-            {
-                OviaMenuButton erp = AddMenu(commandBar, GetTopMenuText("ERP", "ERP", false), GetMenuIconText("ERP", "\uE774"), left, 82, selectedMenu == "ERP", delegate(Control source)
-                {
-                    if (currentSettingsDropDown != null && !currentSettingsDropDown.IsDisposed && currentSettingsDropDown.Visible)
-                    {
-                        currentSettingsDropDown.CloseImmediate();
-                        currentSettingsDropDown = null;
-                    }
-
-                    OpenErpInDefaultBrowser(source);
-                });
-                left += erp.Width + gap;
-            }
-
             if (CanAccessMenu("MASTER_DATA", currentCompanyId, currentUserId))
             {
                 OviaMenuButton master = AddMenu(commandBar, GetTopMenuText("MASTER_DATA", "기준정보", true), GetMenuIconText("MASTER_DATA", "\uE8EC"), left, 112, selectedMenu == "MASTER", null);
@@ -283,17 +268,6 @@ namespace OVIA.Desktop
                 left += master.Width + gap;
             }
 
-            if (CanAccessMenu("SETTINGS", currentCompanyId, currentUserId))
-            {
-                OviaMenuButton settings = AddMenu(commandBar, GetTopMenuText("SETTINGS", "환경설정", true), GetMenuIconText("SETTINGS", "\uE713"), left, 132, selectedMenu == "SETTINGS", null);
-                settings.Click += delegate
-                {
-                    ToggleSettingsDropDown(settings);
-                };
-                left += settings.Width + gap;
-            }
-
-            AddAutoCadStatusIndicator(commandBar);
         }
 
         private static bool CanAccessMenu(string key, string companyId, string userId)
@@ -407,6 +381,47 @@ namespace OVIA.Desktop
                 currentSettingsDropDown.CloseAnimated();
                 currentSettingsDropDown = null;
             }
+        }
+
+        public static bool CanAccessSettingsMenu(Control source)
+        {
+            return CanAccessMenu(source, "SETTINGS");
+        }
+
+        public static string GetSettingsMenuIcon()
+        {
+            return GetMenuIconText("SETTINGS", "\uE713");
+        }
+
+        public static void ToggleSettingsMenu(Control source)
+        {
+            if (source == null || source.IsDisposed || !CanAccessSettingsMenu(source))
+            {
+                return;
+            }
+
+            ToggleSettingsDropDown(source);
+        }
+
+        public static bool CanAccessErpMenu(Control source)
+        {
+            return CanAccessMenu(source, "ERP");
+        }
+
+        public static string GetErpMenuIcon()
+        {
+            return GetMenuIconText("ERP", "\uE774");
+        }
+
+        public static void OpenErpShortcut(Control source)
+        {
+            if (source == null || source.IsDisposed || !CanAccessErpMenu(source))
+            {
+                return;
+            }
+
+            CloseOpenDropDown();
+            OpenErpInDefaultBrowser(source);
         }
 
         private static void ToggleDropDown(Control menuButton, Action<OviaAnimatedDropDownMenu> buildItems)
@@ -714,120 +729,6 @@ namespace OVIA.Desktop
             }
 
             return path.Substring(0, index + delimiter.Length) + "  " + value;
-        }
-
-        private static void AddAutoCadStatusIndicator(Control commandBar)
-        {
-            Panel statusPanel = new Panel();
-            statusPanel.Size = new Size(154, 30);
-            statusPanel.BackColor = Color.White;
-            statusPanel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            commandBar.Controls.Add(statusPanel);
-
-            OviaStatusLamp lamp = new OviaStatusLamp();
-            lamp.Location = new Point(0, 2);
-            lamp.Size = new Size(22, 26);
-            lamp.BackColor = Color.White;
-            statusPanel.Controls.Add(lamp);
-
-            Label label = new Label();
-            label.AutoSize = false;
-            label.Location = new Point(24, 0);
-            label.Size = new Size(130, 30);
-            label.TextAlign = ContentAlignment.MiddleLeft;
-            label.Font = OviaFluentTheme.FontKorean(9.5F, FontStyle.Bold);
-            label.BackColor = Color.White;
-            statusPanel.Controls.Add(label);
-
-            ToolTip statusToolTip = new ToolTip();
-            statusToolTip.AutoPopDelay = 5000;
-            statusToolTip.InitialDelay = 350;
-            statusToolTip.ReshowDelay = 100;
-            statusToolTip.ShowAlways = true;
-
-            PositionAutoCadStatusIndicator(commandBar, statusPanel);
-            UpdateAutoCadStatusIndicator(lamp, label, statusPanel, statusToolTip);
-
-            bool statusTimerDisposed = false;
-            Timer statusTimer = new Timer();
-            statusTimer.Interval = 2000;
-            statusTimer.Tick += delegate
-            {
-                if (statusPanel.IsDisposed || commandBar.IsDisposed || commandBar.FindForm() == null)
-                {
-                    if (!statusTimerDisposed)
-                    {
-                        statusTimer.Stop();
-                        statusTimer.Dispose();
-                        statusTimerDisposed = true;
-                    }
-                    return;
-                }
-
-                UpdateAutoCadStatusIndicator(lamp, label, statusPanel, statusToolTip);
-            };
-            statusTimer.Start();
-
-            commandBar.Resize += delegate
-            {
-                PositionAutoCadStatusIndicator(commandBar, statusPanel);
-            };
-
-            commandBar.Disposed += delegate
-            {
-                if (!statusTimerDisposed)
-                {
-                    statusTimer.Stop();
-                    statusTimer.Dispose();
-                    statusTimerDisposed = true;
-                }
-            };
-        }
-
-        private static void PositionAutoCadStatusIndicator(Control commandBar, Control statusPanel)
-        {
-            if (commandBar == null || statusPanel == null)
-            {
-                return;
-            }
-
-            int x = Math.Max(0, commandBar.ClientSize.Width - statusPanel.Width - 20);
-            statusPanel.Location = new Point(x, 10);
-        }
-
-        private static void UpdateAutoCadStatusIndicator(OviaStatusLamp lamp, Label label, Control statusPanel, ToolTip statusToolTip)
-        {
-            OviaEnvironmentReport report = OviaEnvironmentChecker.CheckForUi();
-            bool isReady = report != null && report.IsCurrentDevelopmentAutoCadReady();
-
-            if (lamp != null)
-            {
-                lamp.IsActive = isReady;
-                lamp.Invalidate();
-            }
-
-            if (label != null)
-            {
-                label.Text = report == null ? "환경 점검 필요" : report.GetDesktopAutoCadStatusText();
-
-                if (isReady)
-                {
-                    label.ForeColor = OviaFluentTheme.Success;
-                }
-                else if (report != null && report.OverallStatus == OviaEnvironmentStatus.Warning && report.RecommendedAutoCad != null && report.RecommendedAutoCad.Year != 2027)
-                {
-                    label.ForeColor = Color.FromArgb(176, 111, 0);
-                }
-                else
-                {
-                    label.ForeColor = OviaFluentTheme.Danger;
-                }
-            }
-
-            if (statusToolTip != null && statusPanel != null && report != null)
-            {
-                statusToolTip.SetToolTip(statusPanel, report.GetDesktopAutoCadDetailText());
-            }
         }
 
         private static OviaMenuButton AddMenu(Control parent, string text, string iconText, int left, int width, bool selected, Action<Control> action)

@@ -21,10 +21,15 @@ namespace OVIA.Desktop.Controls
         private const int HeaderLeft = 34;
         private const int HeaderTop = 8;
         private const int HeaderHeight = 32;
-        private const int NavigationWidth = 188;
+        private const int BaseNavigationWidth = 188;
+        private const int ErpNavigationWidth = 224;
         private const int NotificationWidth = 30;
-        private const int NotificationRightGap = 20;
-        private const int BreadcrumbSafeGap = 40;
+        private const int SettingsWidth = 30;
+        private const int HeaderActionGap = 6;
+        private const int HeaderRightGap = 20;
+        private const int AutoCadStatusWidth = 126;
+        private const int AutoCadStatusGap = 8;
+        private const int BreadcrumbSafeGap = 12;
         private const int WmLButtonDown = 0x0201;
         private const int WmRButtonDown = 0x0204;
         private const int WmMButtonDown = 0x0207;
@@ -41,7 +46,13 @@ namespace OVIA.Desktop.Controls
         private OviaExplorerIconButton btnUp;
         private OviaExplorerIconButton btnRefresh;
         private OviaExplorerIconButton btnHome;
+        private OviaExplorerIconButton btnErp;
         private OviaExplorerIconButton btnNotification;
+        private OviaExplorerIconButton btnSettings;
+        private Panel autoCadStatusPanel;
+        private Label autoCadStatusIcon;
+        private Label autoCadStatusLabel;
+        private Timer autoCadStatusRefreshTimer;
         private Timer notificationRefreshTimer;
         private OviaRoundedPanel addressBar;
         private OviaBreadcrumbLabel breadcrumbLabel;
@@ -77,6 +88,7 @@ namespace OVIA.Desktop.Controls
 
             BuildControls();
             LayoutControls();
+            StartAutoCadStatusRefreshTimer();
             StartNotificationRefreshTimer();
         }
 
@@ -125,6 +137,8 @@ namespace OVIA.Desktop.Controls
 
             parent.Controls.Add(header);
             header.RefreshNavigationButtonStates();
+            header.RefreshErpMenuState();
+            header.RefreshSettingsMenuState();
             header.RefreshNotificationBadge();
 
             parent.Resize += delegate
@@ -342,6 +356,11 @@ namespace OVIA.Desktop.Controls
             };
             Controls.Add(btnHome);
 
+            btnErp = CreateExplorerButton(OVIA.Desktop.OviaWorkspaceCommandBar.GetErpMenuIcon(), "ERP");
+            btnErp.Click += Erp_Click;
+            Controls.Add(btnErp);
+            RefreshErpMenuState();
+
             addressBar = new OviaRoundedPanel();
             addressBar.BackColor = surfaceColor;
             addressBar.FillColor = Color.White;
@@ -377,6 +396,36 @@ namespace OVIA.Desktop.Controls
             pathTextBox.KeyDown += PathTextBox_KeyDown;
             addressBar.Controls.Add(pathTextBox);
 
+            autoCadStatusPanel = new Panel();
+            autoCadStatusPanel.Size = new Size(AutoCadStatusWidth, 30);
+            autoCadStatusPanel.BackColor = surfaceColor;
+            autoCadStatusPanel.Margin = Padding.Empty;
+            autoCadStatusPanel.Padding = Padding.Empty;
+            autoCadStatusPanel.TabStop = false;
+            Controls.Add(autoCadStatusPanel);
+
+            autoCadStatusIcon = new Label();
+            autoCadStatusIcon.AutoSize = false;
+            autoCadStatusIcon.Location = new Point(0, 0);
+            autoCadStatusIcon.Size = new Size(28, 30);
+            autoCadStatusIcon.Text = "\uE7E8";
+            autoCadStatusIcon.TextAlign = ContentAlignment.MiddleCenter;
+            autoCadStatusIcon.Font = OVIA.Desktop.OviaIconFont.Create(12.5F, FontStyle.Regular);
+            autoCadStatusIcon.BackColor = surfaceColor;
+            autoCadStatusIcon.TabStop = false;
+            autoCadStatusPanel.Controls.Add(autoCadStatusIcon);
+
+            autoCadStatusLabel = new Label();
+            autoCadStatusLabel.AutoSize = false;
+            autoCadStatusLabel.Location = new Point(28, 0);
+            autoCadStatusLabel.Size = new Size(AutoCadStatusWidth - 28, 30);
+            autoCadStatusLabel.Text = "AutoCAD OFF";
+            autoCadStatusLabel.TextAlign = ContentAlignment.MiddleLeft;
+            autoCadStatusLabel.Font = OviaFluentTheme.FontKorean(9.5F, FontStyle.Bold);
+            autoCadStatusLabel.BackColor = surfaceColor;
+            autoCadStatusLabel.TabStop = false;
+            autoCadStatusPanel.Controls.Add(autoCadStatusLabel);
+
             btnNotification = CreateExplorerButton("\uF2A3", "알림");
             // U+F2A3 종 아이콘은 같은 버튼 영역 안에서 뒤로/앞으로/위로가기 아이콘과 시각 크기를 맞춘다.
             btnNotification.Font = OVIA.Desktop.OviaIconFont.Create(15F, FontStyle.Regular);
@@ -384,11 +433,17 @@ namespace OVIA.Desktop.Controls
             btnNotification.BadgeFont = OviaFluentTheme.FontData(7.2F, FontStyle.Bold);
             btnNotification.Click += Notification_Click;
             Controls.Add(btnNotification);
+
+            btnSettings = CreateExplorerButton(OVIA.Desktop.OviaWorkspaceCommandBar.GetSettingsMenuIcon(), "환경설정");
+            btnSettings.Font = OVIA.Desktop.OviaIconFont.Create(15F, FontStyle.Regular);
+            btnSettings.Click += Settings_Click;
+            Controls.Add(btnSettings);
+            RefreshSettingsMenuState();
         }
 
         private void LayoutControls()
         {
-            if (btnBack == null)
+            if (btnBack == null || btnErp == null || btnNotification == null || btnSettings == null || autoCadStatusPanel == null || addressBar == null)
             {
                 return;
             }
@@ -398,11 +453,28 @@ namespace OVIA.Desktop.Controls
             btnUp.Location = new Point(72, 0);
             btnRefresh.Location = new Point(108, 0);
             btnHome.Location = new Point(144, 0);
+            btnErp.Location = new Point(180, 0);
 
-            int notificationX = Math.Max(NavigationWidth, this.ClientSize.Width - NotificationRightGap - NotificationWidth);
+            int navigationWidth = btnErp.Visible ? ErpNavigationWidth : BaseNavigationWidth;
+            int rightEdge = Math.Max(navigationWidth, this.ClientSize.Width - HeaderRightGap);
+            int settingsX = Math.Max(navigationWidth, rightEdge - SettingsWidth);
+
+            if (btnSettings.Visible)
+            {
+                btnSettings.Location = new Point(settingsX, 0);
+                rightEdge = settingsX - HeaderActionGap;
+            }
+            else
+            {
+                btnSettings.Location = new Point(Math.Max(navigationWidth, this.ClientSize.Width), 0);
+            }
+
+            int notificationX = Math.Max(navigationWidth, rightEdge - NotificationWidth);
+            int autoCadStatusX = Math.Max(navigationWidth, notificationX - AutoCadStatusGap - AutoCadStatusWidth);
             btnNotification.Location = new Point(notificationX, 0);
-            addressBar.Location = new Point(NavigationWidth, 0);
-            addressBar.Size = new Size(Math.Max(1, notificationX - BreadcrumbSafeGap - NavigationWidth), HeaderHeight);
+            autoCadStatusPanel.Location = new Point(autoCadStatusX, 0);
+            addressBar.Location = new Point(navigationWidth, 0);
+            addressBar.Size = new Size(Math.Max(1, autoCadStatusX - BreadcrumbSafeGap - navigationWidth), HeaderHeight);
             addressBar.RefreshRoundedRegion();
 
             breadcrumbLabel.Location = new Point(10, 4);
@@ -421,7 +493,9 @@ namespace OVIA.Desktop.Controls
         protected override void OnHandleDestroyed(EventArgs e)
         {
             UninstallPathEditMessageFilter();
+            StopAutoCadStatusRefreshTimer();
             StopNotificationRefreshTimer();
+            OVIA.Desktop.OviaWorkspaceCommandBar.CloseOpenDropDown();
             base.OnHandleDestroyed(e);
         }
 
@@ -471,6 +545,83 @@ namespace OVIA.Desktop.Controls
             return button;
         }
 
+        private void StartAutoCadStatusRefreshTimer()
+        {
+            if (autoCadStatusRefreshTimer != null)
+            {
+                return;
+            }
+
+            RefreshAutoCadStatus();
+
+            autoCadStatusRefreshTimer = new Timer();
+            autoCadStatusRefreshTimer.Interval = 2000;
+            autoCadStatusRefreshTimer.Tick += delegate { RefreshAutoCadStatus(); };
+            autoCadStatusRefreshTimer.Start();
+        }
+
+        private void StopAutoCadStatusRefreshTimer()
+        {
+            if (autoCadStatusRefreshTimer == null)
+            {
+                return;
+            }
+
+            autoCadStatusRefreshTimer.Stop();
+            autoCadStatusRefreshTimer.Dispose();
+            autoCadStatusRefreshTimer = null;
+        }
+
+        public void RefreshAutoCadStatus()
+        {
+            if (autoCadStatusPanel == null || autoCadStatusPanel.IsDisposed
+                || autoCadStatusIcon == null || autoCadStatusIcon.IsDisposed
+                || autoCadStatusLabel == null || autoCadStatusLabel.IsDisposed)
+            {
+                return;
+            }
+
+            OVIA.Desktop.OviaEnvironmentReport report = OVIA.Desktop.OviaEnvironmentChecker.CheckForUi();
+            bool isReady = report != null && report.IsCurrentDevelopmentAutoCadReady();
+            Color statusColor;
+
+            if (isReady)
+            {
+                statusColor = OviaFluentTheme.Success;
+            }
+            else if (report != null
+                && report.OverallStatus == OVIA.Desktop.OviaEnvironmentStatus.Warning
+                && report.RecommendedAutoCad != null
+                && report.RecommendedAutoCad.Year != 2027)
+            {
+                statusColor = Color.FromArgb(176, 111, 0);
+            }
+            else
+            {
+                statusColor = OviaFluentTheme.Danger;
+            }
+
+            autoCadStatusIcon.Text = "\uE7E8";
+            autoCadStatusIcon.ForeColor = statusColor;
+            autoCadStatusLabel.Text = isReady ? "AutoCAD ON" : "AutoCAD OFF";
+            autoCadStatusLabel.ForeColor = statusColor;
+
+            string detailText = report == null
+                ? "AutoCAD 상태를 확인할 수 없습니다."
+                : report.GetDesktopAutoCadDetailText();
+
+            if (toolTip != null)
+            {
+                toolTip.SetToolTip(autoCadStatusPanel, detailText);
+                toolTip.SetToolTip(autoCadStatusIcon, detailText);
+                toolTip.SetToolTip(autoCadStatusLabel, detailText);
+            }
+
+            autoCadStatusPanel.Invalidate();
+            autoCadStatusIcon.Invalidate();
+            autoCadStatusLabel.Invalidate();
+        }
+
         private void StartNotificationRefreshTimer()
         {
             if (notificationRefreshTimer != null)
@@ -508,6 +659,9 @@ namespace OVIA.Desktop.Controls
         {
             base.OnParentChanged(e);
             RefreshNavigationButtonStates();
+            RefreshErpMenuState();
+            RefreshSettingsMenuState();
+            RefreshAutoCadStatus();
             RefreshNotificationBadge();
         }
 
@@ -517,6 +671,9 @@ namespace OVIA.Desktop.Controls
             if (Visible)
             {
                 RefreshNavigationButtonStates();
+                RefreshErpMenuState();
+                RefreshSettingsMenuState();
+                RefreshAutoCadStatus();
                 RefreshNotificationBadge();
             }
         }
@@ -565,6 +722,60 @@ namespace OVIA.Desktop.Controls
 
         private void ApplyNotificationBadgeRegion()
         {
+        }
+
+        private void RefreshErpMenuState()
+        {
+            if (btnErp == null || btnErp.IsDisposed)
+            {
+                return;
+            }
+
+            bool canAccess = OVIA.Desktop.OviaWorkspaceCommandBar.CanAccessErpMenu(this);
+            btnErp.Text = OVIA.Desktop.OviaWorkspaceCommandBar.GetErpMenuIcon();
+            btnErp.Visible = canAccess;
+            btnErp.Enabled = canAccess;
+            btnErp.Cursor = canAccess ? Cursors.Hand : Cursors.Default;
+            btnErp.ResetInteractionState();
+            btnErp.Invalidate();
+            LayoutControls();
+        }
+
+        private void Erp_Click(object sender, EventArgs e)
+        {
+            if (btnErp == null || !btnErp.Visible || !btnErp.Enabled)
+            {
+                return;
+            }
+
+            OVIA.Desktop.OviaWorkspaceCommandBar.OpenErpShortcut(btnErp);
+        }
+
+        private void RefreshSettingsMenuState()
+        {
+            if (btnSettings == null || btnSettings.IsDisposed)
+            {
+                return;
+            }
+
+            bool canAccess = OVIA.Desktop.OviaWorkspaceCommandBar.CanAccessSettingsMenu(this);
+            btnSettings.Text = OVIA.Desktop.OviaWorkspaceCommandBar.GetSettingsMenuIcon();
+            btnSettings.Visible = canAccess;
+            btnSettings.Enabled = canAccess;
+            btnSettings.Cursor = canAccess ? Cursors.Hand : Cursors.Default;
+            btnSettings.ResetInteractionState();
+            btnSettings.Invalidate();
+            LayoutControls();
+        }
+
+        private void Settings_Click(object sender, EventArgs e)
+        {
+            if (btnSettings == null || !btnSettings.Visible || !btnSettings.Enabled)
+            {
+                return;
+            }
+
+            OVIA.Desktop.OviaWorkspaceCommandBar.ToggleSettingsMenu(btnSettings);
         }
 
         private void Notification_Click(object sender, EventArgs e)
@@ -1379,5 +1590,273 @@ namespace OVIA.Desktop.Controls
             return path;
         }
     }
+
+    public sealed class OviaProjectContextHeader : UserControl
+    {
+        private readonly Label projectLabel;
+        private readonly Label firstSeparatorLabel;
+        private readonly Label orderNumberLabel;
+        private readonly Label dueDateLabel;
+        private readonly Label secondSeparatorLabel;
+        private readonly Label barListTitleLabel;
+        private readonly Label statusLabel;
+        private readonly ToolTip toolTip;
+
+        private string projectText = string.Empty;
+        private string orderNumberText = string.Empty;
+        private string dueDateText = string.Empty;
+        private string barListTitleText = string.Empty;
+        private string clientNameText = string.Empty;
+        private string projectStatusText = string.Empty;
+        private bool hasBarListContext;
+        private bool hasOrderOrDueContext;
+
+        public OviaProjectContextHeader()
+        {
+            this.SetStyle(ControlStyles.UserPaint, true);
+            this.SetStyle(ControlStyles.AllPaintingInWmPaint, true);
+            this.SetStyle(ControlStyles.OptimizedDoubleBuffer, true);
+            this.SetStyle(ControlStyles.ResizeRedraw, true);
+
+            this.DoubleBuffered = true;
+            this.BackColor = Color.Transparent;
+            this.Height = 58;
+
+            toolTip = new ToolTip();
+            toolTip.AutoPopDelay = 5000;
+            toolTip.InitialDelay = 350;
+            toolTip.ReshowDelay = 100;
+            toolTip.ShowAlways = true;
+
+            projectLabel = CreateTitleLabel(OviaFluentTheme.FontTitle(14F, FontStyle.Bold), Color.Black);
+            firstSeparatorLabel = CreateTitleLabel(OviaFluentTheme.FontSystem(10F, FontStyle.Regular), OviaFluentTheme.TextTertiary);
+            orderNumberLabel = CreateTitleLabel(OviaFluentTheme.FontSystem(9.5F, FontStyle.Regular), OviaFluentTheme.TextPrimary);
+            dueDateLabel = CreateTitleLabel(OviaFluentTheme.FontSystem(9.5F, FontStyle.Regular), OviaFluentTheme.TextPrimary);
+            secondSeparatorLabel = CreateTitleLabel(OviaFluentTheme.FontSystem(10F, FontStyle.Regular), OviaFluentTheme.TextTertiary);
+            barListTitleLabel = CreateTitleLabel(OviaFluentTheme.FontSystem(9.5F, FontStyle.Bold), OviaFluentTheme.TextPrimary);
+
+            firstSeparatorLabel.Text = "|";
+            secondSeparatorLabel.Text = "|";
+
+            statusLabel = new Label();
+            statusLabel.AutoSize = false;
+            statusLabel.Font = OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
+            statusLabel.ForeColor = OviaFluentTheme.TextSecondary;
+            statusLabel.BackColor = Color.Transparent;
+            statusLabel.TextAlign = ContentAlignment.MiddleRight;
+            statusLabel.AutoEllipsis = true;
+
+            this.Controls.Add(projectLabel);
+            this.Controls.Add(firstSeparatorLabel);
+            this.Controls.Add(orderNumberLabel);
+            this.Controls.Add(dueDateLabel);
+            this.Controls.Add(secondSeparatorLabel);
+            this.Controls.Add(barListTitleLabel);
+            this.Controls.Add(statusLabel);
+
+            this.Resize += delegate { LayoutContextLabels(); };
+            SetContext(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+        }
+
+        public void SetContext(string projectNo, string projectName, string orderNumber, string dueDate, string barListTitle, string clientName, string projectStatus)
+        {
+            projectText = BuildProjectText(projectNo, projectName);
+            orderNumberText = NormalizeDisplayText(orderNumber);
+            dueDateText = NormalizeDisplayText(dueDate);
+            barListTitleText = NormalizeDisplayText(barListTitle);
+            clientNameText = NormalizeDisplayText(clientName);
+            projectStatusText = NormalizeDisplayText(projectStatus);
+
+            projectLabel.Text = projectText;
+            orderNumberLabel.Text = orderNumberText;
+            dueDateLabel.Text = dueDateText;
+            barListTitleLabel.Text = barListTitleText;
+            statusLabel.Text = BuildStatusText(clientNameText, projectStatusText);
+
+            hasOrderOrDueContext = orderNumberText != string.Empty || dueDateText != string.Empty;
+            hasBarListContext = hasOrderOrDueContext || barListTitleText != string.Empty;
+            firstSeparatorLabel.Visible = hasBarListContext;
+            orderNumberLabel.Visible = orderNumberText != string.Empty;
+            dueDateLabel.Visible = dueDateText != string.Empty;
+            secondSeparatorLabel.Visible = hasOrderOrDueContext && barListTitleText != string.Empty;
+            barListTitleLabel.Visible = barListTitleText != string.Empty;
+
+            toolTip.SetToolTip(projectLabel, projectText);
+            toolTip.SetToolTip(orderNumberLabel, orderNumberText);
+            toolTip.SetToolTip(dueDateLabel, dueDateText == string.Empty ? string.Empty : "납기일 : " + dueDateText);
+            toolTip.SetToolTip(barListTitleLabel, barListTitleText);
+            toolTip.SetToolTip(statusLabel, statusLabel.Text);
+
+            LayoutContextLabels();
+            this.Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+
+            using (Pen pen = new Pen(OviaFluentTheme.CardBorder, 1F))
+            {
+                int y = Math.Max(0, this.Height - 12);
+                e.Graphics.DrawLine(pen, 0, y, this.Width, y);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && toolTip != null)
+            {
+                toolTip.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+
+        private Label CreateTitleLabel(Font font, Color color)
+        {
+            Label label = new Label();
+            label.AutoSize = false;
+            label.Font = font;
+            label.ForeColor = color;
+            label.BackColor = Color.Transparent;
+            label.TextAlign = ContentAlignment.MiddleLeft;
+            label.AutoEllipsis = true;
+            label.Height = 30;
+            return label;
+        }
+
+        private void LayoutContextLabels()
+        {
+            if (this.Width <= 0)
+            {
+                return;
+            }
+
+            int titleTop = 7;
+            int titleHeight = 30;
+            int statusWidth = Math.Min(380, Math.Max(250, this.Width / 3));
+            int statusLeft = Math.Max(0, this.Width - statusWidth);
+            int availableWidth = Math.Max(1, statusLeft - 18);
+            int x = 0;
+
+            statusLabel.SetBounds(statusLeft, 9, statusWidth, 26);
+
+            bool hasContext = hasBarListContext;
+            firstSeparatorLabel.Visible = hasContext;
+            orderNumberLabel.Visible = orderNumberText != string.Empty;
+            dueDateLabel.Visible = dueDateText != string.Empty;
+            secondSeparatorLabel.Visible = hasOrderOrDueContext && barListTitleText != string.Empty;
+            barListTitleLabel.Visible = barListTitleText != string.Empty;
+            int projectDesired = MeasureLabelWidth(projectLabel, projectText, 10);
+            int projectMaximum = hasContext ? Math.Max(180, (int)Math.Round(availableWidth * 0.43)) : availableWidth;
+            int projectWidth = Math.Min(projectDesired, projectMaximum);
+            projectWidth = Math.Max(1, Math.Min(projectWidth, availableWidth));
+            projectLabel.SetBounds(x, titleTop, projectWidth, titleHeight);
+            x += projectWidth;
+
+            if (!hasContext || x >= availableWidth)
+            {
+                HideContextLabelsBeyondProject();
+                return;
+            }
+
+            firstSeparatorLabel.Visible = true;
+            firstSeparatorLabel.SetBounds(x + 9, titleTop, 14, titleHeight);
+            x += 31;
+
+            int remaining = Math.Max(0, availableWidth - x);
+
+            if (orderNumberLabel.Visible && remaining > 0)
+            {
+                int width = Math.Min(MeasureLabelWidth(orderNumberLabel, orderNumberText, 8), Math.Min(150, remaining));
+                orderNumberLabel.SetBounds(x, titleTop, Math.Max(1, width), titleHeight);
+                x += width + 12;
+            }
+
+            remaining = Math.Max(0, availableWidth - x);
+
+            if (dueDateLabel.Visible && remaining > 0)
+            {
+                int width = Math.Min(MeasureLabelWidth(dueDateLabel, dueDateText, 8), Math.Min(105, remaining));
+                dueDateLabel.SetBounds(x, titleTop, Math.Max(1, width), titleHeight);
+                x += width + 12;
+            }
+
+            remaining = Math.Max(0, availableWidth - x);
+
+            if (secondSeparatorLabel.Visible && remaining > 18)
+            {
+                secondSeparatorLabel.SetBounds(x, titleTop, 14, titleHeight);
+                x += 25;
+            }
+            else
+            {
+                secondSeparatorLabel.Visible = false;
+            }
+
+            remaining = Math.Max(0, availableWidth - x);
+
+            if (barListTitleLabel.Visible && remaining > 0)
+            {
+                barListTitleLabel.SetBounds(x, titleTop, remaining, titleHeight);
+            }
+        }
+
+        private void HideContextLabelsBeyondProject()
+        {
+            firstSeparatorLabel.Visible = false;
+            orderNumberLabel.SetBounds(0, 0, 0, 0);
+            dueDateLabel.SetBounds(0, 0, 0, 0);
+            secondSeparatorLabel.Visible = false;
+            barListTitleLabel.SetBounds(0, 0, 0, 0);
+        }
+
+        private int MeasureLabelWidth(Label label, string text, int horizontalPadding)
+        {
+            if (label == null || string.IsNullOrEmpty(text))
+            {
+                return 0;
+            }
+
+            Size size = TextRenderer.MeasureText(text, label.Font, new Size(int.MaxValue, label.Height), TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+            return Math.Max(1, size.Width + horizontalPadding);
+        }
+
+        private string BuildProjectText(string projectNo, string projectName)
+        {
+            string no = NormalizeDisplayText(projectNo);
+            string name = NormalizeDisplayText(projectName);
+
+            if (no == string.Empty && name == string.Empty)
+            {
+                return "공사 미선택";
+            }
+
+            if (no == string.Empty)
+            {
+                return name;
+            }
+
+            if (name == string.Empty)
+            {
+                return no;
+            }
+
+            return no + "  " + name;
+        }
+
+        private string BuildStatusText(string clientName, string projectStatus)
+        {
+            string client = clientName == string.Empty ? "-" : clientName;
+            string status = projectStatus == string.Empty ? "-" : projectStatus;
+            return "거래처: " + client + "   |   진행상태: " + status;
+        }
+
+        private string NormalizeDisplayText(string value)
+        {
+            return value == null ? string.Empty : value.Trim();
+        }
+    }
+
 
 }

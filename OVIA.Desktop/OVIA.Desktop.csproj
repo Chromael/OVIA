@@ -73,9 +73,11 @@
   <ItemGroup>
     <Compile Include="Models\RebarShapeCommand.cs" />
     <Compile Include="Models\RebarShapeInfo.cs" />
+    <Compile Include="Models\CadShapeEditDocument.cs" />
     <Compile Include="Services\RebarShapeRepository.cs" />
     <Compile Include="Services\RebarShapeRenderer.cs" />
     <Compile Include="Services\CadShapeRenderer.cs" />
+    <Compile Include="Services\CadShapeDisplayNormalizer.cs" />
     <Compile Include="Services\OviaEnvironmentChecker.cs" />
     <Compile Include="Services\OviaFontManager.cs" />
     <Compile Include="Services\OviaSystemIconManager.cs" />
@@ -99,6 +101,9 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="Controls\OviaWorkspaceHeader.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Controls\CadShapeEditorControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
     <Compile Include="Controls\RebarShapePreviewControl.cs">

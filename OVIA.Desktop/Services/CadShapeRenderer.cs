@@ -14,6 +14,8 @@ namespace OVIA.Desktop
     {
         private const float Padding = 0F;
         private const float CadTextFontSizePt = 8F;
+        private const float CadRotatedTextFontSizePt = 9.5F;
+        private const float RotatedTextTrackingPixels = 0.70F;
         private const float VisualScale = 0.90F;
         private const float StraightShapeMaxWidthRatio = 0.60F;
 
@@ -119,6 +121,19 @@ namespace OVIA.Desktop
 
         private void DrawData(Graphics g, Rectangle inner, CadShapeData data, string dimensionText, bool applyTextOverrides, float viewZoomScale)
         {
+            /*
+             * BarList/ERP/출력용 화면에서도 CAD에 그려진 형상 좌표와 종횡비를 그대로 사용합니다.
+             * 형상 내부 TEXT의 숫자값은 표시 문자열일 뿐이며, 선분 길이를 다시 계산하거나
+             * 구간별 비율을 변경하는 기준으로 사용하지 않습니다.
+             * 셀 크기 맞춤은 아래 bounds 계산 후 X/Y 공통 단일 배율로만 수행합니다.
+             */
+            CadShapeData displayData = CadShapeDisplayNormalizer.CreateDisplayData(data);
+
+            if (displayData != null)
+            {
+                data = displayData;
+            }
+
             SmoothingMode oldSmoothing = g.SmoothingMode;
             PixelOffsetMode oldPixelOffsetMode = g.PixelOffsetMode;
             CompositingQuality oldCompositingQuality = g.CompositingQuality;
@@ -194,6 +209,7 @@ namespace OVIA.Desktop
                 using (Pen pen = new Pen(Color.FromArgb(8, 12, 22), penWidth))
                 using (SolidBrush textBrush = new SolidBrush(Color.FromArgb(0, 0, 0)))
                 using (Font textFont = OviaFluentTheme.FontKorean(CadTextFontSizePt * VisualScale * viewZoomScale, FontStyle.Regular, GraphicsUnit.Point))
+                using (Font rotatedTextFont = OviaFluentTheme.FontKorean(CadRotatedTextFontSizePt * VisualScale * viewZoomScale, FontStyle.Regular, GraphicsUnit.Point))
                 {
                     pen.StartCap = LineCap.Round;
                     pen.EndCap = LineCap.Round;
@@ -299,13 +315,16 @@ namespace OVIA.Desktop
                             Y(element.Y1, offsetY, scale)
                         );
 
+                        float normalizedRotation = NormalizeRotation((float)element.Rotation);
+                        Font drawFont = Math.Abs(normalizedRotation) <= 0.35F ? textFont : rotatedTextFont;
+
                         DrawTextAtCenter(
                             g,
                             text,
-                            textFont,
+                            drawFont,
                             textBrush,
                             center,
-                            NormalizeRotation((float)element.Rotation)
+                            normalizedRotation
                         );
                     }
                 }
@@ -437,8 +456,15 @@ namespace OVIA.Desktop
             }
 
             int i;
-            bool found = false;
+            bool geometryFound = false;
 
+            /*
+             * 셀 맞춤 배율의 기준은 철근 형상선 자체입니다.
+             * TEXT의 문자열 길이·숫자 자릿수·CAD 문자 bounds를 배율 계산에 사용하면
+             * 330을 3,300으로 수정하는 것만으로 형상 전체가 작아지는 문제가 생깁니다.
+             * 따라서 지오메트리가 존재할 때는 LINE/ARC/CIRCLE bounds를 먼저 계산하고,
+             * 문자는 내용 폭이 아닌 CAD 삽입점만 포함해 위치가 잘리지 않게 합니다.
+             */
             for (i = 0; i < data.Elements.Count; i++)
             {
                 CadShapeElement element = data.Elements[i];
@@ -452,16 +478,42 @@ namespace OVIA.Desktop
                 {
                     IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.X1, element.Y1);
                     IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.X2, element.Y2);
-                    found = true;
+                    geometryFound = true;
                 }
                 else if (element.Type == "CIRCLE" || element.Type == "ARC")
                 {
                     IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.CX - element.Radius, element.CY - element.Radius);
                     IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.CX + element.Radius, element.CY + element.Radius);
-                    found = true;
+                    geometryFound = true;
                 }
-                else if (element.Type == "TEXT")
+            }
+
+            if (geometryFound)
+            {
+                for (i = 0; i < data.Elements.Count; i++)
                 {
+                    CadShapeElement textElement = data.Elements[i];
+
+                    if (textElement != null && textElement.Type == "TEXT")
+                    {
+                        IncludePoint(ref minX, ref minY, ref maxX, ref maxY, textElement.X1, textElement.Y1);
+                    }
+                }
+            }
+            else
+            {
+                // 지오메트리가 전혀 없는 과거 TEXT 전용 JSON만 기존 호환 방식으로 표시합니다.
+                bool textFound = false;
+
+                for (i = 0; i < data.Elements.Count; i++)
+                {
+                    CadShapeElement element = data.Elements[i];
+
+                    if (element == null || element.Type != "TEXT")
+                    {
+                        continue;
+                    }
+
                     if (element.HasBounds)
                     {
                         IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.BoundsMinX, element.BoundsMinY);
@@ -470,21 +522,18 @@ namespace OVIA.Desktop
                     else
                     {
                         double estimatedHeight = Math.Max(element.Height, 0.8);
-                        double estimatedWidth = Math.Max(
-                            estimatedHeight * 0.55 * Math.Max(element.Text == null ? 0 : element.Text.Length, 1),
-                            estimatedHeight
-                        );
+                        double estimatedWidth = Math.Max(estimatedHeight * 3.0, estimatedHeight);
                         IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.X1 - estimatedWidth / 2.0, element.Y1 - estimatedHeight / 2.0);
                         IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.X1 + estimatedWidth / 2.0, element.Y1 + estimatedHeight / 2.0);
                     }
 
-                    found = true;
+                    textFound = true;
                 }
-            }
 
-            if (!found)
-            {
-                return false;
+                if (!textFound)
+                {
+                    return false;
+                }
             }
 
             if (maxX <= minX)
@@ -566,8 +615,8 @@ namespace OVIA.Desktop
             }
 
             double textHeight = Math.Max(onlyText.Height, 1.0);
-            double estimatedTextWidth = Math.Max(textHeight * 0.55 * Math.Max(text.Length, 1), textHeight * 2.0);
-            double lineLength = Math.Max(estimatedTextWidth * 2.25, textHeight * 7.5);
+            // 과거 TEXT 전용 JSON의 표시용 직선도 숫자 자릿수와 무관한 고정 비율로 복원합니다.
+            double lineLength = Math.Max(textHeight * 7.5, 12.0);
             double centerX = onlyText.X1;
             double lineY = onlyText.Y1 + Math.Max(textHeight * 0.95, 0.8);
 
@@ -729,23 +778,60 @@ namespace OVIA.Desktop
 
             try
             {
-                // 회전 문자는 ClearType의 색상 번짐을 피하고 검은 단색 GridFit으로 선명하게 출력합니다.
-                g.TextRenderingHint = TextRenderingHint.SingleBitPerPixelGridFit;
+                /*
+                 * 90도 회전 치수는 작은 폰트에서 숫자 간격이 뭉쳐 보이기 쉽습니다.
+                 * 회전 문자에는 조금 더 큰 전용 폰트를 사용하고, 문자별 미세 자간을 주어
+                 * 140, 160 같은 세 자리 수치가 붙어 보이지 않도록 출력합니다.
+                 */
+                g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
                 g.TranslateTransform((float)Math.Round(center.X), (float)Math.Round(center.Y));
                 g.RotateTransform(-rotation);
-
-                using (StringFormat format = (StringFormat)StringFormat.GenericTypographic.Clone())
-                {
-                    format.Alignment = StringAlignment.Center;
-                    format.LineAlignment = StringAlignment.Center;
-                    format.FormatFlags |= StringFormatFlags.NoClip | StringFormatFlags.NoWrap;
-                    g.DrawString(text, font, brush, new PointF(0F, 0F), format);
-                }
+                DrawTrackedCadText(g, text, font, brush, RotatedTextTrackingPixels);
             }
             finally
             {
                 g.TextRenderingHint = oldHint;
                 g.Restore(state);
+            }
+        }
+
+        private void DrawTrackedCadText(Graphics g, string text, Font font, Brush brush, float trackingPixels)
+        {
+            if (g == null || font == null || brush == null || String.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            using (StringFormat format = (StringFormat)StringFormat.GenericTypographic.Clone())
+            {
+                format.Alignment = StringAlignment.Near;
+                format.LineAlignment = StringAlignment.Center;
+                format.FormatFlags |= StringFormatFlags.NoClip | StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces;
+
+                float[] widths = new float[text.Length];
+                float totalWidth = 0F;
+                int i;
+
+                for (i = 0; i < text.Length; i++)
+                {
+                    string character = text[i].ToString();
+                    SizeF size = g.MeasureString(character, font, new PointF(0F, 0F), format);
+                    widths[i] = Math.Max(size.Width, 1F);
+                    totalWidth += widths[i];
+                }
+
+                if (text.Length > 1)
+                {
+                    totalWidth += trackingPixels * (text.Length - 1);
+                }
+
+                float x = -totalWidth / 2F;
+
+                for (i = 0; i < text.Length; i++)
+                {
+                    g.DrawString(text[i].ToString(), font, brush, new PointF(x, 0F), format);
+                    x += widths[i] + trackingPixels;
+                }
             }
         }
 
