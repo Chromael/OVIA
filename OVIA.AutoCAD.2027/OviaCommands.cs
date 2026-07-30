@@ -72,6 +72,24 @@ namespace OVIA.AutoCAD_2027
             }
         }
 
+        private sealed class OviaPendingSelection
+        {
+            public Point3d Point1;
+            public Point3d Point2;
+            public List<OviaSelectionRectangle> AllowedOutputRectangles = new List<OviaSelectionRectangle>();
+            public List<ObjectId> BoxIds = new List<ObjectId>();
+            public int OverlappedBoxCount;
+            public int RedSelectionBoxCount;
+            public int ExtractedRowCount;
+            public string ExtractionError = "";
+        }
+
+        private sealed class OviaExtractionBatch
+        {
+            public string FilePath = "";
+            public List<OviaBarTableRow> Rows = new List<OviaBarTableRow>();
+        }
+
         private sealed class OviaResolvedCadColor
         {
             public bool IsValid;
@@ -288,15 +306,36 @@ namespace OVIA.AutoCAD_2027
             Editor ed = doc.Editor;
 
             object previousOsMode = EnableOviaTableSnapMode(ed);
+            List<OviaPendingSelection> pendingSelections = new List<OviaPendingSelection>();
+            List<ObjectId> pendingBoxIds = new List<ObjectId>();
+            List<OviaSelectionRectangle> currentBatchOutputRectangles = new List<OviaSelectionRectangle>();
+
+            /*
+             * OVIA 2026-07-30 _03 - 선택 즉시 독립 추출 / 최종 Enter 단일 게시
+             * -----------------------------------------------------------------
+             * 별도 Enter로는 정상인 표 A, 표 B를 한 세션에서 연속 선택했을 때 마지막 표만 남는
+             * 문제를 구조적으로 차단합니다. 기존 구조는 좌표만 저장한 뒤 사용자가 다른 표로
+             * Pan/Zoom한 최종 Enter 시점에 Editor.SelectCrossingWindow로 앞선 영역을 다시 읽었습니다.
+             * AutoCAD의 현재 화면 밖으로 이동한 앞선 표는 선택 객체가 0개가 될 수 있어 마지막으로
+             * 화면에 보이는 표만 남았습니다. 따라서 각 영역의 끝점을 지정하는 즉시, 그 영역이
+             * 화면에 보이는 시점에 독립 분석하고 검증된 DATA 행과 형상 JSON 경로를 배치에 Append합니다.
+             *
+             * 최종 Enter는 이미 누적된 행의 내부 No를 정규화하고 CSV 1개와 ready 1개를
+             * 원자적으로 게시하는 역할만 수행합니다. 뒤 선택은 앞 선택의 List를 초기화하거나
+             * 번호를 키로 교체할 수 없습니다. 철근 번호 중복은 허용하며, DATA 중복은 현재
+             * OVIABOX 세션 안에서 실제 선택 좌표가 겹치는 부분에만 적용합니다.
+             */
+            OviaExtractionBatch batch = new OviaExtractionBatch();
+            batch.FilePath = CreateCsvFilePath(db, "OVIA_BoxTable");
+            int successfulAreaCount = 0;
+            int failedAreaCount = 0;
 
             try
             {
-                int createdCount = 0;
-
                 while (true)
                 {
                     PromptPointOptions firstPointOptions = new PromptPointOptions(
-                        "\nOVIA 선택박스 시작점: 표 왼쪽 경계선과 시작 행의 위쪽 가로선 교차점을 클릭하세요. 완료는 Enter 또는 OVIA의 'CAD 선택모드 해제' 버튼을 사용하세요: "
+                        "\nOVIA 선택박스 시작점: 표 왼쪽 경계선과 시작 행의 위쪽 가로선 교차점을 클릭하세요. 모든 영역 선택 완료는 Enter, 취소는 Esc: "
                     );
 
                     firstPointOptions.AllowNone = true;
@@ -305,13 +344,62 @@ namespace OVIA.AutoCAD_2027
 
                     if (firstPointResult.Status == PromptStatus.None)
                     {
-                        ed.WriteMessage("\nOVIA: 연속 영역 선택을 완료했습니다. 총 " + createdCount.ToString() + "개 영역을 처리했습니다.\n");
+                        if (pendingSelections.Count == 0)
+                        {
+                            DeleteBatchExtractionArtifacts(batch.FilePath);
+                            ed.WriteMessage("\nOVIA: 선택된 영역이 없어 CAD 영역 선택모드를 종료했습니다.\n");
+                            return;
+                        }
+
+                        if (batch.Rows.Count == 0)
+                        {
+                            DeleteBatchExtractionArtifacts(batch.FilePath);
+                            ed.WriteMessage("\nOVIA: 최종 Enter로 확정한 선택영역에서 전송 가능한 철근 DATA 행을 찾지 못했습니다. CSV와 ready는 생성하지 않았습니다.\n");
+                            return;
+                        }
+
+                        try
+                        {
+                            int finalRowIndex;
+
+                            for (finalRowIndex = 0; finalRowIndex < batch.Rows.Count; finalRowIndex++)
+                            {
+                                batch.Rows[finalRowIndex].No = finalRowIndex + 1;
+                            }
+
+                            WriteBarTableCsv(batch.FilePath, batch.Rows, doc);
+
+                            ed.WriteMessage("\n");
+                            ed.WriteMessage("====================================\n");
+                            ed.WriteMessage("OVIA 다중 선택영역 통합 추출 완료\n");
+                            ed.WriteMessage("------------------------------------\n");
+                            ed.WriteMessage("선택 영역      : " + pendingSelections.Count.ToString(CultureInfo.InvariantCulture) + "개\n");
+                            ed.WriteMessage("성공 영역      : " + successfulAreaCount.ToString(CultureInfo.InvariantCulture) + "개\n");
+                            ed.WriteMessage("미추출 영역    : " + failedAreaCount.ToString(CultureInfo.InvariantCulture) + "개\n");
+                            ed.WriteMessage("통합 DATA 행   : " + batch.Rows.Count.ToString(CultureInfo.InvariantCulture) + "개\n");
+                            ed.WriteMessage("처리 방식      : 영역 선택 직후 독립 추출 + 최종 Enter 단일 게시\n");
+                            ed.WriteMessage("번호 중복      : 허용, 선택 순서대로 모두 보존\n");
+                            ed.WriteMessage("생성 CSV       : 1개\n");
+                            ed.WriteMessage("생성 ready     : 1개\n");
+                            ed.WriteMessage("저장 위치      : " + batch.FilePath + "\n");
+                            WriteBarTablePreview(ed, batch.Rows);
+                            ed.WriteMessage("====================================\n");
+                        }
+                        catch (System.Exception ex)
+                        {
+                            DeleteBatchExtractionArtifacts(batch.FilePath);
+                            ed.WriteMessage("\nOVIA 통합 집계표 CSV 저장 오류: " + ex.Message + "\n");
+                        }
+
                         return;
                     }
 
                     if (firstPointResult.Status != PromptStatus.OK)
                     {
-                        ed.WriteMessage("\nOVIA: CAD 영역 선택모드를 해제했습니다. 총 " + createdCount.ToString() + "개 영역을 처리했습니다.\n");
+                        DeleteOviaBoxEntitiesById(db, pendingBoxIds);
+                        DeleteBatchExtractionArtifacts(batch.FilePath);
+                        ed.Regen();
+                        ed.WriteMessage("\nOVIA: 최종 Enter 전에 선택모드를 취소하여 이번 배치의 선택박스와 임시 추출 결과를 삭제했습니다. CSV와 ready는 생성하지 않았습니다.\n");
                         return;
                     }
 
@@ -322,49 +410,58 @@ namespace OVIA.AutoCAD_2027
 
                     PromptPointResult secondPointResult = ed.GetCorner(secondPointOptions);
 
-                    if (secondPointResult.Status == PromptStatus.None)
-                    {
-                        ed.WriteMessage("\nOVIA: 현재 영역 선택을 취소하고 연속 선택모드를 종료했습니다. 총 " + createdCount.ToString() + "개 영역을 처리했습니다.\n");
-                        return;
-                    }
-
                     if (secondPointResult.Status != PromptStatus.OK)
                     {
-                        ed.WriteMessage("\nOVIA: CAD 영역 선택모드를 해제했습니다. 총 " + createdCount.ToString() + "개 영역을 처리했습니다.\n");
+                        DeleteOviaBoxEntitiesById(db, pendingBoxIds);
+                        DeleteBatchExtractionArtifacts(batch.FilePath);
+                        ed.Regen();
+                        ed.WriteMessage("\nOVIA: 최종 Enter 전에 선택모드를 취소하여 이번 배치의 선택박스와 임시 추출 결과를 삭제했습니다. CSV와 ready는 생성하지 않았습니다.\n");
                         return;
                     }
 
-                    /*
-                     * OVIA 2026-06-25 보정:
-                     * OVIABOX를 1회만 선택하고 끝내는 방식이 아니라,
-                     * 한 영역의 대비색 선택박스를 먼저 생성하고 Enter로 확정하면 OVIABOXTABLE 추출을 자동 수행한 뒤 다시 다음 영역을 선택할 수 있게 합니다.
-                     * 사용자는 필요한 영역마다 시작점/끝점 선택 후 Enter로 확정하고,
-                     * 전체 작업 종료는 다음 시작점 대기 상태에서 Enter 또는 OVIA의 CAD 선택모드 해제 버튼을 사용합니다.
-                     *
-                     * OVIA 2026-06-25 추가 보정:
-                     * BarList에 불러온 CAD 영역은 도면 내 작업 이력으로 남아야 하므로,
-                     * 새 영역을 선택할 때 기존 OVIA_SELECT_BOX를 삭제하지 않습니다.
-                     * 단, 추출 대상은 방금 생성 후 Enter로 확정한 박스 1개 영역으로 한정하여
-                     * 이전 박스와 새 박스가 합쳐진 큰 영역으로 추출되지 않게 합니다.
-                     */
                     Point3d boxPoint1 = firstPointResult.Value;
                     Point3d boxPoint2 = secondPointResult.Value;
-                    int overlappedBoxCount;
-                    List<OviaSelectionRectangle> availableRectangles = BuildNonOverlappingOviaSelectionRectangles(
-                        db,
+                    int overlappedCurrentBatchCount;
+
+                    List<OviaSelectionRectangle> availableOutputRectangles = BuildNonOverlappingOviaSelectionRectangles(
                         boxPoint1,
                         boxPoint2,
-                        out overlappedBoxCount
+                        currentBatchOutputRectangles,
+                        out overlappedCurrentBatchCount
                     );
 
-                    if (availableRectangles.Count == 0)
+                    if (availableOutputRectangles.Count == 0)
                     {
-                        ed.WriteMessage("\nOVIA: 선택한 범위는 기존 OVIA 선택영역에 모두 포함되어 있어 중복 추출하지 않았습니다.\n");
+                        ed.WriteMessage("\nOVIA: 이번 배치 안에서 이미 선택한 좌표와 전부 겹쳐 중복 DATA 선택을 누적하지 않았습니다. 철근 번호가 같은 것은 중복 기준이 아닙니다.\n");
                         continue;
                     }
 
-                    List<ObjectId> pendingBoxIds = new List<ObjectId>();
-                    int redSelectionBoxCount = 0;
+                    currentBatchOutputRectangles.AddRange(availableOutputRectangles);
+
+                    List<OviaSelectionRectangle> displayRectangles = new List<OviaSelectionRectangle>();
+                    int overlappedDisplayBoxCount = 0;
+                    int outputRectangleIndex;
+
+                    for (outputRectangleIndex = 0; outputRectangleIndex < availableOutputRectangles.Count; outputRectangleIndex++)
+                    {
+                        OviaSelectionRectangle outputRectangle = availableOutputRectangles[outputRectangleIndex];
+                        int displayOverlapCount;
+                        List<OviaSelectionRectangle> newDisplayRectangles = BuildNonOverlappingOviaSelectionRectangles(
+                            db,
+                            new Point3d(outputRectangle.MinX, outputRectangle.MinY, 0),
+                            new Point3d(outputRectangle.MaxX, outputRectangle.MaxY, 0),
+                            out displayOverlapCount
+                        );
+
+                        displayRectangles.AddRange(newDisplayRectangles);
+                        overlappedDisplayBoxCount += displayOverlapCount;
+                    }
+
+                    OviaPendingSelection pendingSelection = new OviaPendingSelection();
+                    pendingSelection.Point1 = boxPoint1;
+                    pendingSelection.Point2 = boxPoint2;
+                    pendingSelection.AllowedOutputRectangles.AddRange(availableOutputRectangles);
+                    pendingSelection.OverlappedBoxCount = overlappedCurrentBatchCount;
 
                     using (Transaction tr = db.TransactionManager.StartTransaction())
                     {
@@ -373,9 +470,9 @@ namespace OVIA.AutoCAD_2027
 
                         int rectangleIndex;
 
-                        for (rectangleIndex = 0; rectangleIndex < availableRectangles.Count; rectangleIndex++)
+                        for (rectangleIndex = 0; rectangleIndex < displayRectangles.Count; rectangleIndex++)
                         {
-                            OviaSelectionRectangle rectangle = availableRectangles[rectangleIndex];
+                            OviaSelectionRectangle rectangle = displayRectangles[rectangleIndex];
                             bool usedRedSelectionColor;
                             ObjectId pendingBoxId = CreateOviaBoxEntity(
                                 db,
@@ -388,11 +485,12 @@ namespace OVIA.AutoCAD_2027
 
                             if (!pendingBoxId.IsNull)
                             {
+                                pendingSelection.BoxIds.Add(pendingBoxId);
                                 pendingBoxIds.Add(pendingBoxId);
 
                                 if (usedRedSelectionColor)
                                 {
-                                    redSelectionBoxCount++;
+                                    pendingSelection.RedSelectionBoxCount++;
                                 }
                             }
                         }
@@ -402,92 +500,62 @@ namespace OVIA.AutoCAD_2027
                     }
 
                     /*
-                     * OVIA 2026-07-14 Enter 확정 재보정:
-                     * 기존 정상 동작처럼 시작점과 끝점 선택 직후 테이블 선 대비색 선택박스를 먼저 생성합니다.
-                     * 사용자가 도면에서 선택 범위를 눈으로 확인한 뒤 Enter를 눌렀을 때만
-                     * 형상 JSON과 CSV를 생성하여 OVIA BarList로 전달합니다.
-                     * AutoCAD의 GetKeywords에서 빈 Enter는 PromptStatus.None으로 반환될 수 있으므로
-                     * PromptStatus.None과 PromptStatus.OK를 모두 정상 확정으로 처리합니다.
-                     *
-                     * OVIA 2026-07-14 커서 깜빡임 보정:
-                     * Enter만 기다리는 구간에는 좌표 선택용 십자가 커서와 동적 입력창이 필요하지 않습니다.
-                     * 확인 입력 직전에 DYNMODE/DYNPROMPT를 끄고 CURSORTYPE을 Windows 포인터로 임시 변경하여
-                     * 선택 완료 후 십자가 커서가 계속 깜빡이는 현상을 차단합니다.
-                     * Enter 또는 취소 직후에는 사용자의 기존 설정을 반드시 원래 값으로 복원합니다.
+                     * 가장 중요한 실행 순서:
+                     * 다음 영역의 좌표를 받거나 사용자가 다른 위치로 Pan/Zoom하기 전에 현재 영역을
+                     * 즉시 분석해 batch.Rows에 Append합니다. 뒤 영역의 화면 위치, 스키마, 선택박스,
+                     * 번호, 파서 상태가 앞 영역 결과를 다시 계산하거나 교체할 수 없도록 앞 영역을
+                     * 확정된 메모리 스냅샷으로 만듭니다.
                      */
-                    ed.Regen();
-
-                    OviaEnterPromptDisplayState enterPromptDisplayState = SuppressOviaEnterPromptDisplay();
-                    PromptResult confirmResult;
+                    int beforeRowCount = batch.Rows.Count;
 
                     try
                     {
-                        PromptKeywordOptions confirmOptions = new PromptKeywordOptions(
-                            "\nOVIA 선택박스의 영역을 전송하려면 Enter를 누르세요. 취소는 Esc: "
+                        RunSmartBoxTableExtraction(
+                            "OVIABOX",
+                            pendingSelection.Point1,
+                            pendingSelection.Point2,
+                            pendingSelection.Point1,
+                            pendingSelection.Point2,
+                            pendingSelection.AllowedOutputRectangles,
+                            batch
                         );
-
-                        confirmOptions.AllowNone = true;
-                        confirmOptions.AppendKeywordsToMessage = false;
-                        confirmOptions.Keywords.Add("Send");
-                        confirmOptions.Keywords.Default = "Send";
-
-                        confirmResult = ed.GetKeywords(confirmOptions);
                     }
-                    finally
+                    catch (System.Exception areaException)
                     {
-                        RestoreOviaEnterPromptDisplay(enterPromptDisplayState);
+                        pendingSelection.ExtractionError = areaException.Message;
                     }
 
-                    bool isConfirmed = confirmResult.Status == PromptStatus.None || confirmResult.Status == PromptStatus.OK;
+                    pendingSelection.ExtractedRowCount = batch.Rows.Count - beforeRowCount;
 
-                    if (!isConfirmed)
+                    if (pendingSelection.ExtractedRowCount > 0)
                     {
-                        DeleteOviaBoxEntitiesById(db, pendingBoxIds);
-                        ed.Regen();
-                        ed.WriteMessage("\nOVIA: 현재 선택박스는 취소되어 삭제했으며 데이터는 전송하지 않았습니다. 총 " + createdCount.ToString() + "개 영역을 처리했습니다.\n");
-                        return;
+                        successfulAreaCount++;
+                    }
+                    else
+                    {
+                        failedAreaCount++;
                     }
 
-                    createdCount += availableRectangles.Count;
+                    pendingSelections.Add(pendingSelection);
+                    ed.Regen();
 
                     ed.WriteMessage("\n");
-                    ed.WriteMessage("====================================\n");
-                    ed.WriteMessage("OVIA 선택박스 Enter 확정 완료 및 자동 추출 시작\n");
-                    ed.WriteMessage("------------------------------------\n");
-                    ed.WriteMessage("신규 처리 영역 : " + availableRectangles.Count.ToString() + "개\n");
-                    ed.WriteMessage("누적 처리 영역 : " + createdCount.ToString() + "개\n");
-                    ed.WriteMessage("중복 검사 박스 : " + overlappedBoxCount.ToString() + "개\n");
-                    ed.WriteMessage(
-                        "표시 형태 : 노란 테이블 위 빨간색 "
-                        + redSelectionBoxCount.ToString(CultureInfo.InvariantCulture)
-                        + "개 / 그 외 노란색 "
-                        + (availableRectangles.Count - redSelectionBoxCount).ToString(CultureInfo.InvariantCulture)
-                        + "개 / 매우 두꺼운 실선\n"
-                    );
-                    ed.WriteMessage("박스 표시 : 선택한 모든 OVIA 선택박스를 도면에 유지\n");
-                    ed.WriteMessage("중복 처리 : 전체 선택 문맥으로 분석 후 기존 영역의 행은 자동 제외\n");
-                    ed.WriteMessage("추출 기준 : 신규 행만 CSV로 전송하며 먼저 추출한 행은 유지\n");
-                    ed.WriteMessage("연속 작업 : 다음 영역도 시작점/끝점 선택 후 Enter로 확정하세요. 전체 종료는 다음 시작점 대기에서 Enter 또는 OVIA의 CAD 선택모드 해제 버튼을 사용합니다.\n");
-                    ed.WriteMessage("====================================\n");
+                    ed.WriteMessage("OVIA 선택영역 " + pendingSelections.Count.ToString(CultureInfo.InvariantCulture) + "번째 누적 완료\n");
+                    ed.WriteMessage("- 현재 영역 즉시 추출: " + pendingSelection.ExtractedRowCount.ToString(CultureInfo.InvariantCulture) + "행\n");
+                    ed.WriteMessage("- 전체 메모리 누적: " + batch.Rows.Count.ToString(CultureInfo.InvariantCulture) + "행\n");
+                    ed.WriteMessage("- DATA 신규 비중복 구간: " + availableOutputRectangles.Count.ToString(CultureInfo.InvariantCulture) + "개\n");
+                    ed.WriteMessage("- 새로 그린 선택박스: " + displayRectangles.Count.ToString(CultureInfo.InvariantCulture) + "개\n");
+                    ed.WriteMessage("- 과거 표시선 중복: " + overlappedDisplayBoxCount.ToString(CultureInfo.InvariantCulture) + "개 (DATA 제외 안 함)\n");
+                    ed.WriteMessage("- 현재 배치 좌표 중복: " + overlappedCurrentBatchCount.ToString(CultureInfo.InvariantCulture) + "개 (겹친 좌표만 제외)\n");
+                    ed.WriteMessage("- 철근 번호 중복: 허용, 앞 영역 행을 교체하지 않고 Append\n");
 
-                    /*
-                     * OVIA 2026-07-17 중복 선택 안정화:
-                     * 기존 박스와 겹친 부분을 잘라낸 작은 사각형 각각을 독립 추출하면,
-                     * 표의 행/컬럼 문맥이 잘린 상태에서 형상 셀을 다시 계산하게 됩니다.
-                     * 그 결과 신규 행의 철근형상에 표 세로선과 길이/수량 문자가 섞일 수 있었습니다.
-                     *
-                     * 이제 표 분석과 형상 캡처는 사용자가 방금 지정한 원래 전체 범위를 한 번만 사용하고,
-                     * 실제 CSV 전송 행만 availableRectangles(기존 박스와 겹치지 않는 신규 범위)로 필터합니다.
-                     * 따라서 먼저 추출한 행은 유지되고, 중복 범위 때문에 신규 행의 형상 셀이 잘리지 않습니다.
-                     */
-                    RunSmartBoxTableExtraction(
-                        "OVIABOX",
-                        boxPoint1,
-                        boxPoint2,
-                        boxPoint1,
-                        boxPoint2,
-                        availableRectangles
-                    );
+                    if (pendingSelection.ExtractionError != "")
+                    {
+                        ed.WriteMessage("- 현재 영역 오류: " + pendingSelection.ExtractionError + "\n");
+                    }
+
+                    ed.WriteMessage("- 현재까지 CSV/ready: 0개 (최종 Enter 후 1개씩 생성)\n");
+                    ed.WriteMessage("- 다음 영역의 시작점을 클릭하거나, 모든 선택이 끝났으면 Enter를 한 번 누르세요.\n");
                 }
             }
             finally
@@ -1350,6 +1418,26 @@ namespace OVIA.AutoCAD_2027
             Point3d analysisContextPoint2,
             List<OviaSelectionRectangle> allowedOutputRectangles)
         {
+            RunSmartBoxTableExtraction(
+                commandName,
+                point1,
+                point2,
+                analysisContextPoint1,
+                analysisContextPoint2,
+                allowedOutputRectangles,
+                null
+            );
+        }
+
+        private void RunSmartBoxTableExtraction(
+            string commandName,
+            Point3d point1,
+            Point3d point2,
+            Point3d analysisContextPoint1,
+            Point3d analysisContextPoint2,
+            List<OviaSelectionRectangle> allowedOutputRectangles,
+            OviaExtractionBatch extractionBatch)
+        {
             Point3d selectedMinPoint = new Point3d(
                 Math.Min(point1.X, point2.X),
                 Math.Min(point1.Y, point2.Y),
@@ -1381,7 +1469,8 @@ namespace OVIA.AutoCAD_2027
                 1,
                 analysisContextMinPoint,
                 analysisContextMaxPoint,
-                allowedOutputRectangles
+                allowedOutputRectangles,
+                extractionBatch
             );
         }
 
@@ -1412,6 +1501,7 @@ namespace OVIA.AutoCAD_2027
                 boxCount,
                 analysisContextMinPoint,
                 analysisContextMaxPoint,
+                null,
                 null
             );
         }
@@ -1423,7 +1513,8 @@ namespace OVIA.AutoCAD_2027
             int boxCount,
             Point3d analysisContextMinPoint,
             Point3d analysisContextMaxPoint,
-            List<OviaSelectionRectangle> allowedOutputRectangles)
+            List<OviaSelectionRectangle> allowedOutputRectangles,
+            OviaExtractionBatch extractionBatch)
         {
             Document doc = Application.DocumentManager.MdiActiveDocument;
 
@@ -1763,7 +1854,9 @@ namespace OVIA.AutoCAD_2027
                 return;
             }
 
-            string filePath = CreateCsvFilePath(db, "OVIA_BoxTable");
+            string filePath = extractionBatch == null
+                ? CreateCsvFilePath(db, "OVIA_BoxTable")
+                : extractionBatch.FilePath;
 
             try
             {
@@ -1780,7 +1873,29 @@ namespace OVIA.AutoCAD_2027
                     selectedMaxPoint
                 );
 
+                if (extractionBatch != null)
+                {
+                    int rowIndex;
+
+                    for (rowIndex = 0; rowIndex < tableRows.Count; rowIndex++)
+                    {
+                        tableRows[rowIndex].No = extractionBatch.Rows.Count + rowIndex + 1;
+                    }
+                }
+
                 CaptureCadShapeFilesForRows(ed, db, filePath, tableRows, cadTableGridModel);
+
+                if (extractionBatch != null)
+                {
+                    extractionBatch.Rows.AddRange(tableRows);
+                    ed.WriteMessage(
+                        "\nOVIA: 현재 선택영역에서 "
+                        + tableRows.Count.ToString(CultureInfo.InvariantCulture)
+                        + "개 DATA 행을 통합 배치에 누적했습니다.\n"
+                    );
+                    return;
+                }
+
                 WriteBarTableCsv(filePath, tableRows, doc);
 
                 ed.WriteMessage("\n");
@@ -12530,6 +12645,45 @@ namespace OVIA.AutoCAD_2027
             }
         }
 
+        private static void DeleteBatchExtractionArtifacts(string csvFilePath)
+        {
+            if (csvFilePath == null || csvFilePath.Trim() == "")
+            {
+                return;
+            }
+
+            DeleteFileQuietly(csvFilePath);
+            DeleteFileQuietly(csvFilePath + ".tmp");
+            DeleteFileQuietly(csvFilePath + ".ready");
+            DeleteFileQuietly(csvFilePath + ".ready.tmp");
+
+            try
+            {
+                string csvDirectory = Path.GetDirectoryName(csvFilePath);
+                string csvBaseName = Path.GetFileNameWithoutExtension(csvFilePath);
+
+                if (csvDirectory == null || csvDirectory.Trim() == ""
+                    || csvBaseName == null || csvBaseName.Trim() == "")
+                {
+                    return;
+                }
+
+                string shapeDirectory = Path.Combine(
+                    csvDirectory,
+                    "Shapes",
+                    SanitizeFileName(csvBaseName)
+                );
+
+                if (Directory.Exists(shapeDirectory))
+                {
+                    Directory.Delete(shapeDirectory, true);
+                }
+            }
+            catch
+            {
+            }
+        }
+
         private static void WriteExtractionReadyMarker(string csvFilePath, List<OviaBarTableRow> rows)
         {
             string markerPath = csvFilePath + ".ready";
@@ -12911,6 +13065,23 @@ namespace OVIA.AutoCAD_2027
             out int overlappedBoxCount
         )
         {
+            List<OviaSelectionRectangle> existingRectangles = GetExistingOviaSelectionRectangles(db);
+
+            return BuildNonOverlappingOviaSelectionRectangles(
+                point1,
+                point2,
+                existingRectangles,
+                out overlappedBoxCount
+            );
+        }
+
+        private List<OviaSelectionRectangle> BuildNonOverlappingOviaSelectionRectangles(
+            Point3d point1,
+            Point3d point2,
+            List<OviaSelectionRectangle> blockingRectangles,
+            out int overlappedBoxCount
+        )
+        {
             overlappedBoxCount = 0;
 
             OviaSelectionRectangle selectedRectangle = new OviaSelectionRectangle(
@@ -12929,12 +13100,22 @@ namespace OVIA.AutoCAD_2027
 
             remainingRectangles.Add(selectedRectangle);
 
-            List<OviaSelectionRectangle> existingRectangles = GetExistingOviaSelectionRectangles(db);
-            int existingIndex;
-
-            for (existingIndex = 0; existingIndex < existingRectangles.Count; existingIndex++)
+            if (blockingRectangles == null || blockingRectangles.Count == 0)
             {
-                OviaSelectionRectangle existingRectangle = existingRectangles[existingIndex];
+                return remainingRectangles;
+            }
+
+            int blockingIndex;
+
+            for (blockingIndex = 0; blockingIndex < blockingRectangles.Count; blockingIndex++)
+            {
+                OviaSelectionRectangle blockingRectangle = blockingRectangles[blockingIndex];
+
+                if (blockingRectangle == null)
+                {
+                    continue;
+                }
+
                 List<OviaSelectionRectangle> nextRectangles = new List<OviaSelectionRectangle>();
                 bool overlappedCurrentBox = false;
                 int remainingIndex;
@@ -12943,14 +13124,14 @@ namespace OVIA.AutoCAD_2027
                 {
                     OviaSelectionRectangle candidate = remainingRectangles[remainingIndex];
 
-                    if (!HasMeaningfulHorizontalOverlap(candidate, existingRectangle))
+                    if (!HasMeaningfulHorizontalOverlap(candidate, blockingRectangle))
                     {
                         nextRectangles.Add(candidate);
                         continue;
                     }
 
-                    double overlapMinY = Math.Max(candidate.MinY, existingRectangle.MinY);
-                    double overlapMaxY = Math.Min(candidate.MaxY, existingRectangle.MaxY);
+                    double overlapMinY = Math.Max(candidate.MinY, blockingRectangle.MinY);
+                    double overlapMaxY = Math.Min(candidate.MaxY, blockingRectangle.MaxY);
 
                     if (overlapMaxY - overlapMinY <= OviaBoxOverlapTolerance)
                     {

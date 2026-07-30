@@ -1145,7 +1145,7 @@ namespace OVIA.Desktop
             if (autoCadSelectionModeActive)
             {
                 ActivateAutoCad();
-                lblStatus.Text = "CAD 영역 선택모드가 실행 중입니다. AutoCAD에서 시작점·끝점으로 노란 박스를 만든 뒤 Enter로 현재 영역을 전송하세요.";
+                lblStatus.Text = "CAD 영역 선택모드가 실행 중입니다. 영역별 시작점·끝점을 연속 지정한 뒤 다음 시작점 대기에서 Enter를 한 번 눌러 전체를 전송하세요.";
                 lblStatus.ForeColor = TextSub;
                 return;
             }
@@ -1196,7 +1196,7 @@ namespace OVIA.Desktop
             autoCadSelectionCommandDispatchReturned = false;
             ActivateAutoCad();
 
-            lblStatus.Text = "CAD 영역 선택모드 실행 중 - 각 범위는 시작점·끝점으로 노란 박스를 확인한 뒤 Enter로 전송하세요. 전체 종료는 다음 시작점 대기에서 Enter 또는 CAD 선택모드 해제입니다.";
+            lblStatus.Text = "CAD 영역 선택모드 실행 중 - 각 범위의 시작점·끝점을 Enter 없이 연속 선택하고, 모든 선택이 끝나면 다음 시작점 대기에서 Enter를 한 번 눌러 하나의 CSV로 전송하세요.";
             lblStatus.ForeColor = TextSub;
 
             BeginAutoCadCommandDispatch(
@@ -1280,7 +1280,7 @@ namespace OVIA.Desktop
                     }
 
                     ActivateAutoCad();
-                    lblStatus.Text = "CAD 영역 선택모드를 해제했습니다. 노란 선택영역은 유지됩니다.";
+                    lblStatus.Text = "CAD 영역 선택모드를 해제했습니다. 최종 Enter 전 미전송 선택영역은 삭제되며 데이터는 추가되지 않습니다.";
                     lblStatus.ForeColor = TextSub;
                 }
             );
@@ -1800,7 +1800,7 @@ namespace OVIA.Desktop
             autoCadWatcher.EnableRaisingEvents = true;
             StartAutoCadImportPollTimer();
 
-            lblStatus.Text = "CAD에서 영역선택 대기 중 - 노란 선택박스 확인 후 Enter로 전송된 추출 결과를 기다립니다.";
+            lblStatus.Text = "CAD에서 영역선택 대기 중 - 각 영역은 선택 즉시 메모리에 누적되며, 최종 Enter로 통합 CSV 1개를 게시합니다.";
         }
 
         private void StopAutoCadWatcher()
@@ -8300,6 +8300,13 @@ namespace OVIA.Desktop
             try
             {
                 Dictionary<string, double> unitWeights = OviaRebarUnitWeightStore.LoadEnabledUnitWeights();
+                bool importedTotalWeightUsesKilograms = ShouldCompareImportedTotalWeightAsKilograms(
+                    specCol,
+                    lengthCol,
+                    qtyCol,
+                    totalWeightCol,
+                    unitWeights
+                );
                 int r;
 
                 for (r = 0; r < grid.Rows.Count; r++)
@@ -8343,7 +8350,7 @@ namespace OVIA.Desktop
                     if (totalLengthCol >= 0)
                     {
                         string originalText = GetOriginalImportedTotalText(r, totalLengthCol);
-                        bool mismatch = SetCalculatedCellValue(r, totalLengthCol, calculatedTotalLengthM, "총길이(M)", originalText, baseSpec, unitWeightKgM, next);
+                        bool mismatch = SetCalculatedCellValue(r, totalLengthCol, calculatedTotalLengthM, "총길이(M)", originalText, baseSpec, unitWeightKgM, false, next);
                         mismatchFound = mismatchFound || mismatch;
                         totalLengthMismatchFound = totalLengthMismatchFound || mismatch;
                         anyCalculated = true;
@@ -8352,7 +8359,12 @@ namespace OVIA.Desktop
                     if (totalWeightCol >= 0)
                     {
                         string originalText = GetOriginalImportedTotalText(r, totalWeightCol);
-                        bool mismatch = SetCalculatedCellValue(r, totalWeightCol, calculatedTotalWeightTon, "총중량(Ton)", originalText, baseSpec, unitWeightKgM, next);
+                        bool rowWeightUsesKilograms = ShouldCompareImportedWeightRowAsKilograms(
+                            originalText,
+                            calculatedTotalWeightTon,
+                            importedTotalWeightUsesKilograms
+                        );
+                        bool mismatch = SetCalculatedCellValue(r, totalWeightCol, calculatedTotalWeightTon, "총중량(Ton)", originalText, baseSpec, unitWeightKgM, rowWeightUsesKilograms, next);
                         mismatchFound = mismatchFound || mismatch;
                         totalWeightMismatchFound = totalWeightMismatchFound || mismatch;
                         anyCalculated = true;
@@ -8443,7 +8455,7 @@ namespace OVIA.Desktop
             ClearRebarCalculationCellVisualStyle(cell);
         }
 
-        private bool SetCalculatedCellValue(int rowIndex, int columnIndex, double calculatedValue, string valueName, string originalText, string baseSpec, double unitWeightKgM, Dictionary<string, RebarCalculationMismatchInfo> next)
+        private bool SetCalculatedCellValue(int rowIndex, int columnIndex, double calculatedValue, string valueName, string originalText, string baseSpec, double unitWeightKgM, bool originalWeightUsesKilograms, Dictionary<string, RebarCalculationMismatchInfo> next)
         {
             if (columnIndex < 0 || rowIndex < 0 || rowIndex >= grid.Rows.Count || columnIndex >= grid.Columns.Count)
             {
@@ -8464,10 +8476,18 @@ namespace OVIA.Desktop
                 meta.OriginalImportedText = originalText == null ? "" : originalText.Trim();
             }
 
+            meta.OriginalWeightUsesKilograms = originalWeightUsesKilograms
+                && valueName != null
+                && valueName.IndexOf("중량", StringComparison.OrdinalIgnoreCase) >= 0;
+
             string calculatedDisplayText = GetThreeDecimalComparisonText(calculatedValue);
             string originalDisplayText = GetThreeDecimalComparisonText(meta.OriginalImportedText);
             bool mismatch = originalDisplayText != ""
-                && !string.Equals(originalDisplayText, calculatedDisplayText, StringComparison.Ordinal);
+                && !AreImportedAndCalculatedValuesEquivalent(
+                    meta.OriginalImportedText,
+                    calculatedDisplayText,
+                    meta.OriginalWeightUsesKilograms
+                );
 
             meta.CalculatedValue = calculatedValue;
             meta.HasMismatch = mismatch;
@@ -8489,14 +8509,35 @@ namespace OVIA.Desktop
                 info.CalculatedText = calculatedDisplayText;
                 info.BaseSpec = baseSpec;
                 info.UnitWeightKgM = unitWeightKgM;
+                info.OriginalWeightUsesKilograms = meta.OriginalWeightUsesKilograms;
                 next[key] = info;
 
-                cell.ToolTipText = "CAD 원본값: " + info.OriginalText + " / OVIA 계산값: " + info.CalculatedText + "\r\n" + baseSpec + " 단위중량: " + unitWeightKgM.ToString("0.000", CultureInfo.InvariantCulture) + " kg/m";
+                string mismatchOriginalText = info.OriginalText;
+
+                if (info.OriginalWeightUsesKilograms)
+                {
+                    mismatchOriginalText = info.OriginalText
+                        + " kg ("
+                        + GetKilogramAsTonComparisonText(info.OriginalText)
+                        + " Ton)";
+                }
+
+                cell.ToolTipText = "CAD 원본값: " + mismatchOriginalText + " / OVIA 계산값: " + info.CalculatedText + "\r\n" + baseSpec + " 단위중량: " + unitWeightKgM.ToString("0.000", CultureInfo.InvariantCulture) + " kg/m";
             }
             else
             {
                 ClearRebarCalculationCellVisualStyle(cell);
-                cell.ToolTipText = "CAD 원본값: " + (originalDisplayText == "" ? meta.OriginalImportedText : originalDisplayText)
+                string originalTooltipText = originalDisplayText == "" ? meta.OriginalImportedText : originalDisplayText;
+
+                if (meta.OriginalWeightUsesKilograms && originalDisplayText != "")
+                {
+                    originalTooltipText = meta.OriginalImportedText
+                        + " kg ("
+                        + GetKilogramAsTonComparisonText(meta.OriginalImportedText)
+                        + " Ton)";
+                }
+
+                cell.ToolTipText = "CAD 원본값: " + originalTooltipText
                     + " / OVIA 계산값: " + calculatedDisplayText
                     + " / " + baseSpec + " 단위중량 "
                     + unitWeightKgM.ToString("0.000", CultureInfo.InvariantCulture) + " kg/m";
@@ -8524,11 +8565,11 @@ namespace OVIA.Desktop
                     continue;
                 }
 
-                string original = GetThreeDecimalComparisonText(info.OriginalText);
-                string calculated = GetThreeDecimalComparisonText(info.CalculatedText);
-
-                if (original != "" && calculated != ""
-                    && string.Equals(original, calculated, StringComparison.Ordinal))
+                if (AreImportedAndCalculatedValuesEquivalent(
+                    info.OriginalText,
+                    info.CalculatedText,
+                    info.OriginalWeightUsesKilograms
+                ))
                 {
                     resolvedKeys.Add(pair.Key);
                 }
@@ -8643,6 +8684,200 @@ namespace OVIA.Desktop
 
             object value = cell.Value;
             return value == null ? "" : value.ToString();
+        }
+
+        private bool ShouldCompareImportedTotalWeightAsKilograms(
+            int specColumnIndex,
+            int lengthColumnIndex,
+            int quantityColumnIndex,
+            int totalWeightColumnIndex,
+            Dictionary<string, double> unitWeights)
+        {
+            if (grid == null
+                || totalWeightColumnIndex < 0
+                || specColumnIndex < 0
+                || lengthColumnIndex < 0
+                || quantityColumnIndex < 0
+                || unitWeights == null
+                || unitWeights.Count == 0)
+            {
+                return false;
+            }
+
+            int directTonMatches = 0;
+            int kilogramMatches = 0;
+            int comparableRows = 0;
+            decimal importedWeightSum = 0M;
+            decimal calculatedWeightTonSum = 0M;
+
+            for (int rowIndex = 0; rowIndex < grid.Rows.Count; rowIndex++)
+            {
+                if (grid.Rows[rowIndex].IsNewRow)
+                {
+                    continue;
+                }
+
+                string baseSpec = ExtractBaseRebarSpec(GetCellText(rowIndex, specColumnIndex));
+                double unitWeightKgM;
+                double lengthMm;
+                double quantity;
+                decimal importedWeight;
+
+                if (baseSpec == ""
+                    || !unitWeights.TryGetValue(baseSpec, out unitWeightKgM)
+                    || !TryParseNumber(GetCellText(rowIndex, lengthColumnIndex), out lengthMm)
+                    || !TryParseNumber(GetCellText(rowIndex, quantityColumnIndex), out quantity)
+                    || !TryParseDecimalNumber(GetOriginalImportedTotalText(rowIndex, totalWeightColumnIndex), out importedWeight)
+                    || lengthMm <= 0
+                    || quantity <= 0)
+                {
+                    continue;
+                }
+
+                double calculatedTotalLengthM = Math.Round(
+                    (lengthMm / 1000.0) * quantity,
+                    3,
+                    MidpointRounding.AwayFromZero
+                );
+                double calculatedTotalWeightTon = Math.Round(
+                    (calculatedTotalLengthM * unitWeightKgM) / 1000.0,
+                    3,
+                    MidpointRounding.AwayFromZero
+                );
+                decimal calculatedWeightTon;
+
+                if (!TryParseDecimalNumber(
+                    GetThreeDecimalComparisonText(calculatedTotalWeightTon),
+                    out calculatedWeightTon))
+                {
+                    continue;
+                }
+
+                decimal importedRounded = Decimal.Round(importedWeight, 3, MidpointRounding.AwayFromZero);
+                decimal importedKgAsTonRounded = Decimal.Round(importedWeight / 1000M, 3, MidpointRounding.AwayFromZero);
+
+                if (importedRounded == calculatedWeightTon)
+                {
+                    directTonMatches++;
+                }
+
+                if (importedKgAsTonRounded == calculatedWeightTon)
+                {
+                    kilogramMatches++;
+                }
+
+                comparableRows++;
+                importedWeightSum += importedWeight;
+                calculatedWeightTonSum += calculatedWeightTon;
+            }
+
+            if (comparableRows == 0)
+            {
+                return false;
+            }
+
+            decimal importedSumAsTon = Decimal.Round(importedWeightSum, 3, MidpointRounding.AwayFromZero);
+            decimal importedKgSumAsTon = Decimal.Round(importedWeightSum / 1000M, 3, MidpointRounding.AwayFromZero);
+            decimal calculatedSum = Decimal.Round(calculatedWeightTonSum, 3, MidpointRounding.AwayFromZero);
+            bool directTotalMatches = importedSumAsTon == calculatedSum;
+            bool kilogramTotalMatches = importedKgSumAsTon == calculatedSum;
+
+            if (kilogramTotalMatches && !directTotalMatches)
+            {
+                return true;
+            }
+
+            return kilogramMatches > directTonMatches
+                && kilogramMatches > 0
+                && kilogramMatches * 2 >= comparableRows;
+        }
+
+        private bool ShouldCompareImportedWeightRowAsKilograms(
+            string originalText,
+            double calculatedWeightTon,
+            bool fallbackToKilograms)
+        {
+            decimal originalValue;
+            decimal calculatedValue;
+
+            if (!TryParseDecimalNumber(originalText, out originalValue)
+                || !TryParseDecimalNumber(
+                    GetThreeDecimalComparisonText(calculatedWeightTon),
+                    out calculatedValue))
+            {
+                return fallbackToKilograms;
+            }
+
+            decimal originalRounded = Decimal.Round(originalValue, 3, MidpointRounding.AwayFromZero);
+            decimal originalKgAsTonRounded = Decimal.Round(originalValue / 1000M, 3, MidpointRounding.AwayFromZero);
+            bool directTonMatches = originalRounded == calculatedValue;
+            bool kilogramMatches = originalKgAsTonRounded == calculatedValue;
+
+            if (kilogramMatches && !directTonMatches)
+            {
+                return true;
+            }
+
+            if (directTonMatches && !kilogramMatches)
+            {
+                return false;
+            }
+
+            return fallbackToKilograms;
+        }
+
+        private bool AreImportedAndCalculatedValuesEquivalent(
+            string originalText,
+            string calculatedText,
+            bool originalWeightUsesKilograms)
+        {
+            decimal originalValue;
+            decimal calculatedValue;
+
+            if (!TryParseDecimalNumber(originalText, out originalValue)
+                || !TryParseDecimalNumber(calculatedText, out calculatedValue))
+            {
+                return false;
+            }
+
+            decimal originalRounded = Decimal.Round(originalValue, 3, MidpointRounding.AwayFromZero);
+            decimal calculatedRounded = Decimal.Round(calculatedValue, 3, MidpointRounding.AwayFromZero);
+
+            if (originalRounded == calculatedRounded)
+            {
+                return true;
+            }
+
+            if (!originalWeightUsesKilograms)
+            {
+                return false;
+            }
+
+            decimal originalKgAsTonRounded = Decimal.Round(
+                originalValue / 1000M,
+                3,
+                MidpointRounding.AwayFromZero
+            );
+
+            return originalKgAsTonRounded == calculatedRounded;
+        }
+
+        private string GetKilogramAsTonComparisonText(string originalText)
+        {
+            decimal originalValue;
+
+            if (!TryParseDecimalNumber(originalText, out originalValue))
+            {
+                return "";
+            }
+
+            decimal tonValue = Decimal.Round(
+                originalValue / 1000M,
+                3,
+                MidpointRounding.AwayFromZero
+            );
+
+            return tonValue.ToString("0.000", CultureInfo.InvariantCulture);
         }
 
         private bool IsImportedValueDifferent(string originalText, double calculatedValue)
@@ -8767,14 +9002,15 @@ namespace OVIA.Desktop
                 return false;
             }
 
-            // 그리기 직전에도 현재 최종 셀값과 CAD 원본값을 동일한 3자리 규칙으로 재검증합니다.
-            string original = GetThreeDecimalComparisonText(info.OriginalText);
+            // 그리기 직전에도 CAD 원본 단위(Ton 또는 KG)를 반영하여 소수 셋째 자리로 재검증합니다.
             object currentValue = grid.Rows[rowIndex].Cells[columnIndex].Value;
-            string current = GetThreeDecimalComparisonText(currentValue == null ? "" : currentValue.ToString());
+            string current = currentValue == null ? "" : currentValue.ToString();
 
-            return original == ""
-                || current == ""
-                || !string.Equals(original, current, StringComparison.Ordinal);
+            return !AreImportedAndCalculatedValuesEquivalent(
+                info.OriginalText,
+                current,
+                info.OriginalWeightUsesKilograms
+            );
         }
 
         private string GetRebarCalculationCellKey(int rowIndex, int columnIndex)
@@ -8948,6 +9184,7 @@ namespace OVIA.Desktop
             public string ValueName = "";
             public string BaseSpec = "";
             public double UnitWeightKgM = 0;
+            public bool OriginalWeightUsesKilograms = false;
         }
 
         private class RebarCalculationMismatchInfo
@@ -8959,6 +9196,7 @@ namespace OVIA.Desktop
             public string CalculatedText = "";
             public string BaseSpec = "";
             public double UnitWeightKgM = 0;
+            public bool OriginalWeightUsesKilograms = false;
         }
 
         private bool ContainsAny(string value, params string[] keywords)

@@ -5,6 +5,8 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.IO;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
 using OVIA.Desktop.Controls;
@@ -1854,7 +1856,7 @@ namespace OVIA.Desktop
             ProjectBarListSummary summary = new ProjectBarListSummary();
 
             summary.FilePath = filePath;
-            summary.Title = Path.GetFileNameWithoutExtension(filePath);
+            summary.Title = "";
             summary.CreatedDate = File.GetCreationTime(filePath).ToString("yyyy-MM-dd");
             summary.ModifiedDate = File.GetLastWriteTime(filePath).ToString("yyyy-MM-dd HH:mm");
             summary.Status = "접수";
@@ -1948,6 +1950,11 @@ namespace OVIA.Desktop
             catch
             {
                 summary.Memo = "요약 계산 실패";
+            }
+
+            if (string.IsNullOrWhiteSpace(summary.Title))
+            {
+                summary.Title = Path.GetFileNameWithoutExtension(filePath);
             }
 
             summary.Status = NormalizeBarListStatus(summary.Status);
@@ -3017,7 +3024,13 @@ namespace OVIA.Desktop
         private OviaSimpleDatePicker dtCreatedDate;
         private OviaSimpleDatePicker dtDueDate;
         private OviaDialogTextBox txtMemo;
+        private OVIA.Desktop.Controls.OviaButton btnCadTitleText;
         private OVIA.Desktop.Controls.OviaButton btnOk;
+        private ToolTip cadTitleToolTip;
+        private Timer cadTitleResultTimer;
+        private string pendingCadTitleRequestToken = "";
+        private DateTime cadTitleRequestStartedAt = DateTime.MinValue;
+        private bool cadTitleRequestPending = false;
         private string originalSnapshot = "";
 
         public BarListEditResult Result = new BarListEditResult();
@@ -3039,6 +3052,7 @@ namespace OVIA.Desktop
             this.Font = OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
 
             BuildDialog(writes, buildings, floors, workTypes, tags, colors);
+            this.FormClosed += OviaBarListEditDialog_FormClosed;
             CaptureOriginalSnapshot();
             UpdateConfirmState();
         }
@@ -3078,9 +3092,32 @@ namespace OVIA.Desktop
             top += rowHeight + 4;
             Label lblTitle = CreateFieldLabel("제목", left1, top, labelWidth, 34);
             body.Controls.Add(lblTitle);
-            txtTitle = CreateTextBox(summary.Title, left1 + labelWidth, top, body.Width - left1 - labelWidth - 24, 34);
+
+            int titleAreaWidth = body.Width - left1 - labelWidth - 24;
+            int titleIconSize = 34;
+            int titleIconGap = 6;
+            txtTitle = CreateTextBox(summary.Title, left1 + labelWidth, top, titleAreaWidth - titleIconSize - titleIconGap, 34);
             txtTitle.TextChanged += AnyValueChanged;
             body.Controls.Add(txtTitle);
+
+            btnCadTitleText = new OVIA.Desktop.Controls.OviaButton();
+            btnCadTitleText.Text = "\uF87C";
+            btnCadTitleText.Role = OVIA.Desktop.OviaButtonRole.Neutral;
+            btnCadTitleText.MinimumSize = new Size(titleIconSize, titleIconSize);
+            btnCadTitleText.Size = new Size(titleIconSize, titleIconSize);
+            btnCadTitleText.Location = new Point(left1 + labelWidth + titleAreaWidth - titleIconSize, top);
+            btnCadTitleText.Font = OviaIconFont.Create(13.5F, FontStyle.Regular);
+            btnCadTitleText.TabStop = true;
+            btnCadTitleText.AccessibleName = "CAD에서 제목 텍스트 가져오기";
+            btnCadTitleText.Click += BtnCadTitleText_Click;
+            body.Controls.Add(btnCadTitleText);
+
+            cadTitleToolTip = new ToolTip();
+            cadTitleToolTip.SetToolTip(btnCadTitleText, "CAD에서 제목 텍스트 가져오기");
+
+            cadTitleResultTimer = new Timer();
+            cadTitleResultTimer.Interval = 250;
+            cadTitleResultTimer.Tick += CadTitleResultTimer_Tick;
 
             top += rowHeight;
             AddComboPair(body, "작성", ref cboWrite, writes, summary.WriteStatus, left1, top, labelWidth, itemWidth, "동", ref cboBuilding, buildings, summary.Building, left2, top);
@@ -3127,12 +3164,228 @@ namespace OVIA.Desktop
             this.Controls.Add(btnCancel);
 
             btnOk = new OVIA.Desktop.Controls.OviaButton();
-            btnOk.Text = "확인";
+            btnOk.Text = "저장";
             btnOk.Role = OVIA.Desktop.OviaButtonRole.Primary;
             btnOk.Size = OviaFluentTheme.MeasureButtonSize(btnOk.Text);
             btnOk.Location = new Point((this.ClientSize.Width / 2) + 8, 500);
             btnOk.Click += BtnOk_Click;
             this.Controls.Add(btnOk);
+        }
+
+        private void BtnCadTitleText_Click(object sender, EventArgs e)
+        {
+            if (cadTitleRequestPending)
+            {
+                return;
+            }
+
+            string requestToken;
+            string errorMessage;
+
+            if (!OviaCadTitleTextBridge.TryBeginRequest(out requestToken, out errorMessage))
+            {
+                MessageBox.Show(
+                    errorMessage,
+                    "OVIA CAD 제목 가져오기",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                return;
+            }
+
+            pendingCadTitleRequestToken = requestToken;
+            cadTitleRequestStartedAt = DateTime.Now;
+            cadTitleRequestPending = true;
+            SetCadTitleButtonWaiting(true);
+
+            if (cadTitleResultTimer != null)
+            {
+                cadTitleResultTimer.Start();
+            }
+
+            System.Threading.Thread commandThread = new System.Threading.Thread(
+                delegate()
+                {
+                    string commandError;
+                    bool success = OviaCadTitleTextBridge.TrySendAutoCadCommand("OVIATITLETEXT", out commandError);
+
+                    try
+                    {
+                        this.BeginInvoke(new MethodInvoker(delegate
+                        {
+                            if (this.IsDisposed || !cadTitleRequestPending)
+                            {
+                                return;
+                            }
+
+                            if (!success)
+                            {
+                                FinishCadTitleRequest();
+                                OviaCadTitleTextBridge.CleanupRequestFiles();
+                                MessageBox.Show(
+                                    commandError,
+                                    "OVIA CAD 제목 가져오기",
+                                    MessageBoxButtons.OK,
+                                    MessageBoxIcon.Warning
+                                );
+                                return;
+                            }
+
+                            OviaCadTitleTextBridge.BringAutoCadToFront();
+                        }));
+                    }
+                    catch
+                    {
+                    }
+                }
+            );
+
+            commandThread.IsBackground = true;
+            commandThread.SetApartmentState(System.Threading.ApartmentState.STA);
+            commandThread.Start();
+        }
+
+        private void CadTitleResultTimer_Tick(object sender, EventArgs e)
+        {
+            if (!cadTitleRequestPending)
+            {
+                return;
+            }
+
+            if (cadTitleRequestStartedAt != DateTime.MinValue
+                && DateTime.Now - cadTitleRequestStartedAt > TimeSpan.FromMinutes(5))
+            {
+                FinishCadTitleRequest();
+                OviaCadTitleTextBridge.CleanupRequestFiles();
+                MessageBox.Show(
+                    "CAD 텍스트 선택 시간이 초과되었습니다. 다시 시도해 주세요.",
+                    "OVIA CAD 제목 가져오기",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                return;
+            }
+
+            string status;
+            string titleText;
+            string readError;
+
+            if (!OviaCadTitleTextBridge.TryReadResult(
+                pendingCadTitleRequestToken,
+                out status,
+                out titleText,
+                out readError))
+            {
+                return;
+            }
+
+            FinishCadTitleRequest();
+            OviaCadTitleTextBridge.CleanupRequestFiles();
+
+            if (string.Equals(status, "OK", StringComparison.OrdinalIgnoreCase))
+            {
+                string normalizedTitle = OviaCadTitleTextBridge.NormalizeTitle(titleText);
+                if (normalizedTitle == "")
+                {
+                    MessageBox.Show(
+                        "선택한 객체에서 제목 텍스트를 읽지 못했습니다. TEXT 또는 MTEXT를 선택해 주세요.",
+                        "OVIA CAD 제목 가져오기",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning
+                    );
+                    RestoreDialogAfterCadSelection();
+                    return;
+                }
+
+                txtTitle.Text = normalizedTitle;
+                txtTitle.Focus();
+                RestoreDialogAfterCadSelection();
+                return;
+            }
+
+            if (string.Equals(status, "CANCEL", StringComparison.OrdinalIgnoreCase))
+            {
+                RestoreDialogAfterCadSelection();
+                return;
+            }
+
+            MessageBox.Show(
+                readError == "" ? "CAD에서 제목 텍스트를 가져오지 못했습니다." : readError,
+                "OVIA CAD 제목 가져오기",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning
+            );
+            RestoreDialogAfterCadSelection();
+        }
+
+        private void SetCadTitleButtonWaiting(bool waiting)
+        {
+            if (btnCadTitleText == null)
+            {
+                return;
+            }
+
+            btnCadTitleText.Enabled = !waiting;
+            btnCadTitleText.Cursor = waiting ? Cursors.WaitCursor : Cursors.Hand;
+            btnCadTitleText.Text = waiting ? "…" : "T";
+
+            if (cadTitleToolTip != null)
+            {
+                cadTitleToolTip.SetToolTip(
+                    btnCadTitleText,
+                    waiting ? "AutoCAD에서 텍스트를 선택한 후 Enter를 누르세요" : "CAD에서 제목 텍스트 가져오기"
+                );
+            }
+        }
+
+        private void FinishCadTitleRequest()
+        {
+            cadTitleRequestPending = false;
+            pendingCadTitleRequestToken = "";
+            cadTitleRequestStartedAt = DateTime.MinValue;
+
+            if (cadTitleResultTimer != null)
+            {
+                cadTitleResultTimer.Stop();
+            }
+
+            SetCadTitleButtonWaiting(false);
+        }
+
+        private void RestoreDialogAfterCadSelection()
+        {
+            try
+            {
+                if (this.WindowState == FormWindowState.Minimized)
+                {
+                    this.WindowState = FormWindowState.Normal;
+                }
+
+                this.Show();
+                this.BringToFront();
+                this.Activate();
+            }
+            catch
+            {
+            }
+        }
+
+        private void OviaBarListEditDialog_FormClosed(object sender, FormClosedEventArgs e)
+        {
+            if (cadTitleResultTimer != null)
+            {
+                cadTitleResultTimer.Stop();
+                cadTitleResultTimer.Dispose();
+                cadTitleResultTimer = null;
+            }
+
+            if (cadTitleToolTip != null)
+            {
+                cadTitleToolTip.Dispose();
+                cadTitleToolTip = null;
+            }
+
+            OviaCadTitleTextBridge.CleanupRequestFiles();
         }
 
         private void Body_Paint(object sender, PaintEventArgs e)
@@ -3344,6 +3597,240 @@ namespace OVIA.Desktop
             this.DialogResult = DialogResult.OK;
             Close();
         }
+    }
+
+
+    internal static class OviaCadTitleTextBridge
+    {
+        private const string RequestFileName = "cad_title_text.request";
+        private const string ResultFileName = "cad_title_text.result";
+
+        public static bool TryBeginRequest(out string requestToken, out string errorMessage)
+        {
+            requestToken = "";
+            errorMessage = "";
+
+            try
+            {
+                string bridgeDirectory = GetBridgeDirectory();
+                Directory.CreateDirectory(bridgeDirectory);
+                CleanupRequestFiles();
+
+                requestToken = Guid.NewGuid().ToString("N");
+                File.WriteAllText(GetRequestFilePath(), requestToken, new UTF8Encoding(false));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                errorMessage = "CAD 제목 추출 요청 파일을 만들지 못했습니다.\r\n\r\n상세: " + ex.Message;
+                return false;
+            }
+        }
+
+        public static bool TrySendAutoCadCommand(string command, out string errorMessage)
+        {
+            errorMessage = "";
+
+            if (command == null || command.Trim() == "")
+            {
+                errorMessage = "실행할 AutoCAD 명령이 지정되지 않았습니다.";
+                return false;
+            }
+
+            object autoCadApplication = null;
+            object activeDocument = null;
+
+            try
+            {
+                autoCadApplication = Marshal.GetActiveObject("AutoCAD.Application");
+                if (autoCadApplication == null)
+                {
+                    errorMessage = "실행 중인 AutoCAD에 연결하지 못했습니다. AutoCAD와 DWG 도면을 연 뒤 다시 시도해 주세요.";
+                    return false;
+                }
+
+                activeDocument = autoCadApplication.GetType().InvokeMember(
+                    "ActiveDocument",
+                    BindingFlags.GetProperty,
+                    null,
+                    autoCadApplication,
+                    null
+                );
+
+                if (activeDocument == null)
+                {
+                    errorMessage = "AutoCAD에서 활성 도면을 찾지 못했습니다. DWG 도면을 연 뒤 다시 시도해 주세요.";
+                    return false;
+                }
+
+                activeDocument.GetType().InvokeMember(
+                    "SendCommand",
+                    BindingFlags.InvokeMethod,
+                    null,
+                    activeDocument,
+                    new object[] { command.Trim() + "\r" }
+                );
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Exception detail = ex is TargetInvocationException && ex.InnerException != null
+                    ? ex.InnerException
+                    : ex;
+
+                errorMessage = "AutoCAD 제목 추출 명령을 실행하지 못했습니다. 최신 OVIA AutoCAD 플러그인을 NETLOAD했는지 확인해 주세요.\r\n\r\n상세: " + detail.Message;
+                return false;
+            }
+        }
+
+        public static bool TryReadResult(string requestToken, out string status, out string titleText, out string errorMessage)
+        {
+            status = "";
+            titleText = "";
+            errorMessage = "";
+
+            string resultPath = GetResultFilePath();
+            if (!File.Exists(resultPath))
+            {
+                return false;
+            }
+
+            try
+            {
+                string[] lines = File.ReadAllLines(resultPath, Encoding.UTF8);
+                if (lines.Length < 3)
+                {
+                    return false;
+                }
+
+                string resultToken = lines[0] == null ? "" : lines[0].Trim();
+                if (!string.Equals(resultToken, requestToken, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                status = lines[1] == null ? "" : lines[1].Trim();
+                string encodedText = lines[2] == null ? "" : lines[2].Trim();
+
+                if (encodedText != "")
+                {
+                    byte[] bytes = Convert.FromBase64String(encodedText);
+                    titleText = Encoding.UTF8.GetString(bytes);
+                }
+
+                if (lines.Length >= 4 && lines[3] != null && lines[3].Trim() != "")
+                {
+                    byte[] errorBytes = Convert.FromBase64String(lines[3].Trim());
+                    errorMessage = Encoding.UTF8.GetString(errorBytes);
+                }
+
+                return true;
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return false;
+            }
+            catch (Exception ex)
+            {
+                status = "ERROR";
+                errorMessage = "CAD 제목 추출 결과를 읽지 못했습니다.\r\n\r\n상세: " + ex.Message;
+                return true;
+            }
+        }
+
+        public static string NormalizeTitle(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return "";
+            }
+
+            string normalized = value
+                .Replace("\\P", " ")
+                .Replace("\r", " ")
+                .Replace("\n", " ")
+                .Replace("\t", " ");
+
+            while (normalized.Contains("  "))
+            {
+                normalized = normalized.Replace("  ", " ");
+            }
+
+            return normalized.Trim();
+        }
+
+        public static void BringAutoCadToFront()
+        {
+            try
+            {
+                Process[] processes = Process.GetProcessesByName("acad");
+                if (processes == null)
+                {
+                    return;
+                }
+
+                int i;
+                for (i = 0; i < processes.Length; i++)
+                {
+                    if (processes[i].MainWindowHandle != IntPtr.Zero)
+                    {
+                        SetForegroundWindow(processes[i].MainWindowHandle);
+                        return;
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        public static void CleanupRequestFiles()
+        {
+            TryDelete(GetRequestFilePath());
+            TryDelete(GetResultFilePath());
+            TryDelete(GetResultFilePath() + ".tmp");
+        }
+
+        private static string GetBridgeDirectory()
+        {
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "OVIA",
+                "Bridge"
+            );
+        }
+
+        private static string GetRequestFilePath()
+        {
+            return Path.Combine(GetBridgeDirectory(), RequestFileName);
+        }
+
+        private static string GetResultFilePath()
+        {
+            return Path.Combine(GetBridgeDirectory(), ResultFileName);
+        }
+
+        private static void TryDelete(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
     }
 
 
