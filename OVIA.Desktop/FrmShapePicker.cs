@@ -21,16 +21,14 @@ namespace OVIA.Desktop
         private readonly CadShapeEditDocument workingDocument;
         private CadShapeEditorControl editor;
         private DataGridView textGrid;
-        private Label lblMode;
         private Label lblSelectionType;
         private Label lblSelectionId;
         private Label lblStatistics;
-        private Label lblStatus;
         private TextBox txtSelectedText;
         private NumericUpDown numRotation;
-        private CheckBox chkSnap;
         private Button btnSelectMode;
         private Button btnLineMode;
+        private Button btnCircleMode;
         private Button btnTextMode;
         private Button btnUndo;
         private Button btnRedo;
@@ -39,8 +37,11 @@ namespace OVIA.Desktop
         private Button btnUpdateText;
         private Button btnApply;
         private Button btnCancel;
+        private Button btnHelp;
         private bool suppressUiEvents;
         private bool textGridCommitInProgress;
+        private OviaWindowCaptionTheme captionTheme;
+        private ToolTip toolTip;
 
         public RebarShapeInfo SelectedShape { get; private set; }
         public bool SelectedCadShapeOriginal { get; private set; }
@@ -120,148 +121,139 @@ namespace OVIA.Desktop
             MinimizeBox = true;
             MinimumSize = new Size(1180, 720);
             ClientSize = new Size(1440, 860);
-            BackColor = Color.FromArgb(244, 246, 250);
+            BackColor = OviaFluentTheme.AppBackground;
             Font = OviaFluentTheme.FontKorean(9F, FontStyle.Regular);
             KeyPreview = true;
-
-            Panel header = new Panel();
-            header.Dock = DockStyle.Top;
-            header.Height = 82;
-            header.BackColor = Color.White;
-            header.Padding = new Padding(16, 10, 16, 8);
-            Controls.Add(header);
-
-            Label title = new Label();
-            title.Text = isManualDocument ? "철근 형상 직접 작성·수정" : "CAD 철근 형상 확인·수정";
-            title.Font = OviaFluentTheme.FontKorean(15F, FontStyle.Bold);
-            title.AutoSize = true;
-            title.Location = new Point(16, 10);
-            header.Controls.Add(title);
-
-            Label subtitle = new Label();
-            subtitle.Text = isManualDocument
-                ? "형상번호 없이 빈 캔버스에서 선과 문자를 직접 작성합니다. 작성한 방향 그대로 저장됩니다."
-                : "형상번호를 선택하지 않습니다. CAD 도면의 방향과 연결 구조를 그대로 유지하면서 누락·오인식된 선과 문자를 직접 보정합니다.";
-            subtitle.ForeColor = Color.FromArgb(92, 101, 116);
-            subtitle.AutoSize = true;
-            subtitle.Location = new Point(18, 42);
-            header.Controls.Add(subtitle);
+            toolTip = new ToolTip();
 
             Panel toolbar = new Panel();
             toolbar.Dock = DockStyle.Top;
-            toolbar.Height = 54;
+            toolbar.Height = 90;
             toolbar.BackColor = Color.FromArgb(248, 249, 252);
-            toolbar.Padding = new Padding(12, 10, 12, 8);
+            toolbar.Padding = new Padding(12, 6, 12, 6);
             Controls.Add(toolbar);
 
-            FlowLayoutPanel toolFlow = new FlowLayoutPanel();
-            toolFlow.Dock = DockStyle.Fill;
-            toolFlow.WrapContents = false;
-            toolFlow.AutoScroll = true;
-            toolFlow.FlowDirection = FlowDirection.LeftToRight;
-            toolbar.Controls.Add(toolFlow);
+            TableLayoutPanel toolbarRows = new TableLayoutPanel();
+            toolbarRows.Dock = DockStyle.Fill;
+            toolbarRows.ColumnCount = 1;
+            toolbarRows.RowCount = 2;
+            toolbarRows.Margin = new Padding(0);
+            toolbarRows.Padding = new Padding(0);
+            toolbarRows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            toolbarRows.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
+            toolbarRows.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
+            toolbar.Controls.Add(toolbarRows);
 
-            btnSelectMode = CreateToolbarButton("선택·이동", 92, BtnSelectMode_Click);
-            btnLineMode = CreateToolbarButton("선 추가", 78, BtnLineMode_Click);
-            btnTextMode = CreateToolbarButton("문자 추가", 82, BtnTextMode_Click);
-            btnDelete = CreateToolbarButton("선택 삭제", 86, BtnDelete_Click);
-            btnSplit = CreateToolbarButton("선 분할", 74, BtnSplit_Click);
-            btnUndo = CreateToolbarButton("실행 취소", 86, BtnUndo_Click);
-            btnRedo = CreateToolbarButton("다시 실행", 86, BtnRedo_Click);
-            Button btnHorizontal = CreateToolbarButton("수평 맞춤", 86, BtnHorizontal_Click);
-            Button btnVertical = CreateToolbarButton("수직 맞춤", 86, BtnVertical_Click);
-            Button btnFit = CreateToolbarButton("화면 맞춤", 86, BtnFit_Click);
-            Button btnZoomIn = CreateToolbarButton("확대", 62, BtnZoomIn_Click);
-            Button btnZoomOut = CreateToolbarButton("축소", 62, BtnZoomOut_Click);
-            Button btnRestore = CreateToolbarButton(isManualDocument ? "초기 형상 복원" : "CAD 원본 복원", 112, BtnRestore_Click);
+            FlowLayoutPanel primaryToolFlow = CreateToolbarFlowPanel();
+            FlowLayoutPanel secondaryToolFlow = CreateToolbarFlowPanel();
+            toolbarRows.Controls.Add(primaryToolFlow, 0, 0);
+            toolbarRows.Controls.Add(secondaryToolFlow, 0, 1);
 
-            toolFlow.Controls.Add(btnSelectMode);
-            toolFlow.Controls.Add(btnLineMode);
-            toolFlow.Controls.Add(btnTextMode);
-            toolFlow.Controls.Add(CreateToolbarSeparator());
-            toolFlow.Controls.Add(btnDelete);
-            toolFlow.Controls.Add(btnSplit);
-            toolFlow.Controls.Add(btnUndo);
-            toolFlow.Controls.Add(btnRedo);
-            toolFlow.Controls.Add(CreateToolbarSeparator());
-            toolFlow.Controls.Add(btnHorizontal);
-            toolFlow.Controls.Add(btnVertical);
-            toolFlow.Controls.Add(btnFit);
-            toolFlow.Controls.Add(btnZoomIn);
-            toolFlow.Controls.Add(btnZoomOut);
-            toolFlow.Controls.Add(CreateToolbarSeparator());
-            toolFlow.Controls.Add(btnRestore);
+            btnSelectMode = CreateToolbarButton("선택·이동", "\uE762", 104, BtnSelectMode_Click, "요소를 선택하거나 이동하고, 빈 공간을 드래그하여 여러 요소를 선택합니다.");
+            btnLineMode = CreateToolbarButton("선 추가", "\uE710", 88, BtnLineMode_Click, "연속 선을 추가합니다. 기존 선 끝점 가까이에서는 자동으로 연결됩니다.");
+            btnCircleMode = CreateToolbarButton("원 추가", "\uEA3A", 88, BtnCircleMode_Click, "중심점과 반지름 지점을 차례로 클릭하여 원을 추가합니다.");
+            btnTextMode = CreateToolbarButton("문자 추가", "\uE8D2", 94, BtnTextMode_Click, "문자 또는 치수값을 추가하고 즉시 값을 입력합니다.");
+            btnDelete = CreateToolbarButton("선택 삭제", "\uE74D", 98, BtnDelete_Click, "선택한 요소를 삭제합니다. Delete 키도 사용할 수 있습니다.");
+            btnSplit = CreateToolbarButton("선 분할", "\uE8C6", 88, BtnSplit_Click, "선택한 선을 가운데 지점에서 두 개로 분할합니다.");
+            btnUndo = CreateToolbarButton("실행 취소", "\uE7A7", 98, BtnUndo_Click, "마지막 수정 작업을 취소합니다. Ctrl+Z");
+            btnRedo = CreateToolbarButton("다시 실행", "\uE7A6", 98, BtnRedo_Click, "취소한 작업을 다시 실행합니다. Ctrl+Y");
+            Button btnHorizontal = CreateToolbarButton("수평 맞춤", "\uE8E4", 98, BtnHorizontal_Click, "선택한 선을 수평으로 맞춥니다.");
+            Button btnVertical = CreateToolbarButton("수직 맞춤", "\uE8E3", 98, BtnVertical_Click, "선택한 선을 수직으로 맞춥니다.");
+            Button btnFit = CreateToolbarButton("화면 맞춤", "\uE9A6", 98, BtnFit_Click, "형상을 기본 50% 비율로 중앙에 맞춥니다.");
+            Button btnZoomIn = CreateToolbarButton("확대", "\uE8A3", 74, BtnZoomIn_Click, "형상과 문자·치수값을 함께 확대합니다.");
+            Button btnZoomOut = CreateToolbarButton("축소", "\uE71F", 74, BtnZoomOut_Click, "형상과 문자·치수값을 함께 축소합니다.");
+            Button btnRestore = CreateToolbarButton(isManualDocument ? "초기 형상 복원" : "CAD 원본 복원", "\uE777", 132, BtnRestore_Click, "현재 편집 내용을 취소하고 최초 형상으로 복원합니다.");
 
-            chkSnap = new CheckBox();
-            chkSnap.Text = "15도 스냅";
-            chkSnap.Checked = true;
-            chkSnap.AutoSize = true;
-            chkSnap.Margin = new Padding(14, 8, 4, 0);
-            chkSnap.CheckedChanged += ChkSnap_CheckedChanged;
-            toolFlow.Controls.Add(chkSnap);
+            primaryToolFlow.Controls.Add(btnSelectMode);
+            primaryToolFlow.Controls.Add(btnLineMode);
+            primaryToolFlow.Controls.Add(btnCircleMode);
+            primaryToolFlow.Controls.Add(btnTextMode);
+            primaryToolFlow.Controls.Add(CreateToolbarSeparator());
+            primaryToolFlow.Controls.Add(btnDelete);
+            primaryToolFlow.Controls.Add(btnSplit);
+            primaryToolFlow.Controls.Add(btnUndo);
+            primaryToolFlow.Controls.Add(btnRedo);
 
-            lblMode = new Label();
-            lblMode.AutoSize = true;
-            lblMode.ForeColor = Color.FromArgb(64, 76, 94);
-            lblMode.Font = OviaFluentTheme.FontKorean(9F, FontStyle.Bold);
-            lblMode.Margin = new Padding(18, 9, 0, 0);
-            toolFlow.Controls.Add(lblMode);
+            secondaryToolFlow.Controls.Add(btnHorizontal);
+            secondaryToolFlow.Controls.Add(btnVertical);
+            secondaryToolFlow.Controls.Add(btnFit);
+            secondaryToolFlow.Controls.Add(btnZoomIn);
+            secondaryToolFlow.Controls.Add(btnZoomOut);
+            secondaryToolFlow.Controls.Add(CreateToolbarSeparator());
+            secondaryToolFlow.Controls.Add(btnRestore);
 
             Panel bottom = new Panel();
             bottom.Dock = DockStyle.Bottom;
-            bottom.Height = 58;
+            bottom.Height = 62;
             bottom.BackColor = Color.White;
-            bottom.Padding = new Padding(16, 10, 16, 10);
+            bottom.Padding = new Padding(16, 12, 16, 12);
             Controls.Add(bottom);
 
-            lblStatus = new Label();
-            lblStatus.Dock = DockStyle.Fill;
-            lblStatus.TextAlign = ContentAlignment.MiddleLeft;
-            lblStatus.ForeColor = Color.FromArgb(92, 101, 116);
-            bottom.Controls.Add(lblStatus);
+            FlowLayoutPanel bottomLeft = new FlowLayoutPanel();
+            bottomLeft.Dock = DockStyle.Left;
+            bottomLeft.AutoSize = true;
+            bottomLeft.WrapContents = false;
+            bottomLeft.FlowDirection = FlowDirection.LeftToRight;
+            bottomLeft.Margin = new Padding(0);
+            bottomLeft.Padding = new Padding(0);
+            bottom.Controls.Add(bottomLeft);
 
-            btnCancel = new Button();
+            btnHelp = new OVIA.Desktop.Controls.OviaButton();
+            btnHelp.Text = "도움말";
+            btnHelp.Margin = new Padding(0);
+            btnHelp.Click += BtnHelp_Click;
+            OviaFluentTheme.ApplyButton(btnHelp, OviaButtonRole.Neutral);
+            OviaFluentTheme.FitButtonSize(btnHelp);
+            bottomLeft.Controls.Add(btnHelp);
+
+            FlowLayoutPanel bottomRight = new FlowLayoutPanel();
+            bottomRight.Dock = DockStyle.Right;
+            bottomRight.AutoSize = true;
+            bottomRight.WrapContents = false;
+            bottomRight.FlowDirection = FlowDirection.LeftToRight;
+            bottomRight.Margin = new Padding(0);
+            bottomRight.Padding = new Padding(0);
+            bottom.Controls.Add(bottomRight);
+
+            btnCancel = new OVIA.Desktop.Controls.OviaButton();
             btnCancel.Text = "취소";
-            btnCancel.Dock = DockStyle.Right;
-            btnCancel.Width = 92;
-            btnCancel.Margin = new Padding(8, 0, 0, 0);
+            btnCancel.Margin = new Padding(0, 0, 10, 0);
             btnCancel.Click += BtnCancel_Click;
-            bottom.Controls.Add(btnCancel);
+            OviaFluentTheme.ApplyButton(btnCancel, OviaButtonRole.Neutral);
+            OviaFluentTheme.FitButtonSize(btnCancel);
+            bottomRight.Controls.Add(btnCancel);
 
-            btnApply = new Button();
+            btnApply = new OVIA.Desktop.Controls.OviaButton();
             btnApply.Text = "수정 적용";
-            btnApply.Dock = DockStyle.Right;
-            btnApply.Width = 108;
-            btnApply.BackColor = Color.FromArgb(18, 103, 206);
-            btnApply.ForeColor = Color.White;
-            btnApply.FlatStyle = FlatStyle.Flat;
-            btnApply.FlatAppearance.BorderSize = 0;
+            btnApply.Margin = new Padding(0);
             btnApply.Click += BtnApply_Click;
-            bottom.Controls.Add(btnApply);
+            OviaFluentTheme.ApplyButton(btnApply, OviaButtonRole.Primary);
+            OviaFluentTheme.FitButtonSize(btnApply);
+            bottomRight.Controls.Add(btnApply);
 
             SplitContainer split = new SplitContainer();
             split.Dock = DockStyle.Fill;
             split.FixedPanel = FixedPanel.Panel2;
-            split.IsSplitterFixed = false;
-            split.SplitterWidth = 6;
-            split.SplitterDistance = 1080;
-            split.Panel1.Padding = new Padding(14, 12, 6, 12);
-            split.Panel2.Padding = new Padding(6, 12, 14, 12);
-            split.BackColor = Color.FromArgb(224, 229, 237);
+            split.IsSplitterFixed = true;
+            split.SplitterWidth = 1;
+            split.BorderStyle = BorderStyle.None;
+            split.Panel1.Padding = new Padding(0);
+            split.Panel2.Padding = new Padding(0);
+            split.BackColor = Color.FromArgb(250, 251, 253);
             Controls.Add(split);
             split.SendToBack();
             toolbar.BringToFront();
-            header.BringToFront();
             bottom.BringToFront();
 
             Panel editorFrame = new Panel();
             editorFrame.Dock = DockStyle.Fill;
-            editorFrame.BackColor = Color.White;
-            editorFrame.BorderStyle = BorderStyle.FixedSingle;
+            editorFrame.BackColor = Color.FromArgb(250, 251, 253);
+            editorFrame.BorderStyle = BorderStyle.None;
             split.Panel1.Controls.Add(editorFrame);
 
             editor = new CadShapeEditorControl();
             editor.Dock = DockStyle.Fill;
+            editor.Margin = new Padding(0);
             editor.SelectionChanged += Editor_SelectionChanged;
             editor.DocumentChanged += Editor_DocumentChanged;
             editor.ModeChanged += Editor_ModeChanged;
@@ -269,8 +261,10 @@ namespace OVIA.Desktop
             editorFrame.Controls.Add(editor);
 
             BuildRightPanel(split.Panel2);
+            split.Panel2Collapsed = true;
+            captionTheme = OviaWindowCaptionTheme.Attach(this);
 
-            // Enter/Esc는 편집 캔버스의 연속 선 그리기 종료·취소에 사용하므로
+            // Enter/Esc는 편집 캔버스의 선·원 작성 종료와 문자값 입력에 사용하므로
             // Form의 AcceptButton/CancelButton으로 가로채지 않습니다.
         }
 
@@ -338,7 +332,7 @@ namespace OVIA.Desktop
             selectedGroup.Controls.Add(numRotation);
 
             Label selectedHelp = new Label();
-            selectedHelp.Text = "문자는 캔버스에서 더블클릭하거나 아래 현재값 셀을 클릭해 수정합니다. 선은 양 끝점 핸들을 끌어 보정합니다.";
+            selectedHelp.Text = "문자·치수는 캔버스에서 더블클릭하여 직접 수정합니다. 선 끝점 바깥 원형 핸들은 회전, 원의 십자 핸들은 크기 조절입니다.";
             selectedHelp.ForeColor = Color.FromArgb(103, 112, 126);
             selectedHelp.Location = new Point(18, 153);
             selectedHelp.Size = new Size(290, 30);
@@ -421,18 +415,210 @@ namespace OVIA.Desktop
             right.Controls.Add(policy, 0, 3);
         }
 
-        private Button CreateToolbarButton(string text, int width, EventHandler clickHandler)
+        private FlowLayoutPanel CreateToolbarFlowPanel()
+        {
+            FlowLayoutPanel flow = new FlowLayoutPanel();
+            flow.Dock = DockStyle.Fill;
+            flow.WrapContents = false;
+            flow.AutoScroll = false;
+            flow.FlowDirection = FlowDirection.LeftToRight;
+            flow.Margin = new Padding(0);
+            flow.Padding = new Padding(0, 1, 0, 1);
+            return flow;
+        }
+
+        private Button CreateToolbarButton(string text, string iconGlyph, int width, EventHandler clickHandler, string helpText)
         {
             Button button = new Button();
             button.Text = text;
-            button.Width = width;
-            button.Height = 31;
-            button.Margin = new Padding(3, 0, 3, 0);
+            button.Tag = iconGlyph == null ? "" : iconGlyph;
+            button.Height = 34;
+            button.Margin = new Padding(3, 1, 3, 1);
+            button.AutoSize = false;
+            button.AutoEllipsis = false;
+            button.UseCompatibleTextRendering = false;
             button.FlatStyle = FlatStyle.Flat;
             button.FlatAppearance.BorderColor = Color.FromArgb(197, 203, 213);
+            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(246, 248, 251);
             button.BackColor = Color.White;
+            button.ForeColor = Color.FromArgb(35, 43, 57);
+            button.Font = OviaFluentTheme.FontButton(9F, FontStyle.Bold);
+            button.TextImageRelation = TextImageRelation.ImageBeforeText;
+            button.ImageAlign = ContentAlignment.MiddleCenter;
+            button.TextAlign = ContentAlignment.MiddleCenter;
+            button.Padding = new Padding(8, 0, 8, 0);
+
+            Size textSize = TextRenderer.MeasureText(
+                text == null ? "" : text,
+                button.Font,
+                new Size(int.MaxValue, button.Height),
+                TextFormatFlags.SingleLine | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix
+            );
+            const int iconWidth = 18;
+            const int iconTextGap = 7;
+            const int horizontalPadding = 20;
+            int balancedWidth = iconWidth + iconTextGap + textSize.Width + horizontalPadding;
+            button.Width = Math.Max(Math.Max(72, width), balancedWidth);
+
+            ApplyToolbarButtonIcon(button, button.ForeColor);
             button.Click += clickHandler;
+
+            if (toolTip != null && helpText != null && helpText.Trim() != "")
+            {
+                toolTip.SetToolTip(button, helpText);
+            }
+
             return button;
+        }
+
+        private void ApplyToolbarButtonIcon(Button button, Color color)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            Image oldImage = button.Image;
+            string glyph = button.Tag == null ? "" : button.Tag.ToString();
+            button.Image = CreateToolbarIcon(glyph, color);
+
+            if (oldImage != null)
+            {
+                oldImage.Dispose();
+            }
+        }
+
+        private Image CreateToolbarIcon(string glyph, Color color)
+        {
+            Bitmap bitmap = new Bitmap(18, 18);
+
+            using (Graphics graphics = Graphics.FromImage(bitmap))
+            using (Font iconFont = OviaIconFont.Create(11.5F, FontStyle.Regular))
+            using (SolidBrush brush = new SolidBrush(color))
+            {
+                graphics.Clear(Color.Transparent);
+                graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                SizeF size = graphics.MeasureString(glyph == null ? "" : glyph, iconFont);
+                graphics.DrawString(
+                    glyph == null ? "" : glyph,
+                    iconFont,
+                    brush,
+                    (18F - size.Width) / 2F,
+                    (18F - size.Height) / 2F
+                );
+            }
+
+            return bitmap;
+        }
+
+        private void BtnHelp_Click(object sender, EventArgs e)
+        {
+            ShowEditorHelp();
+        }
+
+        private void ShowEditorHelp()
+        {
+            using (Form helpForm = new Form())
+            {
+                helpForm.Text = "철근 형상 편집 도움말";
+                helpForm.StartPosition = FormStartPosition.CenterParent;
+                helpForm.FormBorderStyle = FormBorderStyle.Sizable;
+                helpForm.MinimizeBox = false;
+                helpForm.MaximizeBox = false;
+                helpForm.MinimumSize = new Size(620, 500);
+                helpForm.ClientSize = new Size(700, 610);
+                helpForm.BackColor = OviaFluentTheme.AppBackground;
+                helpForm.Font = OviaFluentTheme.FontKorean(9F, FontStyle.Regular);
+
+                Panel scrollPanel = new Panel();
+                scrollPanel.Dock = DockStyle.Fill;
+                scrollPanel.AutoScroll = true;
+                scrollPanel.Padding = new Padding(20, 18, 20, 24);
+                scrollPanel.BackColor = Color.White;
+                helpForm.Controls.Add(scrollPanel);
+
+                TableLayoutPanel helpLayout = new TableLayoutPanel();
+                helpLayout.Dock = DockStyle.Top;
+                helpLayout.AutoSize = true;
+                helpLayout.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+                helpLayout.ColumnCount = 1;
+                helpLayout.RowCount = 1;
+                helpLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+                helpLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                helpLayout.Padding = new Padding(0, 0, 0, 12);
+                scrollPanel.Controls.Add(helpLayout);
+
+                Label intro = new Label();
+                intro.AutoSize = true;
+                intro.MaximumSize = new Size(620, 0);
+                intro.Font = OviaFluentTheme.FontKorean(11F, FontStyle.Bold);
+                intro.ForeColor = Color.FromArgb(32, 41, 56);
+                intro.Text = "철근 형상 확인·수정 기능 안내";
+                intro.Margin = new Padding(0, 0, 0, 14);
+                helpLayout.Controls.Add(intro, 0, 0);
+
+                AddHelpSection(helpLayout, "선택과 이동",
+                    "요소를 클릭하면 선택됩니다. 빈 공간을 드래그하면 사각영역 안의 선·원·문자·치수를 한꺼번에 선택할 수 있습니다. Ctrl+A는 전체 선택이며, 선택된 요소를 드래그하면 함께 이동합니다.");
+                AddHelpSection(helpLayout, "선·원·문자 추가",
+                    "선 추가는 시작점과 끝점을 순서대로 지정합니다. 원 추가는 중심점과 반지름 위치를 지정합니다. 문자 추가 후 위치를 클릭하면 바로 값을 입력할 수 있습니다. 선 끝점 가까이에서는 자동으로 연결됩니다.");
+                AddHelpSection(helpLayout, "문자와 수치 수정",
+                    "문자 또는 치수값을 더블클릭하거나 선택 후 F2·Enter를 누르면 값을 수정할 수 있습니다. Enter는 적용, Esc는 현재 입력 취소입니다.");
+                AddHelpSection(helpLayout, "회전과 크기 조절",
+                    "선 끝점 바깥의 회전 핸들을 드래그하면 자유 각도로 회전합니다. 원은 원 둘레를 클릭하여 전체 선택한 뒤 십자 핸들을 드래그하면 크기를 조절할 수 있습니다.");
+                AddHelpSection(helpLayout, "캔버스 보기",
+                    "가운데 마우스 버튼을 누른 채 드래그하면 캔버스를 이동합니다. Ctrl+마우스 휠 또는 상단 확대·축소 버튼으로 형상과 문자 크기를 함께 조절합니다. 화면 맞춤은 형상을 중앙에 배치합니다.");
+                AddHelpSection(helpLayout, "작업 취소와 삭제",
+                    "Ctrl+Z는 실행 취소, Ctrl+Y는 다시 실행입니다. Delete는 선택 요소 삭제, Esc 또는 마우스 우클릭은 현재 선·원 작성이나 선택 작업을 종료합니다.");
+                AddHelpSection(helpLayout, "수정 적용",
+                    "수정 적용을 누르면 편집한 형상과 문자·치수값이 BarList 철근형상 셀에 반영됩니다. 취소를 누르면 현재 창에서 변경한 내용은 적용하지 않습니다.");
+
+                using (OviaWindowCaptionTheme helpCaptionTheme = OviaWindowCaptionTheme.Attach(helpForm))
+                {
+                    helpForm.ShowDialog(this);
+                }
+            }
+        }
+
+        private void AddHelpSection(TableLayoutPanel layout, string title, string description)
+        {
+            Panel section = new Panel();
+            section.Dock = DockStyle.Top;
+            section.AutoSize = true;
+            section.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            section.Padding = new Padding(14, 12, 14, 12);
+            section.Margin = new Padding(0, 0, 0, 10);
+            section.BackColor = Color.FromArgb(247, 249, 252);
+            section.BorderStyle = BorderStyle.FixedSingle;
+
+            TableLayoutPanel sectionLayout = new TableLayoutPanel();
+            sectionLayout.Dock = DockStyle.Top;
+            sectionLayout.AutoSize = true;
+            sectionLayout.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            sectionLayout.ColumnCount = 1;
+            sectionLayout.RowCount = 2;
+            sectionLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            section.Controls.Add(sectionLayout);
+
+            Label titleLabel = new Label();
+            titleLabel.AutoSize = true;
+            titleLabel.Font = OviaFluentTheme.FontKorean(9.5F, FontStyle.Bold);
+            titleLabel.ForeColor = Color.FromArgb(35, 43, 57);
+            titleLabel.Text = title;
+            titleLabel.Margin = new Padding(0, 0, 0, 6);
+            sectionLayout.Controls.Add(titleLabel, 0, 0);
+
+            Label descriptionLabel = new Label();
+            descriptionLabel.AutoSize = true;
+            descriptionLabel.MaximumSize = new Size(600, 0);
+            descriptionLabel.Font = OviaFluentTheme.FontKorean(9F, FontStyle.Regular);
+            descriptionLabel.ForeColor = Color.FromArgb(82, 91, 105);
+            descriptionLabel.Text = description;
+            descriptionLabel.Margin = new Padding(0);
+            sectionLayout.Controls.Add(descriptionLabel, 0, 1);
+
+            layout.RowCount++;
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.Controls.Add(section, 0, layout.RowCount - 1);
         }
 
         private Control CreateToolbarSeparator()
@@ -612,6 +798,16 @@ namespace OVIA.Desktop
                     numRotation.Value = 0;
                     numRotation.Enabled = false;
                 }
+                else if (editor.SelectedCount > 1)
+                {
+                    lblSelectionType.Text = editor.SelectedCount.ToString(CultureInfo.InvariantCulture) + "개 요소 선택";
+                    lblSelectionId.Text = "";
+                    txtSelectedText.Text = "";
+                    txtSelectedText.Enabled = false;
+                    btnUpdateText.Enabled = false;
+                    numRotation.Value = 0;
+                    numRotation.Enabled = false;
+                }
                 else
                 {
                     lblSelectionType.Text = GetElementTypeName(selected.Type);
@@ -678,22 +874,23 @@ namespace OVIA.Desktop
 
             SetModeButtonStyle(btnSelectMode, editor.Mode == CadShapeEditorMode.Select);
             SetModeButtonStyle(btnLineMode, editor.Mode == CadShapeEditorMode.AddLine);
+            SetModeButtonStyle(btnCircleMode, editor.Mode == CadShapeEditorMode.AddCircle);
             SetModeButtonStyle(btnTextMode, editor.Mode == CadShapeEditorMode.AddText);
             btnUndo.Enabled = editor.CanUndo;
             btnRedo.Enabled = editor.CanRedo;
-            btnDelete.Enabled = editor.SelectedElement != null;
-            btnSplit.Enabled = editor.SelectedElement != null && editor.SelectedElement.Type == "LINE";
-            lblMode.Text = editor.Mode == CadShapeEditorMode.Select
-                ? "현재: 선택·이동"
-                : editor.Mode == CadShapeEditorMode.AddLine ? "현재: 연속 선 그리기" : "현재: 문자 추가";
+            btnDelete.Enabled = editor.SelectedCount > 0;
+            btnSplit.Enabled = editor.SelectedCount == 1 && editor.SelectedElement != null && editor.SelectedElement.Type == "LINE";
+
         }
 
         private void SetModeButtonStyle(Button button, bool active)
         {
             if (button == null) return;
-            button.BackColor = active ? Color.FromArgb(18, 103, 206) : Color.White;
+            button.BackColor = active ? OviaFluentTheme.Accent : Color.White;
             button.ForeColor = active ? Color.White : Color.FromArgb(35, 43, 57);
-            button.FlatAppearance.BorderColor = active ? Color.FromArgb(18, 103, 206) : Color.FromArgb(197, 203, 213);
+            button.FlatAppearance.BorderColor = active ? OviaFluentTheme.Accent : Color.FromArgb(197, 203, 213);
+            button.FlatAppearance.MouseOverBackColor = active ? OviaFluentTheme.AccentHover : Color.FromArgb(246, 248, 251);
+            ApplyToolbarButtonIcon(button, button.ForeColor);
         }
 
         private void Editor_SelectionChanged(object sender, EventArgs e)
@@ -718,7 +915,6 @@ namespace OVIA.Desktop
             RefreshSelectionPanel();
             RefreshStatistics();
             UpdateToolbarState();
-            lblStatus.Text = "수정 내용은 아직 원본 CAD JSON에 덮어쓰지 않았습니다. ‘수정 적용’을 누르면 별도 편집 JSON으로 저장됩니다.";
         }
 
         private void Editor_ModeChanged(object sender, EventArgs e)
@@ -737,9 +933,6 @@ namespace OVIA.Desktop
 
             SelectTextGridRow(selected.TextId);
             RefreshSelectionPanel();
-            txtSelectedText.Focus();
-            txtSelectedText.SelectAll();
-            lblStatus.Text = "문자값을 입력한 뒤 Enter 또는 ‘값 적용’을 누르세요.";
         }
 
         private void SelectTextGridRow(string textId)
@@ -875,6 +1068,12 @@ namespace OVIA.Desktop
             editor.Focus();
         }
 
+        private void BtnCircleMode_Click(object sender, EventArgs e)
+        {
+            editor.Mode = CadShapeEditorMode.AddCircle;
+            editor.Focus();
+        }
+
         private void BtnTextMode_Click(object sender, EventArgs e)
         {
             editor.Mode = CadShapeEditorMode.AddText;
@@ -949,20 +1148,13 @@ namespace OVIA.Desktop
             if (result == DialogResult.Yes)
             {
                 editor.RestoreOriginal();
-                lblStatus.Text = isManualDocument
-                    ? "편집 시작 당시의 형상으로 복원했습니다. 적용 전까지 저장되지 않습니다."
-                    : "CAD 원본 형상으로 복원했습니다. 적용 전까지 저장되지 않습니다.";
-            }
-        }
-
-        private void ChkSnap_CheckedChanged(object sender, EventArgs e)
-        {
-            editor.SnapEnabled = chkSnap.Checked;
-            editor.Focus();
+                }
         }
 
         private void BtnApply_Click(object sender, EventArgs e)
         {
+            editor.CommitInlineTextEdit();
+
             if (editor.Document.CountGeometryElements() <= 0)
             {
                 MessageBox.Show("철근 형상선이 없습니다. 선 추가 도구로 형상을 그린 후 적용해주세요.", "철근 형상 확인", MessageBoxButtons.OK, MessageBoxIcon.Warning);
