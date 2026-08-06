@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -19,7 +19,6 @@ namespace OVIA.Desktop
         private readonly Color TextSub = OviaFluentTheme.TextSecondary;
 
         private Panel listPanel;
-        private Label lblStatus;
         private Button btnAdd;
         private Button btnSave;
         private Button btnClose;
@@ -62,7 +61,6 @@ namespace OVIA.Desktop
             BuildTitle(this);
             BuildListPanel(this);
             BuildBottomButtons(this);
-            BuildStatus(this);
 
             this.ResumeLayout(false);
             ApplyWorkspaceLayout();
@@ -198,20 +196,6 @@ namespace OVIA.Desktop
             return button;
         }
 
-        private void BuildStatus(Control parent)
-        {
-            lblStatus = new Label();
-            lblStatus.Text = "License 정보를 불러오는 중입니다.";
-            lblStatus.AutoSize = false;
-            lblStatus.Size = new Size(1116, 40);
-            lblStatus.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
-            lblStatus.Font = OviaFluentTheme.FontStatus(8.7F, FontStyle.Regular);
-            lblStatus.ForeColor = TextSub;
-            lblStatus.BackColor = SurfaceColor;
-            lblStatus.Location = new Point(32, 654);
-            parent.Controls.Add(lblStatus);
-        }
-
         private void LoadLicensesToUi()
         {
             isLoading = true;
@@ -222,7 +206,6 @@ namespace OVIA.Desktop
                 cleanSignature = BuildSignature();
                 isDirty = false;
                 UpdateSaveButtonVisibility();
-                UpdateStatusText();
             }
             finally
             {
@@ -269,7 +252,6 @@ namespace OVIA.Desktop
             PullEntriesFromPanels();
             isDirty = BuildSignature() != cleanSignature;
             UpdateSaveButtonVisibility();
-            UpdateStatusText();
         }
 
         private void Entry_DeleteRequested(object sender, EventArgs e)
@@ -307,7 +289,6 @@ namespace OVIA.Desktop
             RenderEntries();
             isDirty = BuildSignature() != cleanSignature;
             UpdateSaveButtonVisibility();
-            UpdateStatusText();
             OviaNotificationStore.AddWorkLog(companyId, userId, "라이선스 항목 삭제", "메인  ›  환경설정  ›  License");
         }
 
@@ -328,8 +309,6 @@ namespace OVIA.Desktop
             RenderEntries();
             isDirty = true;
             UpdateSaveButtonVisibility();
-            UpdateStatusText();
-
             if (entryPanels.Count > 0)
             {
                 OviaLicenseEntryPanel last = entryPanels[entryPanels.Count - 1];
@@ -372,7 +351,6 @@ namespace OVIA.Desktop
             cleanSignature = BuildSignature();
             isDirty = false;
             UpdateSaveButtonVisibility();
-            UpdateStatusText();
             MessageBox.Show("License 정보가 저장되었습니다.", "OVIA License", MessageBoxButtons.OK, MessageBoxIcon.Information);
             OviaNotificationStore.AddWorkLog(companyId, userId, "License 정보 저장", "메인  ›  환경설정  ›  License");
         }
@@ -414,27 +392,6 @@ namespace OVIA.Desktop
 
             btnSave.Visible = canEdit && isDirty;
             btnSave.Enabled = canEdit && isDirty;
-        }
-
-        private void UpdateStatusText()
-        {
-            if (lblStatus == null)
-            {
-                return;
-            }
-
-            if (!canEdit)
-            {
-                lblStatus.Text = "License 정보 보기 전용입니다. 최고관리자만 추가/수정/삭제할 수 있습니다.";
-            }
-            else if (isDirty)
-            {
-                lblStatus.Text = "저장하지 않은 License 변경사항이 있습니다.";
-            }
-            else
-            {
-                lblStatus.Text = "License 정보를 불러왔습니다. 저장 위치: " + OviaOpenSourceLicenseStore.GetLicenseFilePath();
-            }
         }
 
         private void FrmLicenseManager_FormClosing(object sender, FormClosingEventArgs e)
@@ -498,10 +455,10 @@ namespace OVIA.Desktop
             if (listPanel != null)
             {
                 listPanel.Width = Math.Max(1, this.ClientSize.Width - 64);
-                listPanel.Height = Math.Max(180, this.ClientSize.Height - 338);
+                listPanel.Height = Math.Max(180, this.ClientSize.Height - listPanel.Top - 72);
             }
 
-            int y = Math.Max(420, this.ClientSize.Height - 124);
+            int y = Math.Max(420, this.ClientSize.Height - 54);
             if (btnAdd != null)
             {
                 btnAdd.Location = new Point(32, y);
@@ -513,11 +470,6 @@ namespace OVIA.Desktop
             if (btnClose != null)
             {
                 btnClose.Location = new Point(Math.Max(32, this.ClientSize.Width - 142), y);
-            }
-            if (lblStatus != null)
-            {
-                lblStatus.Width = Math.Max(1, this.ClientSize.Width - 64);
-                lblStatus.Location = new Point(32, Math.Max(460, this.ClientSize.Height - 66));
             }
 
             int width = listPanel == null ? 0 : Math.Max(360, listPanel.ClientSize.Width - 24);

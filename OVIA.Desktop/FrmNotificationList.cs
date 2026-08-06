@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -7,7 +7,7 @@ using OVIA.Desktop.Controls;
 
 namespace OVIA.Desktop
 {
-    public class FrmNotificationList : Form, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider
+    public class FrmNotificationList : Form, IOviaWorkspaceLayout
     {
         private readonly string companyId;
         private readonly string userId;
@@ -18,7 +18,6 @@ namespace OVIA.Desktop
         private DataGridView grid;
         private Label lblTitle;
         private Label lblDesc;
-        private Label lblStatus;
         private Panel pagerPanel;
         private Button btnToggleSelectAll;
         private Button btnConfirmSelected;
@@ -26,16 +25,6 @@ namespace OVIA.Desktop
         private List<OviaNotificationEntry> allEntries = new List<OviaNotificationEntry>();
         private int pageSize = 100;
         private int currentPage = 1;
-
-        public string WorkspaceHelpKey { get { return "NOTIFICATIONS"; } }
-        public string WorkspaceHelpTitle { get { return "알림"; } }
-        public string WorkspaceHelpText
-        {
-            get
-            {
-                return "작업 내역 및 알림은 최대 7일간 보관되며, 7일 후 자동 삭제됩니다. 임의로 삭제할 수 없습니다.";
-            }
-        }
 
         public FrmNotificationList(string companyId, string userId)
         {
@@ -66,7 +55,6 @@ namespace OVIA.Desktop
             BuildToolbar(this);
             BuildGrid(this);
             BuildPager(this);
-            BuildStatus(this);
             BuildContentLoadingOverlay();
 
             ResumeLayout(false);
@@ -238,8 +226,8 @@ namespace OVIA.Desktop
 
             AddTextColumn("No", "순번", 64, DataGridViewContentAlignment.MiddleCenter);
             AddTextColumn("WorkContent", "작업내용", 240, DataGridViewContentAlignment.MiddleLeft);
-            AddTextColumn("WorkPath", "작업 메뉴", 330, DataGridViewContentAlignment.MiddleLeft);
-            AddTextColumn("WorkDate", "작업일시", 150, DataGridViewContentAlignment.MiddleCenter);
+            AddTextColumn("WorkPath", "경로", 330, DataGridViewContentAlignment.MiddleLeft);
+            AddTextColumn("WorkDate", "일시", 150, DataGridViewContentAlignment.MiddleCenter);
             AddTextColumn("Worker", "작업자", 120, DataGridViewContentAlignment.MiddleCenter);
 
             DataGridViewButtonColumn confirmColumn = new DataGridViewButtonColumn();
@@ -293,21 +281,6 @@ namespace OVIA.Desktop
             pagerPanel.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             pagerPanel.BackColor = SurfaceColor;
             parent.Controls.Add(pagerPanel);
-        }
-
-        private void BuildStatus(Control parent)
-        {
-            lblStatus = new Label();
-            lblStatus.Text = "알림을 불러오는 중입니다.";
-            lblStatus.AutoSize = false;
-            lblStatus.Location = new Point(0, 692);
-            lblStatus.Size = new Size(1180, 28);
-            lblStatus.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
-            lblStatus.TextAlign = ContentAlignment.MiddleLeft;
-            lblStatus.Font = OviaFluentTheme.FontStatus(8.8F, FontStyle.Regular);
-            lblStatus.ForeColor = TextSub;
-            lblStatus.BackColor = SurfaceColor;
-            parent.Controls.Add(lblStatus);
         }
 
         private Button CreateButton(string text, int x, int y, int width, OviaButtonRole role)
@@ -382,7 +355,6 @@ namespace OVIA.Desktop
 
             RenderPager();
             UpdateSelectAllButtonText();
-            UpdateStatus();
         }
 
         private void RenderPager()
@@ -822,39 +794,19 @@ namespace OVIA.Desktop
             LoadEntries();
         }
 
-        private void UpdateStatus()
-        {
-            int unread = 0;
-            int i;
-
-            for (i = 0; i < allEntries.Count; i++)
-            {
-                if (!allEntries[i].IsConfirmed)
-                {
-                    unread++;
-                }
-            }
-
-            if (lblStatus != null)
-            {
-                lblStatus.Text = "총 " + allEntries.Count.ToString() + "건 / 미확인 " + unread.ToString() + "건 / 페이지당 " + pageSize.ToString() + "건 / 보관기간 7일";
-            }
-        }
-
         public void ApplyWorkspaceLayout()
         {
             const int toolbarTop = 116;
             const int gridTop = 164;
             const int contentInset = 25;
-            const int statusHeight = 28;
             const int pagerHeight = 38;
-            const int pagerGapAboveStatus = 30;
+            const int bottomInset = 12;
             const int buttonGap = 10;
 
             int width = Math.Max(1, ClientSize.Width);
-            int statusTop = Math.Max(gridTop + 260, ClientSize.Height - statusHeight);
-            int pagerTop = Math.Max(gridTop + 220, statusTop - pagerGapAboveStatus - pagerHeight);
-            int gridHeight = Math.Max(240, pagerTop - gridTop - 10);
+            int pagerTop = Math.Max(gridTop + 220, ClientSize.Height - pagerHeight - bottomInset);
+            int gridY = gridTop + contentInset;
+            int gridHeight = Math.Max(240, pagerTop - gridY - 10);
 
             if (btnToggleSelectAll != null)
             {
@@ -867,8 +819,8 @@ namespace OVIA.Desktop
 
             if (grid != null)
             {
-                grid.Location = new Point(contentInset, gridTop + contentInset);
-                grid.Size = new Size(Math.Max(1, width - contentInset), Math.Max(1, gridHeight - contentInset));
+                grid.Location = new Point(contentInset, gridY);
+                grid.Size = new Size(Math.Max(1, width - contentInset), Math.Max(1, gridHeight));
             }
 
             if (pagerPanel != null)
@@ -877,13 +829,6 @@ namespace OVIA.Desktop
                 pagerPanel.Width = Math.Max(1, width - contentInset);
             }
 
-            if (lblStatus != null)
-            {
-                lblStatus.Location = new Point(0, statusTop);
-                lblStatus.Size = new Size(width, statusHeight);
-                lblStatus.TextAlign = ContentAlignment.MiddleLeft;
-                lblStatus.Padding = new Padding(16, 0, 0, 0);
-            }
         }
 
         private void RefreshOpenNotificationBadges()

@@ -8,7 +8,7 @@ using OVIA.Desktop.Controls;
 
 namespace OVIA.Desktop
 {
-    public class FrmSystemSettings : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider, IOviaWorkspaceUnsavedState
+    public class FrmSystemSettings : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceUnsavedState
     {
         private readonly string companyId;
         private readonly string userId;
@@ -79,15 +79,6 @@ namespace OVIA.Desktop
         private const int SectionGap = 30;
 
 
-        public string WorkspaceHelpKey { get { return "SYSTEM_SETTINGS"; } }
-        public string WorkspaceHelpTitle { get { return "시스템 설정"; } }
-        public string WorkspaceHelpText
-        {
-            get
-            {
-                return "ERP 연결 주소, 회사 로고, 페이지 로딩 설정, 리스트 출력 수, OVIA 주력 색상처럼 OVIA 전체에 적용되는 기본값을 관리합니다. 페이지 로딩 설정은 WebView2와 OVIA 내부 콘텐츠 로딩 오버레이가 함께 사용합니다.";
-            }
-        }
         public FrmSystemSettings(string companyId, string userId)
         {
             this.companyId = companyId == null ? "" : companyId;
@@ -131,7 +122,7 @@ namespace OVIA.Desktop
         {
             OviaWorkspaceHeader.AddTo(
                 parent,
-                OviaMenuHelpStore.GetWorkspacePath("SYSTEM_SETTINGS", "메인  ›  환경설정  ›  시스템 설정"),
+                OviaMenuSettingsStore.GetWorkspacePath("SYSTEM_SETTINGS", "메인  ›  환경설정  ›  시스템 설정"),
                 delegate { this.Close(); },
                 delegate { this.Close(); },
                 delegate { LoadSettingsToUi(); },
@@ -1800,7 +1791,7 @@ namespace OVIA.Desktop
                 );
 
                 UpdateStatus("시스템 설정을 저장했습니다. 저장 위치: " + OviaSystemSettingsStore.GetSettingsFilePath());
-                OviaNotificationStore.AddWorkLog(companyId, userId, "시스템 설정 저장", OviaMenuHelpStore.GetWorkspacePath("SYSTEM_SETTINGS", "메인  ›  환경설정  ›  시스템 설정"));
+                OviaNotificationStore.AddWorkLog(companyId, userId, "시스템 설정 저장", OviaMenuSettingsStore.GetWorkspacePath("SYSTEM_SETTINGS", "메인  ›  환경설정  ›  시스템 설정"));
             }
             catch (Exception ex)
             {

@@ -70,6 +70,7 @@ namespace OVIA.Desktop
                     element.StartAngle = GetNumber(item, "startAngle", 0D);
                     element.EndAngle = GetNumber(item, "endAngle", 0D);
                     element.Height = GetNumber(item, "height", 2.5D);
+                    element.TextScale = Math.Max(0.25D, GetNumber(item, "textScale", 1D));
                     element.Rotation = GetNumber(item, "rotation", 0D);
                     element.ColorIndex = (int)Math.Round(GetNumber(item, "colorIndex", 7D));
                     element.HasBounds = HasNumber(item, "boundsMinX")
@@ -254,7 +255,8 @@ namespace OVIA.Desktop
                     }
                     else
                     {
-                        double height = Math.Max(element.Height, 2D);
+                        double textScale = Math.Max(0.25D, element.TextScale);
+                        double height = Math.Max(element.Height, 2D) * textScale;
                         double width = Math.Max(height * 0.58D * Math.Max((element.Text == null ? "" : element.Text).Length, 1), height);
                         IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.X1 - width / 2D, element.Y1 - height / 2D);
                         IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.X1 + width / 2D, element.Y1 + height / 2D);
@@ -363,6 +365,7 @@ namespace OVIA.Desktop
                     sb.Append(", \"x\": ").Append(JsonNumber(element.X1));
                     sb.Append(", \"y\": ").Append(JsonNumber(element.Y1));
                     sb.Append(", \"height\": ").Append(JsonNumber(Math.Max(element.Height, 0.1D)));
+                    sb.Append(", \"textScale\": ").Append(JsonNumber(Math.Max(element.TextScale, 0.25D)));
                     sb.Append(", \"rotation\": ").Append(JsonNumber(element.Rotation));
                     sb.Append(", \"align\": \"CENTER\"");
 
@@ -558,6 +561,7 @@ namespace OVIA.Desktop
         public double StartAngle = 0D;
         public double EndAngle = 0D;
         public double Height = 2.5D;
+        public double TextScale = 1D;
         public double Rotation = 0D;
         public int ColorIndex = 7;
         public bool HasBounds = false;

@@ -18,6 +18,9 @@ namespace OVIA.Desktop
         private const float RotatedTextTrackingPixels = 0.70F;
         private const float VisualScale = 0.90F;
         private const float StraightShapeMaxWidthRatio = 0.60F;
+        private const float MinimumCadTextFontSizePt = 3.0F;
+        private const float TextBoundsFitTolerance = 1.04F;
+        private const string SourceCellLayoutPolicy = "SOURCE_CELL";
 
         public void DrawCadShape(Graphics g, Rectangle bounds, string jsonPath, bool selected)
         {
@@ -43,31 +46,46 @@ namespace OVIA.Desktop
             }
 
             Rectangle inner = new Rectangle(bounds.Left + 1, bounds.Top + 1, Math.Max(1, bounds.Width - 2), Math.Max(1, bounds.Height - 2));
+            GraphicsState cellClipState = g.Save();
 
-            // 셀 배경/테두리는 FrmBarList의 공통 그리드 페인터에서만 처리합니다.
-            // CAD 형상 렌더러는 형상 자체만 그려야 셀 라인 두께가 일정하게 유지됩니다.
-
-            if (jsonPath == null || jsonPath.Trim() == "" || !File.Exists(jsonPath))
+            try
             {
-                DrawEmpty(g, inner, "CAD 형상 없음");
-                return;
+                /*
+                 * DataGridView의 CellPainting Graphics는 인접 컬럼까지 그릴 수 있는 상태로 전달될 수 있습니다.
+                 * 긴 CAD 설명문자나 회전문자가 철근규격/길이 컬럼까지 넘어가지 않도록 렌더러 자체에서
+                 * 철근형상 셀 내부를 최종 clip 경계로 고정합니다.
+                 */
+                g.SetClip(inner, CombineMode.Intersect);
+
+                // 셀 배경/테두리는 FrmBarList의 공통 그리드 페인터에서만 처리합니다.
+                // CAD 형상 렌더러는 형상 자체만 그려야 셀 라인 두께가 일정하게 유지됩니다.
+
+                if (jsonPath == null || jsonPath.Trim() == "" || !File.Exists(jsonPath))
+                {
+                    DrawEmpty(g, inner, "CAD 형상 없음");
+                    return;
+                }
+
+                CadShapeData data = Load(jsonPath);
+
+                if (data == null || data.Elements.Count == 0)
+                {
+                    DrawEmpty(g, inner, "CAD 형상 없음");
+                    return;
+                }
+
+                /*
+                 * 예외적인 CAD 객체 구성이나 기존 JSON에서 일자형 숫자만 남고 선이 빠진 경우에도
+                 * 숫자만 표시되지 않도록 단일 숫자 TEXT 데이터에는 표시용 수평선을 복원합니다.
+                 * 실제 지오메트리가 하나라도 있으면 적용하지 않습니다.
+                 */
+                EnsureStraightShapeFallback(data);
+                DrawData(g, inner, data, dimensionText, applyTextOverrides, NormalizeViewZoomScale(viewZoomScale));
             }
-
-            CadShapeData data = Load(jsonPath);
-
-            if (data == null || data.Elements.Count == 0)
+            finally
             {
-                DrawEmpty(g, inner, "CAD 형상 없음");
-                return;
+                g.Restore(cellClipState);
             }
-
-            /*
-             * 예외적인 CAD 객체 구성이나 기존 JSON에서 일자형 숫자만 남고 선이 빠진 경우에도
-             * 숫자만 표시되지 않도록 단일 숫자 TEXT 데이터에는 표시용 수평선을 복원합니다.
-             * 실제 지오메트리가 하나라도 있으면 적용하지 않습니다.
-             */
-            EnsureStraightShapeFallback(data);
-            DrawData(g, inner, data, dimensionText, applyTextOverrides, NormalizeViewZoomScale(viewZoomScale));
         }
 
         public int GetRecommendedRowHeight(string jsonPath, int baseHeight, int maximumHeight)
@@ -121,6 +139,10 @@ namespace OVIA.Desktop
 
         private void DrawData(Graphics g, Rectangle inner, CadShapeData data, string dimensionText, bool applyTextOverrides, float viewZoomScale)
         {
+            // CAD 원본과 OVIA 편집 JSON은 rotation 부호의 기준이 다릅니다.
+            // 원본 CAD는 기존 렌더링 방향을 유지하고, OVIA_EDIT/OVIA_MANUAL은 편집창에서 본 방향 그대로 표시합니다.
+            bool useOviaEditedRotation = UsesOviaEditedRotation(data);
+
             /*
              * BarList/ERP/출력용 화면에서도 CAD에 그려진 형상 좌표와 종횡비를 그대로 사용합니다.
              * 형상 내부 TEXT의 숫자값은 표시 문자열일 뿐이며, 선분 길이를 다시 계산하거나
@@ -134,6 +156,10 @@ namespace OVIA.Desktop
                 data = displayData;
             }
 
+            bool useSourceCellLayout = UsesSourceCellLayout(data);
+            bool useCadSourceTextMetrics = data != null
+                && data.Source != null
+                && data.Source.Trim().Equals("CAD", StringComparison.OrdinalIgnoreCase);
             SmoothingMode oldSmoothing = g.SmoothingMode;
             PixelOffsetMode oldPixelOffsetMode = g.PixelOffsetMode;
             CompositingQuality oldCompositingQuality = g.CompositingQuality;
@@ -165,7 +191,19 @@ namespace OVIA.Desktop
                 double contentMaxX;
                 double contentMaxY;
 
-                if (!GetElementBounds(data, out contentMinX, out contentMinY, out contentMaxX, out contentMaxY))
+                if (useSourceCellLayout && data.Width > 0.0001 && data.Height > 0.0001)
+                {
+                    /*
+                     * 새 SOURCE_CELL JSON은 실제 CAD 철근형상 물리 셀 좌표계를 기준으로 맞춥니다.
+                     * 따라서 콘텐츠만 타이트하게 다시 중앙 확대하지 않고, CAD 셀 안의 원래 여백과
+                     * 문자·숫자·철근선의 상대 좌표를 동일한 X/Y 단일 배율로 보존합니다.
+                     */
+                    contentMinX = 0.0;
+                    contentMinY = 0.0;
+                    contentMaxX = Math.Max(data.Width, 1.0);
+                    contentMaxY = Math.Max(data.Height, 1.0);
+                }
+                else if (!GetElementBounds(data, out contentMinX, out contentMinY, out contentMaxX, out contentMaxY))
                 {
                     contentMinX = 0;
                     contentMinY = 0;
@@ -178,12 +216,12 @@ namespace OVIA.Desktop
                 double scale = Math.Min(drawArea.Width / contentWidth, drawArea.Height / contentHeight) * VisualScale;
 
                 /*
-                 * 일자형 철근은 세로 높이가 거의 없어서 일반 맞춤 배율을 적용하면 가로 폭을
-                 * 셀 전체에 가깝게 채웁니다. CAD 원본 표처럼 가운데에 적정 길이로 보이도록
-                 * 순수 수평 일자형 형상에만 셀 가로 폭의 60% 상한을 적용합니다.
-                 * 형상선과 치수 문자는 같은 좌표 배율을 사용하므로 함께 축소됩니다.
+                 * 과거 CONTENT_BOUNDS JSON의 일자형 철근은 세로 높이가 거의 없어 가로 폭을
+                 * 과도하게 채울 수 있으므로 기존 60% 상한을 유지합니다. SOURCE_CELL JSON은
+                 * CAD 물리 셀 안의 원래 여백과 선 길이 비율을 이미 보존하므로 별도 상한을
+                 * 다시 적용하지 않습니다.
                  */
-                if (IsStraightHorizontalShape(data))
+                if (!useSourceCellLayout && IsStraightHorizontalShape(data))
                 {
                     double straightWidthScale = drawArea.Width * StraightShapeMaxWidthRatio / contentWidth;
 
@@ -269,7 +307,8 @@ namespace OVIA.Desktop
                     }
 
                     // CAD 원본 텍스트는 이동시키지 않고 원래 상대 좌표와 회전값 그대로 표시합니다.
-                    // 글자 크기만 모든 형상에서 맑은 고딕 8pt로 통일합니다.
+                    // 기본 상한은 맑은 고딕 8pt이며, 원본 CAD 문자 높이와 실제 bounds가 더 작으면
+                    // 해당 비율에 맞춰 축소하여 인접 컬럼 침범과 문자/형상 비율 왜곡을 방지합니다.
                     for (i = 0; i < data.Elements.Count; i++)
                     {
                         CadShapeElement element = data.Elements[i];
@@ -316,16 +355,51 @@ namespace OVIA.Desktop
                         );
 
                         float normalizedRotation = NormalizeRotation((float)element.Rotation);
-                        Font drawFont = Math.Abs(normalizedRotation) <= 0.35F ? textFont : rotatedTextFont;
-
-                        DrawTextAtCenter(
+                        float renderRotation = useOviaEditedRotation
+                            ? normalizedRotation
+                            : -normalizedRotation;
+                        Font baseFont = Math.Abs(renderRotation) <= 0.35F ? textFont : rotatedTextFont;
+                        float fittedFontSize = GetCadTextFontSize(
                             g,
                             text,
-                            drawFont,
-                            textBrush,
-                            center,
-                            normalizedRotation
+                            baseFont,
+                            element,
+                            renderRotation,
+                            scale,
+                            useSourceCellLayout,
+                            useCadSourceTextMetrics
                         );
+                        Font fittedFont = null;
+                        Font drawFont = baseFont;
+
+                        if (Math.Abs(fittedFontSize - baseFont.SizeInPoints) > 0.01F)
+                        {
+                            fittedFont = OviaFluentTheme.FontKorean(
+                                fittedFontSize,
+                                FontStyle.Regular,
+                                GraphicsUnit.Point
+                            );
+                            drawFont = fittedFont;
+                        }
+
+                        try
+                        {
+                            DrawTextAtCenter(
+                                g,
+                                text,
+                                drawFont,
+                                textBrush,
+                                center,
+                                renderRotation
+                            );
+                        }
+                        finally
+                        {
+                            if (fittedFont != null)
+                            {
+                                fittedFont.Dispose();
+                            }
+                        }
                     }
                 }
             }
@@ -339,6 +413,174 @@ namespace OVIA.Desktop
             }
         }
 
+
+        private bool UsesOviaEditedRotation(CadShapeData data)
+        {
+            if (data == null || data.Source == null)
+            {
+                return false;
+            }
+
+            string source = data.Source.Trim();
+            return source.Equals("OVIA_EDIT", StringComparison.OrdinalIgnoreCase)
+                || source.Equals("OVIA_MANUAL", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool UsesSourceCellLayout(CadShapeData data)
+        {
+            if (data == null || data.LayoutPolicy == null)
+            {
+                return false;
+            }
+
+            return data.LayoutPolicy.Trim().Equals(SourceCellLayoutPolicy, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private float GetCadTextFontSize(
+            Graphics g,
+            string text,
+            Font baseFont,
+            CadShapeElement element,
+            float rotation,
+            double coordinateScale,
+            bool useSourceCellLayout,
+            bool useCadSourceTextMetrics)
+        {
+            if (g == null || baseFont == null || element == null)
+            {
+                return baseFont == null ? CadTextFontSizePt : baseFont.SizeInPoints;
+            }
+
+            double elementTextScale = Math.Max(0.25D, Math.Min(8D, element.TextScale));
+            float requestedSize = Math.Max(
+                MinimumCadTextFontSizePt,
+                Math.Min(72F, baseFont.SizeInPoints * (float)elementTextScale)
+            );
+
+            if (useSourceCellLayout && useCadSourceTextMetrics && element.Height > 0.0001 && coordinateScale > 0.0001)
+            {
+                /*
+                 * CAD 문자 높이를 현재 SOURCE_CELL 단일 배율로 변환합니다.
+                 * 기존처럼 모든 문자를 무조건 8pt로 그리면 CAD에서 작게 배치된 설명문자가
+                 * 철근선보다 과도하게 커지고 셀 왼쪽으로 튀어나옵니다. 8pt는 최대 상한으로만
+                 * 유지하고, 원본 CAD 높이가 더 작을 때는 원본 비율을 우선합니다.
+                 */
+                float sourceHeightPoints = (float)(element.Height * coordinateScale * 72.0 / Math.Max(g.DpiY, 1F));
+                sourceHeightPoints *= (float)elementTextScale;
+
+                if (sourceHeightPoints > 0.1F)
+                {
+                    requestedSize = Math.Min(requestedSize, Math.Max(MinimumCadTextFontSizePt, sourceHeightPoints));
+                }
+            }
+
+            if (!useCadSourceTextMetrics || !element.HasBounds || String.IsNullOrEmpty(text))
+            {
+                return requestedSize;
+            }
+
+            double targetWidth = Math.Abs(element.BoundsMaxX - element.BoundsMinX) * coordinateScale * elementTextScale;
+            double targetHeight = Math.Abs(element.BoundsMaxY - element.BoundsMinY) * coordinateScale * elementTextScale;
+
+            if (targetWidth <= 0.5 || targetHeight <= 0.5)
+            {
+                return requestedSize;
+            }
+
+            using (Font probeFont = OviaFluentTheme.FontKorean(
+                requestedSize,
+                FontStyle.Regular,
+                GraphicsUnit.Point))
+            {
+                SizeF measured = MeasureCadTextBounds(g, text, probeFont, rotation);
+
+                if (measured.Width <= 0.1F || measured.Height <= 0.1F)
+                {
+                    return requestedSize;
+                }
+
+                double widthRatio = targetWidth * TextBoundsFitTolerance / measured.Width;
+                double heightRatio = targetHeight * TextBoundsFitTolerance / measured.Height;
+                double fitRatio = Math.Min(1.0, Math.Min(widthRatio, heightRatio));
+
+                if (fitRatio < 0.999)
+                {
+                    requestedSize = Math.Max(
+                        MinimumCadTextFontSizePt,
+                        (float)(requestedSize * fitRatio)
+                    );
+                }
+            }
+
+            return requestedSize;
+        }
+
+        private SizeF MeasureCadTextBounds(Graphics g, string text, Font font, float rotation)
+        {
+            if (g == null || font == null || String.IsNullOrEmpty(text))
+            {
+                return SizeF.Empty;
+            }
+
+            float textWidth;
+            float textHeight;
+
+            if (Math.Abs(rotation) <= 0.35F)
+            {
+                Size measured = TextRenderer.MeasureText(
+                    g,
+                    text,
+                    font,
+                    new Size(10000, 1000),
+                    TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine
+                );
+                textWidth = Math.Max(measured.Width + 2F, 1F);
+                textHeight = Math.Max(measured.Height + 2F, 1F);
+            }
+            else
+            {
+                textWidth = MeasureTrackedCadTextWidth(g, text, font, RotatedTextTrackingPixels);
+                textHeight = Math.Max(font.GetHeight(g), 1F);
+            }
+
+            double radians = Math.Abs(rotation) * Math.PI / 180.0;
+            double cos = Math.Abs(Math.Cos(radians));
+            double sin = Math.Abs(Math.Sin(radians));
+            float rotatedWidth = (float)(textWidth * cos + textHeight * sin);
+            float rotatedHeight = (float)(textWidth * sin + textHeight * cos);
+            return new SizeF(Math.Max(rotatedWidth, 1F), Math.Max(rotatedHeight, 1F));
+        }
+
+        private float MeasureTrackedCadTextWidth(Graphics g, string text, Font font, float trackingPixels)
+        {
+            if (g == null || font == null || String.IsNullOrEmpty(text))
+            {
+                return 0F;
+            }
+
+            float totalWidth = 0F;
+
+            using (StringFormat format = (StringFormat)StringFormat.GenericTypographic.Clone())
+            {
+                format.Alignment = StringAlignment.Near;
+                format.LineAlignment = StringAlignment.Center;
+                format.FormatFlags |= StringFormatFlags.NoClip | StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces;
+                int i;
+
+                for (i = 0; i < text.Length; i++)
+                {
+                    SizeF size = g.MeasureString(text[i].ToString(), font, new PointF(0F, 0F), format);
+                    totalWidth += Math.Max(size.Width, 1F);
+                }
+            }
+
+            if (text.Length > 1)
+            {
+                totalWidth += trackingPixels * (text.Length - 1);
+            }
+
+            return totalWidth;
+        }
 
         private float NormalizeViewZoomScale(float value)
         {
@@ -459,11 +701,10 @@ namespace OVIA.Desktop
             bool geometryFound = false;
 
             /*
-             * 셀 맞춤 배율의 기준은 철근 형상선 자체입니다.
-             * TEXT의 문자열 길이·숫자 자릿수·CAD 문자 bounds를 배율 계산에 사용하면
-             * 330을 3,300으로 수정하는 것만으로 형상 전체가 작아지는 문제가 생깁니다.
-             * 따라서 지오메트리가 존재할 때는 LINE/ARC/CIRCLE bounds를 먼저 계산하고,
-             * 문자는 내용 폭이 아닌 CAD 삽입점만 포함해 위치가 잘리지 않게 합니다.
+             * 지오메트리와 CAD 원본 TEXT bounds를 함께 사용합니다.
+             * 표시 문자열을 다시 측정해 bounds를 만들지 않고 JSON에 저장된 원본 extents만 사용하므로,
+             * 사용자가 330을 3,300으로 수정해도 형상 전체 배율이 임의로 바뀌지 않습니다.
+             * 반면 긴 원본 설명문자의 실제 폭은 맞춤 범위에 포함되어 인접 컬럼 침범을 방지합니다.
              */
             for (i = 0; i < data.Elements.Count; i++)
             {
@@ -494,7 +735,17 @@ namespace OVIA.Desktop
                 {
                     CadShapeElement textElement = data.Elements[i];
 
-                    if (textElement != null && textElement.Type == "TEXT")
+                    if (textElement == null || textElement.Type != "TEXT")
+                    {
+                        continue;
+                    }
+
+                    if (textElement.HasBounds)
+                    {
+                        IncludePoint(ref minX, ref minY, ref maxX, ref maxY, textElement.BoundsMinX, textElement.BoundsMinY);
+                        IncludePoint(ref minX, ref minY, ref maxX, ref maxY, textElement.BoundsMaxX, textElement.BoundsMaxY);
+                    }
+                    else
                     {
                         IncludePoint(ref minX, ref minY, ref maxX, ref maxY, textElement.X1, textElement.Y1);
                     }
@@ -521,7 +772,8 @@ namespace OVIA.Desktop
                     }
                     else
                     {
-                        double estimatedHeight = Math.Max(element.Height, 0.8);
+                        double textScale = Math.Max(0.25D, element.TextScale);
+                        double estimatedHeight = Math.Max(element.Height, 0.8) * textScale;
                         double estimatedWidth = Math.Max(estimatedHeight * 3.0, estimatedHeight);
                         IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.X1 - estimatedWidth / 2.0, element.Y1 - estimatedHeight / 2.0);
                         IncludePoint(ref minX, ref minY, ref maxX, ref maxY, element.X1 + estimatedWidth / 2.0, element.Y1 + estimatedHeight / 2.0);
@@ -785,7 +1037,7 @@ namespace OVIA.Desktop
                  */
                 g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
                 g.TranslateTransform((float)Math.Round(center.X), (float)Math.Round(center.Y));
-                g.RotateTransform(-rotation);
+                g.RotateTransform(rotation);
                 DrawTrackedCadText(g, text, font, brush, RotatedTextTrackingPixels);
             }
             finally
@@ -877,6 +1129,8 @@ namespace OVIA.Desktop
                 string json = File.ReadAllText(path);
                 CadShapeData data = new CadShapeData();
                 data.Version = (int)Math.Round(GetNumber(json, "version", 1));
+                data.Source = GetString(json, "source");
+                data.LayoutPolicy = GetString(json, "layoutPolicy");
                 data.Width = GetNumber(json, "width", 100);
                 data.Height = GetNumber(json, "height", 60);
 
@@ -900,6 +1154,7 @@ namespace OVIA.Desktop
                     element.StartAngle = GetNumber(item, "startAngle", 0);
                     element.EndAngle = GetNumber(item, "endAngle", 0);
                     element.Height = GetNumber(item, "height", 0);
+                    element.TextScale = Math.Max(0.25D, GetNumber(item, "textScale", 1D));
                     element.Rotation = GetNumber(item, "rotation", 0);
                     element.HasBounds = HasNumber(item, "boundsMinX")
                         && HasNumber(item, "boundsMinY")
@@ -964,6 +1219,8 @@ namespace OVIA.Desktop
     internal class CadShapeData
     {
         public int Version = 1;
+        public string Source = "";
+        public string LayoutPolicy = "";
         public double Width = 100;
         public double Height = 60;
         public List<CadShapeElement> Elements = new List<CadShapeElement>();
@@ -984,6 +1241,7 @@ namespace OVIA.Desktop
         public double StartAngle = 0;
         public double EndAngle = 0;
         public double Height = 0;
+        public double TextScale = 1;
         public double Rotation = 0;
         public bool HasBounds = false;
         public double BoundsMinX = 0;

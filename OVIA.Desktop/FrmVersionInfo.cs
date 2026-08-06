@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -30,7 +30,6 @@ namespace OVIA.Desktop
         private Label lblCurrentVersion;
         private Label lblVersionGuide;
         private Label lblVersionPath;
-        private Label lblStatus;
         private DataGridView grid;
         private Button btnAdd;
         private Button btnExport;
@@ -73,7 +72,6 @@ namespace OVIA.Desktop
             BuildCommandBar(this);
             BuildTopArea(this);
             BuildGrid(this);
-            BuildStatus(this);
 
             ResumeLayout(false);
             ApplyWorkspaceLayout();
@@ -83,7 +81,7 @@ namespace OVIA.Desktop
         {
             OviaWorkspaceHeader.AddTo(
                 parent,
-                OviaMenuHelpStore.GetWorkspacePath("VERSION_INFO", "메인  ›  환경설정  ›  버전정보"),
+                OviaMenuSettingsStore.GetWorkspacePath("VERSION_INFO", "메인  ›  환경설정  ›  버전정보"),
                 delegate { NavigateBack(); },
                 delegate { NavigateUp(); },
                 delegate { if (ConfirmDiscardUnsavedChanges()) LoadRowsToGrid(); },
@@ -152,8 +150,8 @@ namespace OVIA.Desktop
             {
                 workspace.NavigateToWorkspaceInfoPage(
                     "SETTINGS",
-                    OviaMenuHelpStore.GetWorkspacePath("SETTINGS", "메인  ›  환경설정"),
-                    OviaMenuHelpStore.GetMenuName("SETTINGS", "환경설정"),
+                    OviaMenuSettingsStore.GetWorkspacePath("SETTINGS", "메인  ›  환경설정"),
+                    OviaMenuSettingsStore.GetMenuName("SETTINGS", "환경설정"),
                     "SETTINGS",
                     "환경설정 메뉴입니다.",
                     "시스템 설정, 메뉴관리, 버전정보 등 OVIA 설치·운영 기준을 관리합니다."
@@ -393,20 +391,6 @@ namespace OVIA.Desktop
             grid.Columns.Add(colAction);
         }
 
-        private void BuildStatus(Control parent)
-        {
-            lblStatus = new Label();
-            lblStatus.Text = "버전정보를 불러오는 중입니다.";
-            lblStatus.AutoSize = false;
-            lblStatus.Size = new Size(1116, 40);
-            lblStatus.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
-            lblStatus.Font = OviaFluentTheme.FontStatus(8.7F, FontStyle.Regular);
-            lblStatus.ForeColor = TextSub;
-            lblStatus.BackColor = SurfaceColor;
-            lblStatus.Location = new Point(32, 654);
-            parent.Controls.Add(lblStatus);
-        }
-
         private void LoadRowsToGrid()
         {
             isLoading = true;
@@ -426,7 +410,6 @@ namespace OVIA.Desktop
                 UpdateCurrentVersionLabel();
                 UpdateVersionPathLabel();
                 UpdateSaveButtonVisibility();
-                UpdateStatusText();
             }
             finally
             {
@@ -850,7 +833,6 @@ namespace OVIA.Desktop
             isDirty = snapshot != cleanSnapshot;
             UpdateCurrentVersionLabel();
             UpdateSaveButtonVisibility();
-            UpdateStatusText();
         }
 
         private bool CommitGridEdit()
@@ -1042,27 +1024,6 @@ namespace OVIA.Desktop
             }
         }
 
-        private void UpdateStatusText()
-        {
-            if (lblStatus == null)
-            {
-                return;
-            }
-
-            if (!canEdit)
-            {
-                lblStatus.Text = "버전정보 보기 전용입니다. 최고관리자만 수정할 수 있습니다.";
-            }
-            else if (isDirty)
-            {
-                lblStatus.Text = "저장하지 않은 버전정보 변경사항이 있습니다.";
-            }
-            else
-            {
-                lblStatus.Text = "버전정보를 불러왔습니다. 저장 파일: " + OviaVersionInfoStore.GetDisplayInstallVersionInfoFilePath();
-            }
-        }
-
         private void FrmVersionInfo_FormClosing(object sender, FormClosingEventArgs e)
         {
             if (!ConfirmDiscardUnsavedChanges())
@@ -1164,7 +1125,7 @@ namespace OVIA.Desktop
             if (grid != null)
             {
                 grid.Location = new Point(32, 178);
-                grid.Size = new Size(Math.Max(400, width - 64), Math.Max(260, height - 250));
+                grid.Size = new Size(Math.Max(400, width - 64), Math.Max(260, height - grid.Top - 18));
                 if (grid.Columns.Contains(ColumnContent))
                 {
                     int fixedWidth = 70 + 86 + 86 + 86 + 170 + 82 + 20;
@@ -1172,11 +1133,6 @@ namespace OVIA.Desktop
                 }
             }
 
-            if (lblStatus != null)
-            {
-                lblStatus.Width = Math.Max(1, width - 64);
-                lblStatus.Location = new Point(32, Math.Max(460, height - 66));
-            }
         }
 
         private void RequestLogout()

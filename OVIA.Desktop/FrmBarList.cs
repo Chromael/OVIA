@@ -45,6 +45,11 @@ namespace OVIA.Desktop
         private ContextMenuStrip gridContextMenu;
         private ToolStripMenuItem undoMenuItem;
         private ToolStripMenuItem redoMenuItem;
+        private ToolStripMenuItem rowCopyMenuItem;
+        private ToolStripMenuItem rowPasteMenuItem;
+        private BarListCellClipboardData cellClipboardData = null;
+        private List<object[]> rowClipboardRows = new List<object[]>();
+        private string rowClipboardSchemaKey = "";
         private List<GridUndoSnapshot> undoStates = new List<GridUndoSnapshot>();
         private List<GridUndoSnapshot> redoStates = new List<GridUndoSnapshot>();
         private GridUndoSnapshot cellEditBeforeSnapshot = null;
@@ -1083,6 +1088,14 @@ namespace OVIA.Desktop
             gridContextMenu.Items.Add(copyBottomItem);
 
             gridContextMenu.Items.Add(new ToolStripSeparator());
+
+            rowCopyMenuItem = new ToolStripMenuItem("행 복사");
+            rowCopyMenuItem.Click += ContextRowCopy_Click;
+            gridContextMenu.Items.Add(rowCopyMenuItem);
+
+            rowPasteMenuItem = new ToolStripMenuItem("행 붙여넣기");
+            rowPasteMenuItem.Click += ContextRowPaste_Click;
+            gridContextMenu.Items.Add(rowPasteMenuItem);
 
             ToolStripMenuItem addRowItem = new ToolStripMenuItem("행추가");
             addRowItem.Click += ContextAddRow_Click;
@@ -3150,6 +3163,29 @@ namespace OVIA.Desktop
 
         private void Grid_KeyDown(object sender, KeyEventArgs e)
         {
+            if (grid != null && grid.IsCurrentCellInEditMode
+                && e.Control && !e.Shift
+                && (e.KeyCode == Keys.C || e.KeyCode == Keys.V))
+            {
+                return;
+            }
+
+            if (e.Control && !e.Shift && e.KeyCode == Keys.C)
+            {
+                CopySelectedCellsToClipboard();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
+
+            if (e.Control && !e.Shift && e.KeyCode == Keys.V)
+            {
+                PasteCopiedCells();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
+
             if (e.Control && !e.Shift && e.KeyCode == Keys.Z)
             {
                 UndoGridAction();
@@ -3727,6 +3763,7 @@ namespace OVIA.Desktop
 
             EnsureAtLeastOneCellSelected();
             RefreshUndoRedoMenuState();
+            RefreshClipboardMenuState();
         }
 
         private bool CanUseExtractEditMenu()
@@ -3763,6 +3800,796 @@ namespace OVIA.Desktop
             {
                 grid.Rows[rowIndex].Cells[columnIndex].Selected = true;
             }
+        }
+
+
+        private void RefreshClipboardMenuState()
+        {
+            if (rowCopyMenuItem != null)
+            {
+                rowCopyMenuItem.Enabled = CanUseExtractEditMenu();
+            }
+
+            if (rowPasteMenuItem != null)
+            {
+                rowPasteMenuItem.Enabled = CanUseExtractEditMenu()
+                    && rowClipboardRows != null
+                    && rowClipboardRows.Count > 0
+                    && String.Equals(rowClipboardSchemaKey, BuildClipboardSchemaKey(), StringComparison.Ordinal);
+            }
+        }
+
+        private void CopySelectedCellsToClipboard()
+        {
+            if (!CanUseExtractEditMenu())
+            {
+                return;
+            }
+
+            List<DataGridViewCell> selectedCells = GetClipboardSelectedCells();
+
+            if (selectedCells.Count == 0)
+            {
+                MessageBox.Show(
+                    "복사할 셀을 먼저 선택해주세요.",
+                    "OVIA 셀 복사",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+                return;
+            }
+
+            int sourceColumnIndex = selectedCells[0].ColumnIndex;
+            int i;
+
+            for (i = 1; i < selectedCells.Count; i++)
+            {
+                if (selectedCells[i].ColumnIndex != sourceColumnIndex)
+                {
+                    MessageBox.Show(
+                        "셀 복사는 같은 세로 열에서만 가능합니다.\r\n\r\n한 종류의 셀만 선택한 뒤 Ctrl+C를 눌러주세요.",
+                        "OVIA 셀 복사",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning
+                    );
+                    return;
+                }
+            }
+
+            BarListCellClipboardData clipboard = new BarListCellClipboardData();
+            clipboard.SourceColumnIndex = sourceColumnIndex;
+            clipboard.SourceColumnKey = GetClipboardColumnKey(sourceColumnIndex);
+            clipboard.SourceColumnTitle = GetClipboardColumnTitle(sourceColumnIndex);
+            clipboard.SchemaKey = BuildClipboardSchemaKey();
+
+            List<int> copiedColumnIndexes = GetCellClipboardColumnIndexes(sourceColumnIndex);
+
+            for (i = 0; i < selectedCells.Count; i++)
+            {
+                DataGridViewCell sourceCell = selectedCells[i];
+                BarListCellClipboardEntry entry = new BarListCellClipboardEntry();
+                entry.SourceRowIndex = sourceCell.RowIndex;
+
+                int c;
+
+                for (c = 0; c < copiedColumnIndexes.Count; c++)
+                {
+                    int columnIndex = copiedColumnIndexes[c];
+                    object value = grid.Rows[sourceCell.RowIndex].Cells[columnIndex].Value;
+                    entry.ValuesByColumn[columnIndex] = value == null ? "" : value.ToString();
+                }
+
+                clipboard.Entries.Add(entry);
+            }
+
+            cellClipboardData = clipboard;
+            TrySetSystemClipboardText(GetCellClipboardDisplayText(selectedCells[0]));
+
+            lblStatus.Text = selectedCells.Count == 1
+                ? "[" + clipboard.SourceColumnTitle + "] 셀을 복사했습니다. 같은 세로 열의 셀에 Ctrl+V로 붙여넣을 수 있습니다."
+                : "[" + clipboard.SourceColumnTitle + "] 열의 " + selectedCells.Count.ToString() + "개 셀을 복사했습니다.";
+            lblStatus.ForeColor = TextSub;
+        }
+
+        private void PasteCopiedCells()
+        {
+            if (!CanUseExtractEditMenu())
+            {
+                return;
+            }
+
+            if (cellClipboardData == null || cellClipboardData.Entries.Count == 0)
+            {
+                MessageBox.Show(
+                    "OVIA에서 복사한 셀이 없습니다.\r\n\r\n먼저 같은 BarList에서 셀을 선택한 뒤 Ctrl+C를 눌러주세요.",
+                    "OVIA 셀 붙여넣기",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+                return;
+            }
+
+            if (!String.Equals(cellClipboardData.SchemaKey, BuildClipboardSchemaKey(), StringComparison.Ordinal))
+            {
+                MessageBox.Show(
+                    "복사한 셀과 현재 BarList의 열 구성이 달라 붙여넣을 수 없습니다.",
+                    "OVIA 셀 붙여넣기",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                return;
+            }
+
+            List<DataGridViewCell> targetCells = GetClipboardSelectedCells();
+
+            if (targetCells.Count == 0)
+            {
+                MessageBox.Show(
+                    "붙여넣을 대상 셀을 먼저 선택해주세요.",
+                    "OVIA 셀 붙여넣기",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+                return;
+            }
+
+            int targetColumnIndex = targetCells[0].ColumnIndex;
+            int i;
+
+            for (i = 1; i < targetCells.Count; i++)
+            {
+                if (targetCells[i].ColumnIndex != targetColumnIndex)
+                {
+                    MessageBox.Show(
+                        "여러 종류의 열에는 한 번에 붙여넣을 수 없습니다.\r\n\r\n같은 세로 열의 대상 셀만 선택해주세요.",
+                        "OVIA 셀 붙여넣기",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning
+                    );
+                    return;
+                }
+            }
+
+            string targetColumnKey = GetClipboardColumnKey(targetColumnIndex);
+
+            if (cellClipboardData.SourceColumnIndex != targetColumnIndex
+                || !String.Equals(cellClipboardData.SourceColumnKey, targetColumnKey, StringComparison.Ordinal))
+            {
+                MessageBox.Show(
+                    "복사한 [" + cellClipboardData.SourceColumnTitle + "] 셀은 ["
+                    + GetClipboardColumnTitle(targetColumnIndex)
+                    + "] 열에 붙여넣을 수 없습니다.\r\n\r\n같은 세로 열의 셀을 선택해주세요.",
+                    "OVIA 셀 붙여넣기",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                return;
+            }
+
+            if (grid.Columns[targetColumnIndex].ReadOnly || IsCalculatedResultColumn(targetColumnIndex))
+            {
+                MessageBox.Show(
+                    "[" + GetClipboardColumnTitle(targetColumnIndex)
+                    + "] 열은 자동 계산 또는 읽기 전용 열이므로 붙여넣을 수 없습니다.",
+                    "OVIA 셀 붙여넣기",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                return;
+            }
+
+            if (cellClipboardData.Entries.Count != 1
+                && cellClipboardData.Entries.Count != targetCells.Count)
+            {
+                MessageBox.Show(
+                    "복사한 셀 수와 붙여넣을 대상 셀 수가 다릅니다.\r\n\r\n"
+                    + "셀 하나를 복사하면 같은 열의 여러 셀에 일괄 붙여넣을 수 있습니다.\r\n"
+                    + "여러 셀을 복사한 경우에는 같은 수의 대상 셀을 선택해주세요.",
+                    "OVIA 셀 붙여넣기",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                return;
+            }
+
+            PushUndoState(CaptureGridState());
+
+            for (i = 0; i < targetCells.Count; i++)
+            {
+                BarListCellClipboardEntry entry = cellClipboardData.Entries.Count == 1
+                    ? cellClipboardData.Entries[0]
+                    : cellClipboardData.Entries[i];
+
+                ApplyCellClipboardEntry(entry, targetCells[i].RowIndex, targetColumnIndex);
+            }
+
+            ApplyRebarCalculationAndValidation(false);
+            MarkUnsaved();
+            RecalculateSummary();
+            grid.Invalidate();
+
+            lblStatus.Text = "[" + cellClipboardData.SourceColumnTitle + "] 값을 "
+                + targetCells.Count.ToString() + "개 셀에 붙여넣었습니다.";
+            lblStatus.ForeColor = TextSub;
+        }
+
+        private List<DataGridViewCell> GetClipboardSelectedCells()
+        {
+            List<DataGridViewCell> cells = new List<DataGridViewCell>();
+
+            if (grid == null)
+            {
+                return cells;
+            }
+
+            int i;
+
+            for (i = 0; i < grid.SelectedCells.Count; i++)
+            {
+                DataGridViewCell cell = grid.SelectedCells[i];
+
+                if (cell == null
+                    || cell.RowIndex < 0
+                    || cell.ColumnIndex < 0
+                    || cell.RowIndex >= grid.Rows.Count
+                    || cell.ColumnIndex >= grid.Columns.Count
+                    || grid.Rows[cell.RowIndex].IsNewRow
+                    || !grid.Columns[cell.ColumnIndex].Visible)
+                {
+                    continue;
+                }
+
+                cells.Add(cell);
+            }
+
+            if (cells.Count == 0 && grid.CurrentCell != null
+                && grid.CurrentCell.RowIndex >= 0
+                && grid.CurrentCell.ColumnIndex >= 0
+                && grid.CurrentCell.RowIndex < grid.Rows.Count
+                && grid.CurrentCell.ColumnIndex < grid.Columns.Count
+                && !grid.Rows[grid.CurrentCell.RowIndex].IsNewRow
+                && grid.Columns[grid.CurrentCell.ColumnIndex].Visible)
+            {
+                cells.Add(grid.CurrentCell);
+            }
+
+            cells.Sort(delegate(DataGridViewCell left, DataGridViewCell right)
+            {
+                int rowCompare = left.RowIndex.CompareTo(right.RowIndex);
+
+                if (rowCompare != 0)
+                {
+                    return rowCompare;
+                }
+
+                return left.ColumnIndex.CompareTo(right.ColumnIndex);
+            });
+
+            return cells;
+        }
+
+        private List<int> GetCellClipboardColumnIndexes(int sourceColumnIndex)
+        {
+            List<int> indexes = new List<int>();
+
+            if (sourceColumnIndex < 0 || sourceColumnIndex >= grid.Columns.Count)
+            {
+                return indexes;
+            }
+
+            if (!IsRebarShapeColumn(sourceColumnIndex))
+            {
+                indexes.Add(sourceColumnIndex);
+                return indexes;
+            }
+
+            int i;
+
+            for (i = 0; i < grid.Columns.Count; i++)
+            {
+                if (IsShapeClipboardColumn(i))
+                {
+                    indexes.Add(i);
+                }
+            }
+
+            if (!indexes.Contains(sourceColumnIndex))
+            {
+                indexes.Insert(0, sourceColumnIndex);
+            }
+
+            return indexes;
+        }
+
+        private bool IsShapeClipboardColumn(int columnIndex)
+        {
+            if (grid == null || columnIndex < 0 || columnIndex >= grid.Columns.Count)
+            {
+                return false;
+            }
+
+            if (IsRebarShapeColumn(columnIndex))
+            {
+                return true;
+            }
+
+            DataGridViewColumn column = grid.Columns[columnIndex];
+            string header = column.HeaderText == null ? "" : column.HeaderText.Trim();
+            string name = column.Name == null ? "" : column.Name.Trim();
+            string normalized = NormalizeInternalColumnToken(header + name);
+
+            if (normalized.IndexOf("형상", StringComparison.OrdinalIgnoreCase) >= 0
+                || normalized.IndexOf("SHAPE", StringComparison.OrdinalIgnoreCase) >= 0
+                || normalized.IndexOf("CADSHAPE", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            if (!column.Visible && IsShapeDimensionClipboardColumn(column))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool IsShapeDimensionClipboardColumn(DataGridViewColumn column)
+        {
+            if (column == null)
+            {
+                return false;
+            }
+
+            string header = column.HeaderText == null ? "" : column.HeaderText.Trim();
+            string name = column.Name == null ? "" : column.Name.Trim();
+            string[] keys = new string[] { "A", "B", "C", "D", "E", "F", "G", "H", "R1", "R2", "R3", "R4" };
+            int i;
+
+            for (i = 0; i < keys.Length; i++)
+            {
+                string[] candidates = GetDimensionHeaderCandidates(keys[i]);
+                int j;
+
+                for (j = 0; j < candidates.Length; j++)
+                {
+                    string candidate = candidates[j];
+
+                    if (header.Equals(candidate, StringComparison.OrdinalIgnoreCase)
+                        || name.Equals(candidate, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private void ApplyCellClipboardEntry(BarListCellClipboardEntry entry, int targetRowIndex, int targetColumnIndex)
+        {
+            if (entry == null
+                || targetRowIndex < 0
+                || targetRowIndex >= grid.Rows.Count
+                || grid.Rows[targetRowIndex].IsNewRow)
+            {
+                return;
+            }
+
+            if (!IsRebarShapeColumn(targetColumnIndex))
+            {
+                string value;
+
+                if (entry.ValuesByColumn.TryGetValue(cellClipboardData.SourceColumnIndex, out value))
+                {
+                    grid.Rows[targetRowIndex].Cells[targetColumnIndex].Value = value;
+                    RefreshModifiedCellVisual(targetRowIndex, targetColumnIndex);
+                }
+
+                return;
+            }
+
+            Dictionary<string, string> clonedJsonPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (KeyValuePair<int, string> pair in entry.ValuesByColumn)
+            {
+                int columnIndex = pair.Key;
+
+                if (columnIndex < 0 || columnIndex >= grid.Columns.Count)
+                {
+                    continue;
+                }
+
+                string value = pair.Value == null ? "" : pair.Value;
+
+                if (IsCadShapeJsonColumn(columnIndex) && value.Trim() != "")
+                {
+                    string clonedValue;
+
+                    if (!clonedJsonPaths.TryGetValue(value, out clonedValue))
+                    {
+                        clonedValue = CloneCadShapeJsonForPaste(value, targetRowIndex);
+                        clonedJsonPaths[value] = clonedValue;
+                    }
+
+                    value = clonedValue;
+                }
+
+                grid.Rows[targetRowIndex].Cells[columnIndex].Value = value;
+                RefreshModifiedCellVisual(targetRowIndex, columnIndex);
+            }
+
+            grid.InvalidateRow(targetRowIndex);
+        }
+
+        private string GetCellClipboardDisplayText(DataGridViewCell cell)
+        {
+            if (cell == null)
+            {
+                return "";
+            }
+
+            if (IsRebarShapeColumn(cell.ColumnIndex))
+            {
+                string dimensions = GetShapeDimensionText(cell.RowIndex);
+
+                if (dimensions != "")
+                {
+                    return dimensions;
+                }
+            }
+
+            object value = cell.Value;
+            return value == null ? "" : value.ToString();
+        }
+
+        private void TrySetSystemClipboardText(string value)
+        {
+            try
+            {
+                Clipboard.SetText(value == null ? "" : value);
+            }
+            catch
+            {
+                // Windows Clipboard가 잠겨 있어도 OVIA 내부 복사 데이터는 유지합니다.
+            }
+        }
+
+        private string GetClipboardColumnKey(int columnIndex)
+        {
+            if (grid == null || columnIndex < 0 || columnIndex >= grid.Columns.Count)
+            {
+                return "";
+            }
+
+            DataGridViewColumn column = grid.Columns[columnIndex];
+            OviaBarListMappedColumn mapped = column.Tag as OviaBarListMappedColumn;
+
+            if (mapped != null && mapped.StandardKey != null && mapped.StandardKey.Trim() != "")
+            {
+                return "MAP:" + mapped.StandardKey.Trim().ToUpperInvariant();
+            }
+
+            string header = column.HeaderText == null ? "" : column.HeaderText;
+            string name = column.Name == null ? "" : column.Name;
+            return "COL:" + NormalizeInternalColumnToken(header + "|" + name);
+        }
+
+        private string GetClipboardColumnTitle(int columnIndex)
+        {
+            if (grid == null || columnIndex < 0 || columnIndex >= grid.Columns.Count)
+            {
+                return "";
+            }
+
+            string title = grid.Columns[columnIndex].HeaderText;
+
+            if (title == null || title.Trim() == "")
+            {
+                title = grid.Columns[columnIndex].Name;
+            }
+
+            return title == null ? "" : title.Trim();
+        }
+
+        private string BuildClipboardSchemaKey()
+        {
+            if (grid == null)
+            {
+                return "";
+            }
+
+            StringBuilder builder = new StringBuilder();
+            builder.Append(grid.Columns.Count.ToString(CultureInfo.InvariantCulture));
+            int i;
+
+            for (i = 0; i < grid.Columns.Count; i++)
+            {
+                builder.Append("|");
+                builder.Append(GetClipboardColumnKey(i));
+            }
+
+            return builder.ToString();
+        }
+
+        private bool IsCadShapeJsonColumn(int columnIndex)
+        {
+            if (grid == null || columnIndex < 0 || columnIndex >= grid.Columns.Count)
+            {
+                return false;
+            }
+
+            string header = grid.Columns[columnIndex].HeaderText == null ? "" : grid.Columns[columnIndex].HeaderText;
+            string name = grid.Columns[columnIndex].Name == null ? "" : grid.Columns[columnIndex].Name;
+            string normalized = NormalizeInternalColumnToken(header + name);
+
+            return normalized.IndexOf("CADSHAPEJSON", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private string CloneCadShapeJsonForPaste(string savedValue, int targetRowIndex)
+        {
+            if (savedValue == null || savedValue.Trim() == "")
+            {
+                return "";
+            }
+
+            string sourcePath = ResolveCadShapeJsonPath(savedValue);
+
+            if (sourcePath == "" || !File.Exists(sourcePath))
+            {
+                return savedValue;
+            }
+
+            try
+            {
+                string tempDirectory = Path.Combine(Path.GetTempPath(), "OVIA", "ShapeClipboard");
+                Directory.CreateDirectory(tempDirectory);
+
+                string extension = Path.GetExtension(sourcePath);
+
+                if (extension == null || extension.Trim() == "")
+                {
+                    extension = ".json";
+                }
+
+                string baseName = Path.GetFileNameWithoutExtension(sourcePath);
+
+                if (baseName == null || baseName.Trim() == "")
+                {
+                    baseName = "cad_shape";
+                }
+
+                string token = Guid.NewGuid().ToString("N").Substring(0, 12);
+                string targetFileName = baseName
+                    + "_copy_r"
+                    + (targetRowIndex + 1).ToString("000", CultureInfo.InvariantCulture)
+                    + "_"
+                    + token
+                    + extension;
+                string targetPath = Path.Combine(tempDirectory, targetFileName);
+
+                File.Copy(sourcePath, targetPath, false);
+
+                try
+                {
+                    CadShapeEditDocument targetDocument = CadShapeEditDocument.Load(targetPath);
+                    string originalValue = targetDocument.OriginalSourcePath == null
+                        ? ""
+                        : targetDocument.OriginalSourcePath.Trim();
+
+                    if (originalValue != "")
+                    {
+                        string originalPath = originalValue;
+
+                        if (!Path.IsPathRooted(originalPath))
+                        {
+                            string sourceDirectory = Path.GetDirectoryName(sourcePath);
+
+                            if (sourceDirectory != null && sourceDirectory.Trim() != "")
+                            {
+                                originalPath = Path.Combine(
+                                    sourceDirectory,
+                                    originalPath.Replace('/', Path.DirectorySeparatorChar)
+                                );
+                            }
+                        }
+
+                        if (File.Exists(originalPath))
+                        {
+                            string rawExtension = Path.GetExtension(originalPath);
+
+                            if (rawExtension == null || rawExtension.Trim() == "")
+                            {
+                                rawExtension = ".json";
+                            }
+
+                            string rawFileName = baseName + "_copy_raw_" + token + rawExtension;
+                            string targetRawPath = Path.Combine(tempDirectory, rawFileName);
+                            File.Copy(originalPath, targetRawPath, false);
+                            targetDocument.OriginalSourcePath = rawFileName;
+                            targetDocument.Save(targetPath);
+                        }
+                    }
+                }
+                catch
+                {
+                    // 동반 원본 복제 실패 시에도 독립 편집 JSON 복사본은 사용합니다.
+                }
+
+                return targetPath;
+            }
+            catch
+            {
+                return savedValue;
+            }
+        }
+
+        private void ContextRowCopy_Click(object sender, EventArgs e)
+        {
+            if (!CanUseExtractEditMenu())
+            {
+                return;
+            }
+
+            List<int> selectedIndexes = GetSelectedRowIndexes(true);
+
+            if (selectedIndexes.Count == 0)
+            {
+                MessageBox.Show(
+                    "복사할 행을 먼저 선택해주세요.",
+                    "OVIA 행 복사",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+                return;
+            }
+
+            rowClipboardRows = new List<object[]>();
+            int i;
+
+            for (i = 0; i < selectedIndexes.Count; i++)
+            {
+                rowClipboardRows.Add(CloneRowValues(grid.Rows[selectedIndexes[i]]));
+            }
+
+            rowClipboardSchemaKey = BuildClipboardSchemaKey();
+            RefreshClipboardMenuState();
+
+            lblStatus.Text = selectedIndexes.Count == 1
+                ? "행 전체를 복사했습니다. 추가한 행 또는 기존 행을 선택한 뒤 [행 붙여넣기]를 사용할 수 있습니다."
+                : selectedIndexes.Count.ToString() + "개 행을 복사했습니다.";
+            lblStatus.ForeColor = TextSub;
+        }
+
+        private void ContextRowPaste_Click(object sender, EventArgs e)
+        {
+            if (!CanUseExtractEditMenu())
+            {
+                return;
+            }
+
+            if (rowClipboardRows == null || rowClipboardRows.Count == 0)
+            {
+                MessageBox.Show(
+                    "복사한 행이 없습니다.\r\n\r\n우클릭 메뉴에서 [행 복사]를 먼저 실행해주세요.",
+                    "OVIA 행 붙여넣기",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+                return;
+            }
+
+            if (!String.Equals(rowClipboardSchemaKey, BuildClipboardSchemaKey(), StringComparison.Ordinal))
+            {
+                MessageBox.Show(
+                    "복사한 행과 현재 BarList의 열 구성이 달라 붙여넣을 수 없습니다.",
+                    "OVIA 행 붙여넣기",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                return;
+            }
+
+            List<int> targetIndexes = GetSelectedRowIndexes(true);
+
+            if (targetIndexes.Count == 0)
+            {
+                MessageBox.Show(
+                    "붙여넣을 대상 행을 먼저 선택해주세요.",
+                    "OVIA 행 붙여넣기",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+                return;
+            }
+
+            if (rowClipboardRows.Count > 1 && targetIndexes.Count == 1)
+            {
+                int startIndex = targetIndexes[0];
+
+                if (startIndex + rowClipboardRows.Count > grid.Rows.Count)
+                {
+                    MessageBox.Show(
+                        "복사한 행 수만큼 붙여넣을 대상 행이 부족합니다.\r\n\r\n행을 추가한 뒤 다시 실행해주세요.",
+                        "OVIA 행 붙여넣기",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning
+                    );
+                    return;
+                }
+
+                targetIndexes.Clear();
+                int rowOffset;
+
+                for (rowOffset = 0; rowOffset < rowClipboardRows.Count; rowOffset++)
+                {
+                    targetIndexes.Add(startIndex + rowOffset);
+                }
+            }
+            else if (rowClipboardRows.Count != 1 && rowClipboardRows.Count != targetIndexes.Count)
+            {
+                MessageBox.Show(
+                    "복사한 행 수와 붙여넣을 대상 행 수가 다릅니다.\r\n\r\n"
+                    + "행 하나를 복사하면 여러 행에 반복해서 붙여넣을 수 있습니다.\r\n"
+                    + "여러 행을 복사한 경우에는 같은 수의 대상 행을 선택해주세요.",
+                    "OVIA 행 붙여넣기",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                return;
+            }
+
+            PushUndoState(CaptureGridState());
+
+            int i;
+
+            for (i = 0; i < targetIndexes.Count; i++)
+            {
+                object[] sourceValues = rowClipboardRows.Count == 1
+                    ? rowClipboardRows[0]
+                    : rowClipboardRows[i];
+
+                ApplyRowClipboardValues(targetIndexes[i], sourceValues);
+            }
+
+            ApplyRebarCalculationAndValidation(false);
+            MarkUnsaved();
+            RecalculateSummary();
+            grid.Invalidate();
+
+            lblStatus.Text = rowClipboardRows.Count == 1
+                ? "복사한 행을 " + targetIndexes.Count.ToString() + "개 대상 행에 붙여넣었습니다."
+                : rowClipboardRows.Count.ToString() + "개 행을 붙여넣었습니다.";
+            lblStatus.ForeColor = TextSub;
+        }
+
+        private void ApplyRowClipboardValues(int targetRowIndex, object[] sourceValues)
+        {
+            if (sourceValues == null
+                || sourceValues.Length != grid.Columns.Count
+                || targetRowIndex < 0
+                || targetRowIndex >= grid.Rows.Count
+                || grid.Rows[targetRowIndex].IsNewRow)
+            {
+                return;
+            }
+
+            int c;
+
+            for (c = 0; c < grid.Columns.Count; c++)
+            {
+                string value = sourceValues[c] == null ? "" : sourceValues[c].ToString();
+
+                if (IsCadShapeJsonColumn(c) && value.Trim() != "")
+                {
+                    value = CloneCadShapeJsonForPaste(value, targetRowIndex);
+                }
+
+                grid.Rows[targetRowIndex].Cells[c].Value = value;
+                RefreshModifiedCellVisual(targetRowIndex, c);
+            }
+
+            ResetImportedCalculationMetaForRows(targetRowIndex, targetRowIndex);
+            grid.InvalidateRow(targetRowIndex);
         }
 
         private void ContextSelectAll_Click(object sender, EventArgs e)
@@ -7666,8 +8493,95 @@ namespace OVIA.Desktop
             lblRowCount.Text = rowCount.ToString("N0", CultureInfo.InvariantCulture);
             lblTotalQty.Text = totalQty.ToString("#,0.###", CultureInfo.InvariantCulture);
             lblTotalLength.Text = totalLength.ToString("#,0.###", CultureInfo.InvariantCulture);
-            lblTotalWeight.Text = totalWeight.ToString("#,0.###", CultureInfo.InvariantCulture);
+
+            decimal preciseTotalWeightTon;
+
+            if (TryCalculatePreciseSummaryWeightTon(out preciseTotalWeightTon))
+            {
+                /*
+                 * 행별 중량 셀은 화면 계약에 따라 소수 셋째 자리로 표시하지만,
+                 * 합계는 각 행의 표시값을 다시 더하지 않습니다.
+                 * 길이×수량×단위중량의 반올림 전 값을 모두 합산한 뒤 마지막에 한 번만
+                 * 소수 셋째 자리 반올림하여 CAD 총합계와 같은 계산 순서를 사용합니다.
+                 */
+                decimal roundedTotalWeight = Decimal.Round(preciseTotalWeightTon, 3, MidpointRounding.AwayFromZero);
+                lblTotalWeight.Text = roundedTotalWeight.ToString("#,0.###", CultureInfo.InvariantCulture);
+            }
+            else
+            {
+                // 규격/길이/수량 또는 단위중량이 없는 수동·비표준 데이터는 기존 셀 합산을 유지합니다.
+                lblTotalWeight.Text = totalWeight.ToString("#,0.###", CultureInfo.InvariantCulture);
+            }
+
             RefreshProjectContextHeaderFromGrid();
+        }
+
+        private bool TryCalculatePreciseSummaryWeightTon(out decimal totalWeightTon)
+        {
+            totalWeightTon = 0M;
+
+            int specCol = FindRebarSpecColumnIndex();
+            int lengthCol = FindSingleLengthColumnIndex();
+            int qtyCol = FindQuantityColumnIndex();
+
+            if (specCol < 0 || lengthCol < 0 || qtyCol < 0)
+            {
+                return false;
+            }
+
+            Dictionary<string, double> unitWeights = OviaRebarUnitWeightStore.LoadEnabledUnitWeights();
+
+            if (unitWeights == null || unitWeights.Count == 0)
+            {
+                return false;
+            }
+
+            int dataRowCount = 0;
+            int calculatedRowCount = 0;
+            int r;
+
+            for (r = 0; r < grid.Rows.Count; r++)
+            {
+                if (grid.Rows[r].IsNewRow)
+                {
+                    continue;
+                }
+
+                dataRowCount++;
+
+                string baseSpec = ExtractBaseRebarSpec(GetCellText(r, specCol));
+                double unitWeightKgM;
+                decimal lengthMm;
+                decimal qty;
+
+                if (baseSpec == ""
+                    || !unitWeights.TryGetValue(baseSpec, out unitWeightKgM)
+                    || !TryParseDecimalNumber(GetCellText(r, lengthCol), out lengthMm)
+                    || !TryParseDecimalNumber(GetCellText(r, qtyCol), out qty)
+                    || lengthMm <= 0M
+                    || qty <= 0M)
+                {
+                    return false;
+                }
+
+                decimal unitWeightDecimal;
+
+                if (!Decimal.TryParse(
+                    unitWeightKgM.ToString("R", CultureInfo.InvariantCulture),
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out unitWeightDecimal))
+                {
+                    return false;
+                }
+
+                decimal rowLengthM = (lengthMm / 1000M) * qty;
+                decimal rowWeightTon = (rowLengthM * unitWeightDecimal) / 1000M;
+                totalWeightTon += rowWeightTon;
+                calculatedRowCount++;
+            }
+
+            return dataRowCount > 0 && calculatedRowCount == dataRowCount;
         }
 
         private void MarkUnsaved()
@@ -9174,6 +10088,22 @@ namespace OVIA.Desktop
             }
 
             return "D" + match.Groups[1].Value;
+        }
+
+
+        private class BarListCellClipboardData
+        {
+            public int SourceColumnIndex = -1;
+            public string SourceColumnKey = "";
+            public string SourceColumnTitle = "";
+            public string SchemaKey = "";
+            public List<BarListCellClipboardEntry> Entries = new List<BarListCellClipboardEntry>();
+        }
+
+        private class BarListCellClipboardEntry
+        {
+            public int SourceRowIndex = -1;
+            public Dictionary<int, string> ValuesByColumn = new Dictionary<int, string>();
         }
 
         private class RebarCalculationCellMeta

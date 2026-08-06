@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 using OVIA.Desktop.Controls;
@@ -9,38 +9,33 @@ namespace OVIA.Desktop
     /// WebView2 전환 단계에서 Web ERP 페이지를 OVIA Desktop 내부에 표시하는 공통 화면입니다.
     /// AutoCAD 제어와 로컬 설치 환경 체크는 WinForms/C#에 남기고, 공사등록 같은 업무 콘텐츠는 Web ERP로 이전합니다.
     /// </summary>
-    public class FrmOviaWebErpPage : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider, IOviaWorkspaceBrowserNavigation
+    public class FrmOviaWebErpPage : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceBrowserNavigation
     {
         private readonly string companyId;
         private readonly string userId;
-        private readonly string workspaceHelpKey;
-        private readonly string workspaceHelpTitle;
-        private readonly string workspaceHelpText;
+        private readonly string workspaceMenuKey;
+        private readonly string workspaceTitle;
+        private readonly string workspaceDescription;
         private readonly string pathText;
         private readonly string selectedMenu;
         private readonly string routePath;
 
         private OviaWebViewHost webViewHost;
         private OviaWorkspaceHeader workspaceHeader;
-        private Label lblStatus;
 
-        public FrmOviaWebErpPage(string companyId, string userId, string key, string title, string pathText, string selectedMenu, string routePath, string helpText)
+        public FrmOviaWebErpPage(string companyId, string userId, string key, string title, string pathText, string selectedMenu, string routePath, string descriptionText)
         {
             this.companyId = companyId == null ? string.Empty : companyId;
             this.userId = userId == null ? string.Empty : userId;
-            this.workspaceHelpKey = string.IsNullOrWhiteSpace(key) ? "WEB_ERP_PAGE" : key.Trim();
-            this.workspaceHelpTitle = string.IsNullOrWhiteSpace(title) ? "Web ERP" : title.Trim();
-            this.pathText = string.IsNullOrWhiteSpace(pathText) ? "메인  ›  " + this.workspaceHelpTitle : pathText;
+            this.workspaceMenuKey = string.IsNullOrWhiteSpace(key) ? "WEB_ERP_PAGE" : key.Trim();
+            this.workspaceTitle = string.IsNullOrWhiteSpace(title) ? "Web ERP" : title.Trim();
+            this.pathText = string.IsNullOrWhiteSpace(pathText) ? "메인  ›  " + this.workspaceTitle : pathText;
             this.selectedMenu = string.IsNullOrWhiteSpace(selectedMenu) ? string.Empty : selectedMenu;
             this.routePath = string.IsNullOrWhiteSpace(routePath) ? string.Empty : routePath.Trim();
-            this.workspaceHelpText = string.IsNullOrWhiteSpace(helpText) ? this.workspaceHelpTitle + " Web ERP 페이지입니다." : helpText;
+            this.workspaceDescription = string.IsNullOrWhiteSpace(descriptionText) ? this.workspaceTitle + " Web ERP 페이지입니다." : descriptionText;
 
             BuildUI();
         }
-
-        public string WorkspaceHelpKey { get { return workspaceHelpKey; } }
-        public string WorkspaceHelpTitle { get { return workspaceHelpTitle; } }
-        public string WorkspaceHelpText { get { return workspaceHelpText; } }
 
         private void BuildUI()
         {
@@ -49,7 +44,7 @@ namespace OVIA.Desktop
             OviaFluentTheme.ApplyForm(this);
             Controls.Clear();
 
-            Text = "OVIA - " + workspaceHelpTitle;
+            Text = "OVIA - " + workspaceTitle;
             Font = OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
@@ -115,19 +110,6 @@ namespace OVIA.Desktop
             UpdateHeaderNavigationState();
         }
 
-        private void BuildStatus(Control parent)
-        {
-            lblStatus = new Label();
-            lblStatus.AutoSize = false;
-            lblStatus.Location = new Point(32, 638);
-            lblStatus.Size = new Size(1116, 24);
-            lblStatus.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
-            lblStatus.Font = OviaFluentTheme.FontStatus(8.5F, FontStyle.Regular);
-            lblStatus.ForeColor = OviaFluentTheme.TextMuted;
-            lblStatus.Text = "Web ERP 연결 페이지입니다. 주소: " + ResolveWebErpUrl();
-            parent.Controls.Add(lblStatus);
-        }
-
         private void CommandBar_Paint(object sender, PaintEventArgs e)
         {
             Control control = sender as Control;
@@ -147,13 +129,13 @@ namespace OVIA.Desktop
         {
             OviaSystemSettings settings = OviaSystemSettingsStore.Load();
 
-            if (string.Equals(workspaceHelpKey, "ERP", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(workspaceMenuKey, "ERP", StringComparison.OrdinalIgnoreCase))
             {
                 return OviaSystemSettingsStore.BuildErpConnectionUrl(settings);
             }
 
-            string moduleName = OviaMenuHelpStore.GetErpModuleName(workspaceHelpKey);
-            if (OviaMenuHelpStore.IsErpLoadEnabled(workspaceHelpKey) && moduleName != "")
+            string moduleName = OviaMenuSettingsStore.GetErpModuleName(workspaceMenuKey);
+            if (OviaMenuSettingsStore.IsErpLoadEnabled(workspaceMenuKey) && moduleName != "")
             {
                 return OviaSystemSettingsStore.BuildErpModuleUrl(settings, moduleName);
             }
@@ -207,11 +189,6 @@ namespace OVIA.Desktop
             {
                 webViewHost.Navigate(url);
             }
-
-            if (lblStatus != null)
-            {
-                lblStatus.Text = "Web ERP 페이지를 새로고침했습니다. " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " / 주소: " + url;
-            }
         }
 
         private void NavigateBackOrMain()
@@ -252,7 +229,7 @@ namespace OVIA.Desktop
 
             if (normalized == "SETTINGS")
             {
-                workspace.NavigateToWorkspaceInfoPage("SETTINGS", OviaMenuHelpStore.GetWorkspacePath("SETTINGS", "메인  ›  환경설정"), OviaMenuHelpStore.GetMenuName("SETTINGS", "환경설정"), "SETTINGS", "OVIA 시스템 동작과 양식/출력 환경 설정을 관리합니다.", "환경설정의 세부 설정은 드롭다운 메뉴에서 선택합니다.");
+                workspace.NavigateToWorkspaceInfoPage("SETTINGS", OviaMenuSettingsStore.GetWorkspacePath("SETTINGS", "메인  ›  환경설정"), OviaMenuSettingsStore.GetMenuName("SETTINGS", "환경설정"), "SETTINGS", "OVIA 시스템 동작과 양식/출력 환경 설정을 관리합니다.", "환경설정의 세부 설정은 드롭다운 메뉴에서 선택합니다.");
                 return;
             }
 
@@ -277,17 +254,10 @@ namespace OVIA.Desktop
 
         public void ApplyWorkspaceLayout()
         {
-            int width = Math.Max(1, ClientSize.Width - 64);
             if (webViewHost != null)
             {
-                webViewHost.Width = width;
-                webViewHost.Height = Math.Max(250, ClientSize.Height - 184);
-            }
-
-            if (lblStatus != null)
-            {
-                lblStatus.Top = Math.Max(0, ClientSize.Height - 58);
-                lblStatus.Width = width;
+                webViewHost.Width = Math.Max(1, ClientSize.Width);
+                webViewHost.Height = Math.Max(1, ClientSize.Height - webViewHost.Top);
             }
         }
 
@@ -319,11 +289,6 @@ namespace OVIA.Desktop
         public bool RefreshBrowser()
         {
             bool reloaded = webViewHost != null && webViewHost.TryReloadCurrentWebViewPage();
-
-            if (reloaded && lblStatus != null)
-            {
-                lblStatus.Text = "Web ERP 현재 페이지를 새로고침했습니다. " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-            }
 
             UpdateHeaderNavigationState();
             return reloaded;

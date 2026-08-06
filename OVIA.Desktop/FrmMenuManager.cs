@@ -11,14 +11,7 @@ using OVIA.Desktop.Controls;
 
 namespace OVIA.Desktop
 {
-    public interface IOviaWorkspaceHelpProvider
-    {
-        string WorkspaceHelpKey { get; }
-        string WorkspaceHelpTitle { get; }
-        string WorkspaceHelpText { get; }
-    }
-
-    public class FrmMenuManager : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider, IOviaWorkspaceUnsavedState
+    public class FrmMenuManager : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceUnsavedState
     {
         private readonly string companyId;
         private readonly string userId;
@@ -33,7 +26,6 @@ namespace OVIA.Desktop
         private Panel bottomButtonPanel;
         private DataGridView grid;
         private Label lblStatus;
-        private Button btnEditHelp;
         private Button btnSave;
         private Button btnIconReference;
         private Button btnClose;
@@ -44,8 +36,6 @@ namespace OVIA.Desktop
         private bool isSynchronizingGridValues;
         private string originalRowsSignature = string.Empty;
         private const string FluentIconReferenceUrl = "https://learn.microsoft.com/ko-kr/windows/apps/design/iconography/segoe-fluent-icons-font";
-        private int hoveredHelpButtonRowIndex = -1;
-        private int hoveredHelpButtonColumnIndex = -1;
 
         private bool isApplyingGridLayout = false;
         private bool isApplyingWorkspaceBounds = false;
@@ -58,17 +48,7 @@ namespace OVIA.Desktop
             this.canEdit = OviaSystemSettingsStore.IsSystemAdministrator(this.companyId, this.userId);
 
             BuildUI();
-            LoadRowsToGrid(OviaMenuHelpStore.Load());
-        }
-
-        public string WorkspaceHelpKey { get { return "MENU_MANAGER"; } }
-        public string WorkspaceHelpTitle { get { return "메뉴관리"; } }
-        public string WorkspaceHelpText
-        {
-            get
-            {
-                return "OVIA 메뉴와 페이지의 사용 여부와 사용자 권한 레벨(1~10)을 관리합니다.";
-            }
+            LoadRowsToGrid(OviaMenuSettingsStore.Load());
         }
 
         private void BuildUI()
@@ -103,10 +83,10 @@ namespace OVIA.Desktop
         {
             OviaWorkspaceHeader.AddTo(
                 parent,
-                OviaMenuHelpStore.GetWorkspacePath("MENU_MANAGER", "메인  ›  환경설정  ›  메뉴관리"),
+                OviaMenuSettingsStore.GetWorkspacePath("MENU_MANAGER", "메인  ›  환경설정  ›  메뉴관리"),
                 delegate { Close(); },
                 delegate { Close(); },
-                delegate { LoadRowsToGrid(OviaMenuHelpStore.Load()); },
+                delegate { LoadRowsToGrid(OviaMenuSettingsStore.Load()); },
                 delegate { RequestLogout(); },
                 true,
                 true,
@@ -207,8 +187,6 @@ namespace OVIA.Desktop
             grid.CellDoubleClick += Grid_CellDoubleClick;
             grid.CellFormatting += Grid_CellFormatting;
             grid.CellPainting += Grid_CellPainting;
-            grid.CellMouseEnter += Grid_CellMouseEnter;
-            grid.CellMouseLeave += Grid_CellMouseLeave;
             grid.DataError += Grid_DataError;
             grid.ColumnWidthChanged += Grid_ColumnWidthChanged;
             grid.RowHeightChanged += Grid_RowHeightChanged;
@@ -416,7 +394,7 @@ namespace OVIA.Desktop
         private void LoadRowsToGrid(List<OviaMenuSetting> settings)
         {
             isLoading = true;
-            rows = settings == null ? OviaMenuHelpStore.CreateDefaultSettings() : settings;
+            rows = settings == null ? OviaMenuSettingsStore.CreateDefaultSettings() : settings;
             grid.Rows.Clear();
 
             int i;
@@ -431,11 +409,11 @@ namespace OVIA.Desktop
 
                 int index = grid.Rows.Add();
                 grid.Rows[index].Cells["LevelMarker"].Value = GetLevelMarker(row.Level);
-                grid.Rows[index].Cells["Icon"].Value = OviaMenuHelpStore.GetIconGlyphFromCode(row.IconCode, string.Empty);
+                grid.Rows[index].Cells["Icon"].Value = OviaMenuSettingsStore.GetIconGlyphFromCode(row.IconCode, string.Empty);
                 grid.Rows[index].Cells["IconCode"].Value = row.IconCode;
                 grid.Rows[index].Cells["MenuName"].Value = row.MenuName;
                 grid.Rows[index].Cells["Key"].Value = row.Key;
-                grid.Rows[index].Cells["ModulePath"].Value = OviaMenuHelpStore.GetModulePath(row.Key);
+                grid.Rows[index].Cells["ModulePath"].Value = OviaMenuSettingsStore.GetModulePath(row.Key);
                 grid.Rows[index].Cells["ErpLoad"].Value = row.ErpLoad;
                 grid.Rows[index].Cells["ErpModuleName"].Value = row.ErpModuleName;
                 grid.Rows[index].Cells["Enabled"].Value = row.Enabled;
@@ -462,7 +440,7 @@ namespace OVIA.Desktop
 
         private static bool IsBrowserOnlyErpShortcutRow(OviaMenuSetting row)
         {
-            return row != null && OviaMenuHelpStore.IsBrowserOnlyErpShortcut(row.Key);
+            return row != null && OviaMenuSettingsStore.IsBrowserOnlyErpShortcut(row.Key);
         }
 
         private static bool IsErpModuleEditableRow(OviaMenuSetting row)
@@ -539,12 +517,6 @@ namespace OVIA.Desktop
             }
 
             string columnName = grid.Columns[e.ColumnIndex].Name;
-            if (columnName == "EditHelp")
-            {
-                PaintHelpInputButton(e);
-                return;
-            }
-
             if (columnName != "Enabled" && columnName != "ErpLoad")
             {
                 return;
@@ -610,59 +582,6 @@ namespace OVIA.Desktop
 
             e.Handled = true;
         }
-
-        private void PaintHelpInputButton(DataGridViewCellPaintingEventArgs e)
-        {
-            bool selected = (e.State & DataGridViewElementStates.Selected) == DataGridViewElementStates.Selected;
-            Color cellBack = selected ? grid.DefaultCellStyle.SelectionBackColor : e.CellStyle.BackColor;
-            if (cellBack == Color.Empty)
-            {
-                cellBack = Color.White;
-            }
-
-            using (SolidBrush backBrush = new SolidBrush(cellBack))
-            {
-                e.Graphics.FillRectangle(backBrush, e.CellBounds);
-            }
-
-            using (Pen linePen = new Pen(OviaFluentTheme.CardBorder, 1))
-            {
-                e.Graphics.DrawLine(linePen, e.CellBounds.Left, e.CellBounds.Bottom - 1, e.CellBounds.Right, e.CellBounds.Bottom - 1);
-            }
-
-            int buttonWidth = Math.Min(84, Math.Max(74, e.CellBounds.Width - 14));
-            int buttonHeight = 23;
-            Rectangle buttonRect = new Rectangle(
-                e.CellBounds.Left + Math.Max(4, (e.CellBounds.Width - buttonWidth) / 2),
-                e.CellBounds.Top + Math.Max(3, (e.CellBounds.Height - buttonHeight) / 2),
-                buttonWidth,
-                buttonHeight);
-
-            bool hovered = e.RowIndex == hoveredHelpButtonRowIndex && e.ColumnIndex == hoveredHelpButtonColumnIndex;
-            Color fill = canEdit ? (hovered ? OviaFluentTheme.PrimaryActionHoverBack : Color.White) : Color.FromArgb(226, 229, 234);
-            Color border = canEdit ? (hovered ? OviaFluentTheme.PrimaryActionHoverBack : OviaFluentTheme.ControlBorder) : Color.FromArgb(205, 210, 218);
-            Color fore = canEdit ? (hovered ? Color.White : TextDark) : TextSub;
-
-            using (GraphicsPath path = CreateRoundRectPath(new Rectangle(buttonRect.X, buttonRect.Y, buttonRect.Width - 1, buttonRect.Height - 1), 4))
-            using (SolidBrush brush = new SolidBrush(fill))
-            using (Pen pen = new Pen(border, 1))
-            {
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                e.Graphics.FillPath(brush, path);
-                e.Graphics.DrawPath(pen, path);
-            }
-
-            TextRenderer.DrawText(
-                e.Graphics,
-                "도움말 입력",
-                OviaFluentTheme.FontData(8F, FontStyle.Regular),
-                buttonRect,
-                fore,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
-
-            e.Handled = true;
-        }
-
 
         private void Grid_ForwardMouseWheelToContentScrollPanel(object sender, MouseEventArgs e)
         {
@@ -784,9 +703,9 @@ namespace OVIA.Desktop
                 sb.Append('|');
                 sb.Append(row.Enabled ? "1" : "0");
                 sb.Append('|');
-                sb.Append(OviaMenuHelpStore.NormalizePermissionLevel(row.PermissionLevel).ToString());
+                sb.Append(OviaMenuSettingsStore.NormalizePermissionLevel(row.PermissionLevel).ToString());
                 sb.Append('|');
-                sb.Append(OviaMenuHelpStore.NormalizeIconCode(row.IconCode));
+                sb.Append(OviaMenuSettingsStore.NormalizeIconCode(row.IconCode));
                 sb.Append('|');
                 bool signatureErpLoad = !IsBrowserOnlyErpShortcutRow(row) && row.ErpLoad;
                 string signatureErpModuleName = IsBrowserOnlyErpShortcutRow(row) ? string.Empty : OviaSystemSettingsStore.NormalizeErpModuleName(row.ErpModuleName);
@@ -794,7 +713,6 @@ namespace OVIA.Desktop
                 sb.Append('|');
                 sb.Append(signatureErpModuleName);
                 sb.Append('|');
-                sb.Append(row.HelpText == null ? string.Empty : row.HelpText);
                 sb.AppendLine();
             }
 
@@ -836,7 +754,7 @@ namespace OVIA.Desktop
             }
 
             row.MenuName = NormalizeMenuName(grid.Rows[rowIndex].Cells["MenuName"].Value, row.MenuName);
-            row.IconCode = OviaMenuHelpStore.NormalizeIconCode(GetCellText(rowIndex, "IconCode"));
+            row.IconCode = OviaMenuSettingsStore.NormalizeIconCode(GetCellText(rowIndex, "IconCode"));
             if (IsBrowserOnlyErpShortcutRow(row))
             {
                 row.ErpLoad = false;
@@ -855,7 +773,7 @@ namespace OVIA.Desktop
                 isSynchronizingGridValues = true;
                 grid.Rows[rowIndex].Cells["MenuName"].Value = row.MenuName;
                 grid.Rows[rowIndex].Cells["IconCode"].Value = row.IconCode;
-                grid.Rows[rowIndex].Cells["Icon"].Value = OviaMenuHelpStore.GetIconGlyphFromCode(row.IconCode, string.Empty);
+                grid.Rows[rowIndex].Cells["Icon"].Value = OviaMenuSettingsStore.GetIconGlyphFromCode(row.IconCode, string.Empty);
                 grid.Rows[rowIndex].Cells["ErpLoad"].Value = row.ErpLoad;
                 grid.Rows[rowIndex].Cells["ErpModuleName"].Value = row.ErpModuleName;
             }
@@ -932,7 +850,7 @@ namespace OVIA.Desktop
 
         private static string GetPermissionLevelText(int level)
         {
-            int normalized = OviaMenuHelpStore.NormalizePermissionLevel(level);
+            int normalized = OviaMenuSettingsStore.NormalizePermissionLevel(level);
             return "레벨 " + normalized.ToString();
         }
 
@@ -940,7 +858,7 @@ namespace OVIA.Desktop
         {
             if (value == null)
             {
-                return OviaMenuHelpStore.NormalizePermissionLevel(fallback);
+                return OviaMenuSettingsStore.NormalizePermissionLevel(fallback);
             }
 
             string text = value.ToString().Trim();
@@ -965,49 +883,10 @@ namespace OVIA.Desktop
             int parsed;
             if (int.TryParse(digits, out parsed))
             {
-                return OviaMenuHelpStore.NormalizePermissionLevel(parsed);
+                return OviaMenuSettingsStore.NormalizePermissionLevel(parsed);
             }
 
-            return OviaMenuHelpStore.NormalizePermissionLevel(fallback);
-        }
-
-        private void Grid_CellMouseEnter(object sender, DataGridViewCellEventArgs e)
-        {
-            if (grid == null || e.RowIndex < 0 || e.ColumnIndex < 0)
-            {
-                return;
-            }
-
-            if (grid.Columns[e.ColumnIndex].Name != "EditHelp")
-            {
-                return;
-            }
-
-            hoveredHelpButtonRowIndex = e.RowIndex;
-            hoveredHelpButtonColumnIndex = e.ColumnIndex;
-            grid.Cursor = canEdit ? Cursors.Hand : Cursors.Default;
-            grid.InvalidateCell(e.ColumnIndex, e.RowIndex);
-        }
-
-        private void Grid_CellMouseLeave(object sender, DataGridViewCellEventArgs e)
-        {
-            if (grid == null || e.RowIndex < 0 || e.ColumnIndex < 0)
-            {
-                return;
-            }
-
-            if (e.RowIndex == hoveredHelpButtonRowIndex && e.ColumnIndex == hoveredHelpButtonColumnIndex)
-            {
-                int oldRow = hoveredHelpButtonRowIndex;
-                int oldCol = hoveredHelpButtonColumnIndex;
-                hoveredHelpButtonRowIndex = -1;
-                hoveredHelpButtonColumnIndex = -1;
-                grid.Cursor = Cursors.Default;
-                if (oldRow >= 0 && oldCol >= 0)
-                {
-                    grid.InvalidateCell(oldCol, oldRow);
-                }
-            }
+            return OviaMenuSettingsStore.NormalizePermissionLevel(fallback);
         }
 
         private void Grid_CellClick(object sender, DataGridViewCellEventArgs e)
@@ -1136,16 +1015,6 @@ namespace OVIA.Desktop
             grid.BeginEdit(true);
         }
 
-        private void EditSelectedHelp()
-        {
-            // 메뉴관리 도움말 입력 기능은 삭제되었습니다.
-        }
-
-        private void EditRowHelp(int rowIndex)
-        {
-            // 메뉴관리 도움말 입력 기능은 삭제되었습니다.
-        }
-
         private void IconReference_Click(object sender, EventArgs e)
         {
             try
@@ -1185,7 +1054,7 @@ namespace OVIA.Desktop
 
             try
             {
-                OviaMenuHelpStore.Save(rows);
+                OviaMenuSettingsStore.Save(rows);
                 originalRowsSignature = BuildRowsSignature(rows);
                 isDirty = false;
                 UpdateSaveButtonVisibility();
@@ -1194,7 +1063,7 @@ namespace OVIA.Desktop
                     OviaWorkspaceCommandBar.Populate(commandBarPanel, "SETTINGS", companyId, userId);
                 }
                 UpdateStatus("메뉴관리 설정이 저장되었습니다. 상단 메뉴에 즉시 반영됩니다.");
-                OviaNotificationStore.AddWorkLog(companyId, userId, "메뉴관리 설정 저장", OviaMenuHelpStore.GetWorkspacePath("MENU_MANAGER", "메인  ›  환경설정  ›  메뉴관리"));
+                OviaNotificationStore.AddWorkLog(companyId, userId, "메뉴관리 설정 저장", OviaMenuSettingsStore.GetWorkspacePath("MENU_MANAGER", "메인  ›  환경설정  ›  메뉴관리"));
             }
             catch (Exception ex)
             {
@@ -1790,10 +1659,9 @@ namespace OVIA.Desktop
         public bool ErpLoad = false;
         public string ErpModuleName = string.Empty;
         public string ModulePath = string.Empty;
-        public string HelpText = string.Empty;
     }
 
-    internal static class OviaMenuHelpStore
+    internal static class OviaMenuSettingsStore
     {
         private const string FileName = "menu_settings.dat";
 
@@ -1858,29 +1726,25 @@ namespace OVIA.Desktop
                     bool isNewLevelFormat = IsNewPermissionLevelFormat(lines);
                     bool isIconCodeFormat = IsIconCodeFormat(lines);
                     bool isErpModuleFormat = IsErpModuleFormat(lines);
-                    if (parts.Length >= 10 && isErpModuleFormat)
+                    if (parts.Length >= 9 && isErpModuleFormat)
                     {
                         setting.PermissionLevel = isNewLevelFormat ? NormalizePermissionLevel(parts[5]) : (legacySuperAdminOnly ? 10 : 1);
                         setting.IconCode = NormalizeIconCode(parts[6]);
                         setting.ErpLoad = parts[7] == "1";
                         setting.ErpModuleName = OviaSystemSettingsStore.NormalizeErpModuleName(Decode(parts[8]));
-                        setting.HelpText = Decode(parts[9]);
                     }
-                    else if (parts.Length >= 8 && isIconCodeFormat)
+                    else if (parts.Length >= 7 && isIconCodeFormat)
                     {
                         setting.PermissionLevel = isNewLevelFormat ? NormalizePermissionLevel(parts[5]) : (legacySuperAdminOnly ? 10 : 1);
                         setting.IconCode = NormalizeIconCode(parts[6]);
-                        setting.HelpText = Decode(parts[7]);
                     }
-                    else if (parts.Length >= 7)
+                    else if (parts.Length >= 6)
                     {
                         setting.PermissionLevel = isNewLevelFormat ? NormalizePermissionLevel(parts[5]) : (legacySuperAdminOnly ? 10 : 1);
-                        setting.HelpText = Decode(parts[6]);
                     }
                     else
                     {
                         setting.PermissionLevel = legacySuperAdminOnly ? 10 : 1;
-                        setting.HelpText = parts.Length >= 6 ? Decode(parts[5]) : string.Empty;
                     }
                 }
             }
@@ -2038,7 +1902,7 @@ namespace OVIA.Desktop
             }
 
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine("# OVIA menu settings v4 - permission level 1-10, ERP meber_level compatible, Segoe Fluent icon code, ERP load/module");
+            sb.AppendLine("# OVIA menu settings v5 - permission level 1-10, ERP meber_level compatible, Segoe Fluent icon code, ERP load/module");
             int i;
             for (i = 0; i < settings.Count; i++)
             {
@@ -2067,8 +1931,6 @@ namespace OVIA.Desktop
                 sb.Append(saveErpLoad ? "1" : "0");
                 sb.Append('\t');
                 sb.Append(Encode(saveErpModuleName));
-                sb.Append('\t');
-                sb.Append(Encode(row.HelpText));
                 sb.AppendLine();
             }
 
@@ -2169,26 +2031,6 @@ namespace OVIA.Desktop
         {
             OviaMenuSetting setting = FindSetting(key);
             return setting == null ? string.Empty : OviaSystemSettingsStore.NormalizeErpModuleName(setting.ErpModuleName);
-        }
-
-        public static string GetHelpText(string key, string fallbackText)
-        {
-            string normalized = key == null ? string.Empty : key.Trim();
-            List<OviaMenuSetting> settings = Load();
-            int i;
-            for (i = 0; i < settings.Count; i++)
-            {
-                OviaMenuSetting row = settings[i];
-                if (row != null && string.Equals(row.Key, normalized, StringComparison.OrdinalIgnoreCase))
-                {
-                    if (!string.IsNullOrWhiteSpace(row.HelpText))
-                    {
-                        return row.HelpText;
-                    }
-                }
-            }
-
-            return fallbackText == null ? string.Empty : fallbackText;
         }
 
         public static string GetMenuName(string key, string fallbackName)
@@ -2511,56 +2353,56 @@ namespace OVIA.Desktop
         public static List<OviaMenuSetting> CreateDefaultSettings()
         {
             List<OviaMenuSetting> list = new List<OviaMenuSetting>();
-            Add(list, "MAIN", "메인", 1, false, "OVIA 전체 업무 현황, AutoCAD 상태, 최근 BarList 작업, 공사 현황, 공지사항을 확인하는 대시보드입니다.");
-            Add(list, "NOTIFICATIONS", "알림", 2, false, "작업 내역 및 알림은 최대 7일간 보관되며, 7일 후 자동 삭제됩니다. 임의로 삭제할 수 없습니다.");
-            Add(list, "PROJECT_MANAGER", "공사관리", 1, false, "공사관리 2차 메뉴의 공사목록입니다. 기존 WinForms 공사관리 화면을 유지하며 공사 검색, 수정, 완료공사 포함 조회를 처리합니다.");
-            Add(list, "PROJECT_REGISTER", "공사등록", 2, false, "공사관리 2차 메뉴의 공사등록입니다. Web ERP 안의 공사등록 페이지를 WebView2로 불러오며, Web ERP에서 등록된 공사는 공사목록에 표시되는 구조로 전환합니다.");
-            Add(list, "PROJECT_BARLIST_LIST", "공사별 BarList", 3, false, "선택한 공사에 저장된 BarList 목록을 조회하고 신규 등록, 수정, 다른 공사 BarList 불러오기 흐름으로 이동합니다.");
-            Add(list, "BARLIST", "BarList", 3, false, "CAD 도면 또는 Excel에서 BarList를 가져와 검토하고 저장하는 화면입니다. 형상, 수량, 길이, 중량 데이터를 확인합니다.");
+            Add(list, "MAIN", "메인", 1, false);
+            Add(list, "NOTIFICATIONS", "알림", 2, false);
+            Add(list, "PROJECT_MANAGER", "공사관리", 1, false);
+            Add(list, "PROJECT_REGISTER", "공사등록", 2, false);
+            Add(list, "PROJECT_BARLIST_LIST", "공사별 BarList", 3, false);
+            Add(list, "BARLIST", "BarList", 3, false);
 
-            Add(list, "OPERATIONS", "운영현황", 1, false, "전체 BarList, 생산오더, 입출고, 재고, 송장, 태그/QR, 미처리 작업을 통합 조회하는 메뉴입니다.");
-            Add(list, "OPERATIONS_ALL_BARLIST", "전체 BarList", 2, false, "모든 공사의 BarList를 통합 조회하고 검색, 필터, Excel 저장, 출력, 공사/BarList 이동을 처리합니다.");
-            Add(list, "OPERATIONS_ALL_ORDER", "전체 생산오더", 2, false, "전체 공사의 생산오더와 작업지시 상태를 조회합니다. 등록과 수정은 공사 상세 내부에서 처리합니다.");
-            Add(list, "OPERATIONS_INOUT", "입출고 현황", 2, false, "전체 입고와 출고 흐름을 기간, 공사, 거래처 기준으로 조회합니다.");
-            Add(list, "OPERATIONS_STOCK", "재고 현황", 2, false, "규격별, 길이별, 공사별 재고 상태를 통합 조회합니다.");
-            Add(list, "OPERATIONS_INVOICE", "송장/납품 현황", 2, false, "전체 송장, 납품표, 미송장, 출하 상태를 통합 조회합니다.");
-            Add(list, "OPERATIONS_TAG_QR", "태그/QR 현황", 2, false, "태그 발행, QR 생성, 미발행, 재발행 상태를 조회합니다.");
-            Add(list, "OPERATIONS_PENDING", "미처리 작업", 2, false, "미출력, 미송장, 미태그, 오류 데이터를 한 곳에 모아 확인합니다.");
-            Add(list, "OPERATIONS_PRINT_CENTER", "출력센터", 2, false, "재출력, 출력 이력, 프린터 오류, 태그/송장 재발행을 관리합니다.");
+            Add(list, "OPERATIONS", "운영현황", 1, false);
+            Add(list, "OPERATIONS_ALL_BARLIST", "전체 BarList", 2, false);
+            Add(list, "OPERATIONS_ALL_ORDER", "전체 생산오더", 2, false);
+            Add(list, "OPERATIONS_INOUT", "입출고 현황", 2, false);
+            Add(list, "OPERATIONS_STOCK", "재고 현황", 2, false);
+            Add(list, "OPERATIONS_INVOICE", "송장/납품 현황", 2, false);
+            Add(list, "OPERATIONS_TAG_QR", "태그/QR 현황", 2, false);
+            Add(list, "OPERATIONS_PENDING", "미처리 작업", 2, false);
+            Add(list, "OPERATIONS_PRINT_CENTER", "출력센터", 2, false);
 
-            Add(list, "MATERIAL_STOCK", "자재/재고", 1, false, "입고, 재고현황, 재고조정, 출고사용내역을 관리하는 메뉴입니다.");
-            Add(list, "MATERIAL_INBOUND", "입고관리", 2, false, "입고 자료 등록, 수정, 삭제, Excel 가져오기, 출력을 처리합니다.");
-            Add(list, "MATERIAL_STOCK_STATUS", "재고현황", 2, false, "규격별, 길이별, 공사별 재고를 조회하고 Excel 저장과 출력을 처리합니다.");
-            Add(list, "MATERIAL_STOCK_ADJUST", "재고조정", 2, false, "재고 추가, 차감, 보정과 조정 사유 입력을 관리합니다.");
-            Add(list, "MATERIAL_OUTBOUND_USAGE", "출고사용내역", 2, false, "출고 사용 상세 이력과 공사/자재별 사용 내역을 조회합니다.");
+            Add(list, "MATERIAL_STOCK", "자재/재고", 1, false);
+            Add(list, "MATERIAL_INBOUND", "입고관리", 2, false);
+            Add(list, "MATERIAL_STOCK_STATUS", "재고현황", 2, false);
+            Add(list, "MATERIAL_STOCK_ADJUST", "재고조정", 2, false);
+            Add(list, "MATERIAL_OUTBOUND_USAGE", "출고사용내역", 2, false);
 
-            Add(list, "SHIPPING_INVOICE", "출하/송장", 1, false, "송장 조회와 발행, 납품표, 인수증, 검수양식, 출하 실적등록을 처리하는 메뉴입니다.");
-            Add(list, "SHIPPING_INVOICE_MANAGE", "송장관리", 2, false, "송장 조회, 발행, 수정, 납품표, 인수증, 검수양식 출력과 차량/운전자 선택을 처리합니다.");
-            Add(list, "SHIPPING_RESULT_REGISTER", "출하실적등록", 2, false, "출하 실적 조회, 실적 등록, 거래처별 실적 양식 생성, ERP 전송을 처리합니다.");
+            Add(list, "SHIPPING_INVOICE", "출하/송장", 1, false);
+            Add(list, "SHIPPING_INVOICE_MANAGE", "송장관리", 2, false);
+            Add(list, "SHIPPING_RESULT_REGISTER", "출하실적등록", 2, false);
 
-            Add(list, "ERP", "ERP", 1, false, "시스템 설정에 저장된 ERP 주소를 기본 웹 브라우저로 여는 단일 1차 메뉴입니다. ERP는 2차 드롭다운 메뉴를 사용하지 않습니다.");
+            Add(list, "ERP", "ERP", 1, false);
 
-            Add(list, "MASTER_DATA", "기준정보", 1, false, "거래처, 철근메이커, 자재/규격, 형상코드, 차량, 작업자, 기계, 위치 같은 업무 기준 데이터를 관리합니다.");
-            Add(list, "MASTER_COMPANY", "거래처 관리", 2, false, "거래처, 가공사, 납품처 기준 데이터를 관리합니다.");
-            Add(list, "MASTER_REBAR_MAKER", "철근메이커 관리", 2, false, "철근메이커와 브랜드 기준 데이터를 관리합니다.");
-            Add(list, "MASTER_MATERIAL_SPEC", "자재/규격 관리", 2, false, "자재 코드와 철근 규격 기준 데이터를 관리합니다.");
-            Add(list, "MASTER_SHAPE_CODE", "형상코드 관리", 2, false, "형상 코드, 사용자 형상, 미리보기 기준 데이터를 관리합니다.");
-            Add(list, "MASTER_CAR_DRIVER", "차량/운전자 관리", 2, false, "차량번호, 기사, 운전자 정보를 관리합니다.");
-            Add(list, "MASTER_WORKER_TEAM", "작업자/작업반 관리", 2, false, "작업자와 작업반 기준 정보를 관리합니다.");
-            Add(list, "MASTER_MACHINE_LOCATION", "기계/위치 관리", 2, false, "기계, 설비, 위치, 창고 기준 데이터를 관리합니다.");
+            Add(list, "MASTER_DATA", "기준정보", 1, false);
+            Add(list, "MASTER_COMPANY", "거래처 관리", 2, false);
+            Add(list, "MASTER_REBAR_MAKER", "철근메이커 관리", 2, false);
+            Add(list, "MASTER_MATERIAL_SPEC", "자재/규격 관리", 2, false);
+            Add(list, "MASTER_SHAPE_CODE", "형상코드 관리", 2, false);
+            Add(list, "MASTER_CAR_DRIVER", "차량/운전자 관리", 2, false);
+            Add(list, "MASTER_WORKER_TEAM", "작업자/작업반 관리", 2, false);
+            Add(list, "MASTER_MACHINE_LOCATION", "기계/위치 관리", 2, false);
 
-            Add(list, "SETTINGS", "환경설정", 1, true, "OVIA 시스템 동작, BarList 매핑, 단위중량표, 출력 양식, QR/바코드 양식, 프린터, 백업, 버전정보를 관리합니다.");
-            Add(list, "LEGACY_MAIN_DASHBOARD", "기존 메인대시보드", 2, true, "WebView2 전환 전 메인에서 사용하던 WinForms 대시보드 카드, 차트, 최근 작업 현황을 보관하는 시스템관리용 화면입니다.");
-            Add(list, "SYSTEM_SETTINGS", "시스템 설정", 2, true, "ERP 연결 주소, 회사 로고, 리스트 출력 수처럼 OVIA 전체에 적용되는 기본값을 관리합니다. 리스트 출력 수는 알림, 공사관리, 공사별 BarList 등 리스트 형식 화면의 한 페이지 표시 기준으로 사용됩니다.");
-            Add(list, "BARLIST_MAPPING", "BarList 항목 매핑", 2, true, "CAD 도면마다 다른 철근재료표 헤더명을 OVIA 기본 헤더로 치환합니다. 매핑 텍스트는 셀 단위로 추가/수정할 수 있으며, 매핑 열은 드래그로 순서를 바꿀 수 있습니다.");
-            Add(list, "REBAR_UNIT_WEIGHT", "이형철근 단위중량표", 2, true, "규격과 단위무게 기준으로 1톤 단위 조견표와 총길이/중량 계산 기준을 관리합니다. 시스템관리자만 수정할 수 있습니다.");
-            Add(list, "IMPORT_TEMPLATE", "가져오기 양식 설정", 2, true, "SSBAR, Tekla, Excel, DBF, BAR 등 외부 데이터 가져오기 템플릿을 관리합니다.");
-            Add(list, "PRINT_TEMPLATE", "출력 양식 설정", 2, true, "송장, 납품표, 인수증, 검수양식, BarList 출력 템플릿을 관리합니다.");
-            Add(list, "QR_BARCODE_TEMPLATE", "QR/바코드 양식 설정", 2, true, "QR 데이터 구조, 바코드 종류, 태그 양식 연결 기준을 관리합니다.");
-            Add(list, "PRINTER_SETTINGS", "프린터 설정", 2, true, "기본 프린터, 라벨 프린터, 송장 프린터, 용지와 여백을 관리합니다.");
-            Add(list, "BACKUP_RESTORE", "백업/복원", 2, true, "로컬 데이터, 설정, 공사 데이터를 백업하거나 복원하는 메뉴입니다.");
-            Add(list, "MENU_MANAGER", "메뉴관리", 2, true, "OVIA에 있는 모든 메뉴 및 페이지의 사용 여부와 사용자 권한 레벨을 관리합니다. 권한관리는 추후 ERP 사용자 정보의 meber_level 컬럼과 연동됩니다.");
-            Add(list, "VERSION_INFO", "버전정보", 2, true, "로그인 화면 하단과 시스템 정보에 표시되는 OVIA 버전 정보를 관리합니다.");
+            Add(list, "SETTINGS", "환경설정", 1, true);
+            Add(list, "LEGACY_MAIN_DASHBOARD", "기존 메인대시보드", 2, true);
+            Add(list, "SYSTEM_SETTINGS", "시스템 설정", 2, true);
+            Add(list, "BARLIST_MAPPING", "BarList 항목 매핑", 2, true);
+            Add(list, "REBAR_UNIT_WEIGHT", "이형철근 단위중량표", 2, true);
+            Add(list, "IMPORT_TEMPLATE", "가져오기 양식 설정", 2, true);
+            Add(list, "PRINT_TEMPLATE", "출력 양식 설정", 2, true);
+            Add(list, "QR_BARCODE_TEMPLATE", "QR/바코드 양식 설정", 2, true);
+            Add(list, "PRINTER_SETTINGS", "프린터 설정", 2, true);
+            Add(list, "BACKUP_RESTORE", "백업/복원", 2, true);
+            Add(list, "MENU_MANAGER", "메뉴관리", 2, true);
+            Add(list, "VERSION_INFO", "버전정보", 2, true);
             return list;
         }
 
@@ -2617,7 +2459,7 @@ namespace OVIA.Desktop
             }
         }
 
-        private static void Add(List<OviaMenuSetting> list, string key, string name, int level, bool adminOnly, string help)
+        private static void Add(List<OviaMenuSetting> list, string key, string name, int level, bool adminOnly)
         {
             OviaMenuSetting setting = new OviaMenuSetting();
             setting.Key = key;
@@ -2627,7 +2469,6 @@ namespace OVIA.Desktop
             setting.PermissionLevel = adminOnly ? 10 : 1;
             setting.IconCode = GetDefaultIconCode(key);
             setting.ModulePath = GetModulePath(key);
-            setting.HelpText = help == null ? string.Empty : help;
             list.Add(setting);
         }
 
@@ -2650,141 +2491,4 @@ namespace OVIA.Desktop
         }
     }
 
-    internal sealed class OviaMenuHelpDialog : Form
-    {
-        public OviaMenuHelpDialog(string title, string helpText)
-        {
-            BuildUI(title, helpText);
-        }
-
-        public static void ShowHelp(IWin32Window owner, string title, string helpText)
-        {
-            using (OviaMenuHelpDialog dialog = new OviaMenuHelpDialog(title, helpText))
-            {
-                Form ownerForm = owner as Form;
-                if (ownerForm != null)
-                {
-                    dialog.StartPosition = FormStartPosition.CenterParent;
-                    dialog.ShowDialog(ownerForm);
-                }
-                else
-                {
-                    dialog.StartPosition = FormStartPosition.CenterScreen;
-                    dialog.ShowDialog(owner);
-                }
-            }
-        }
-
-        private void BuildUI(string title, string helpText)
-        {
-            string menuTitle = string.IsNullOrWhiteSpace(title) ? "도움말" : title.Trim();
-            Text = menuTitle.EndsWith("도움말", StringComparison.Ordinal) ? menuTitle : menuTitle + " 도움말";
-            Font = OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
-            ClientSize = new Size(600, 380);
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false;
-            MinimizeBox = false;
-            ShowInTaskbar = false;
-            BackColor = Color.FromArgb(255, 252, 232);
-
-            TextBox body = new TextBox();
-            body.Multiline = true;
-            body.ReadOnly = true;
-            body.BorderStyle = BorderStyle.None;
-            body.ScrollBars = ScrollBars.Vertical;
-            body.Location = new Point(24, 22);
-            body.Size = new Size(552, 336);
-            body.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
-            body.Font = OviaFluentTheme.FontSystem(9.8F, FontStyle.Regular);
-            body.ForeColor = OviaFluentTheme.TextSecondary;
-            body.BackColor = Color.FromArgb(255, 252, 232);
-            body.Text = string.IsNullOrWhiteSpace(helpText) ? "이 메뉴의 도움말이 아직 등록되지 않았습니다." : helpText;
-            body.WordWrap = true;
-            body.HideSelection = false;
-            Controls.Add(body);
-
-            Shown += delegate
-            {
-                body.SelectionStart = 0;
-                body.SelectionLength = 0;
-            };
-        }
-    }
-
-    internal sealed class OviaMenuHelpEditDialog : Form
-    {
-        private TextBox txtHelp;
-        public string HelpText { get; private set; }
-
-        public static bool TryEdit(Form owner, string menuName, string currentHelp, out string helpText)
-        {
-            helpText = currentHelp == null ? string.Empty : currentHelp;
-            using (OviaMenuHelpEditDialog dialog = new OviaMenuHelpEditDialog(menuName, currentHelp))
-            {
-                DialogResult result = owner == null ? dialog.ShowDialog() : dialog.ShowDialog(owner);
-                if (result == DialogResult.OK)
-                {
-                    helpText = dialog.HelpText;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private OviaMenuHelpEditDialog(string menuName, string currentHelp)
-        {
-            BuildUI(menuName, currentHelp);
-        }
-
-        private void BuildUI(string menuName, string currentHelp)
-        {
-            string menuTitle = string.IsNullOrWhiteSpace(menuName) ? "메뉴" : menuName.Trim();
-            Text = menuTitle + " 도움말 입력";
-            Font = OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
-            ClientSize = new Size(620, 390);
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false;
-            MinimizeBox = false;
-            StartPosition = FormStartPosition.CenterParent;
-            BackColor = Color.White;
-
-            txtHelp = new TextBox();
-            txtHelp.Multiline = true;
-            txtHelp.AcceptsReturn = true;
-            txtHelp.AcceptsTab = true;
-            txtHelp.WordWrap = true;
-            txtHelp.ScrollBars = ScrollBars.Vertical;
-            txtHelp.Location = new Point(28, 28);
-            txtHelp.Size = new Size(564, 284);
-            txtHelp.Font = OviaFluentTheme.FontSystem(9.5F, FontStyle.Regular);
-            txtHelp.Text = currentHelp == null ? string.Empty : currentHelp;
-            Controls.Add(txtHelp);
-
-            Button save = new OVIA.Desktop.Controls.OviaButton();
-            save.Text = "저장";
-            save.Location = new Point(380, 334);
-            save.Size = OviaFluentTheme.MeasureButtonSize(save.Text);
-            OviaFluentTheme.ApplyButton(save, OviaButtonRole.Primary);
-            save.Click += Save_Click;
-            Controls.Add(save);
-
-            Button cancel = new OVIA.Desktop.Controls.OviaButton();
-            cancel.Text = "취소";
-            cancel.Location = new Point(save.Right + 12, 334);
-            cancel.Size = OviaFluentTheme.MeasureButtonSize(cancel.Text);
-            OviaFluentTheme.ApplyButton(cancel, OviaButtonRole.Neutral);
-            cancel.DialogResult = DialogResult.Cancel;
-            Controls.Add(cancel);
-
-            CancelButton = cancel;
-        }
-
-        private void Save_Click(object sender, EventArgs e)
-        {
-            HelpText = txtHelp == null ? string.Empty : txtHelp.Text;
-            DialogResult = DialogResult.OK;
-            Close();
-        }
-    }
 }

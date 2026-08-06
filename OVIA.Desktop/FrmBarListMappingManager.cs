@@ -8,7 +8,7 @@ using OVIA.Desktop.Controls;
 
 namespace OVIA.Desktop
 {
-    public class FrmBarListMappingManager : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider, IOviaWorkspaceUnsavedState
+    public class FrmBarListMappingManager : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceUnsavedState
     {
         private readonly string companyId;
         private readonly string userId;
@@ -56,15 +56,6 @@ namespace OVIA.Desktop
         private readonly Color ChangedTextColor = OviaFluentTheme.Danger;
 
 
-        public string WorkspaceHelpKey { get { return "BARLIST_MAPPING"; } }
-        public string WorkspaceHelpTitle { get { return "BarList 항목 매핑"; } }
-        public string WorkspaceHelpText
-        {
-            get
-            {
-                return "CAD 도면마다 다른 철근재료표 헤더명을 OVIA 기본 헤더로 치환합니다. 형번·형상번호는 업체별 임의 코드이므로 매핑하지 않으며, 철근규격은 필수 항목으로 관리합니다.";
-            }
-        }
         public FrmBarListMappingManager(string companyId, string userId)
         {
             this.companyId = companyId == null ? "" : companyId;
@@ -99,7 +90,7 @@ namespace OVIA.Desktop
             windowToolTip.ReshowDelay = 100;
             windowToolTip.ShowAlways = true;
 
-            BuildExplorerHeader(this, OviaMenuHelpStore.GetWorkspacePath("BARLIST_MAPPING", "메인  ›  환경설정  ›  BarList 항목 매핑"));
+            BuildExplorerHeader(this, OviaMenuSettingsStore.GetWorkspacePath("BARLIST_MAPPING", "메인  ›  환경설정  ›  BarList 항목 매핑"));
             BuildCommandBar(this);
 
             contentScrollPanel = new Panel();
@@ -1202,7 +1193,7 @@ namespace OVIA.Desktop
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information
                 );
-                OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 항목 매핑 저장", OviaMenuHelpStore.GetWorkspacePath("BARLIST_MAPPING", "메인  ›  환경설정  ›  BarList 항목 매핑"));
+                OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 항목 매핑 저장", OviaMenuSettingsStore.GetWorkspacePath("BARLIST_MAPPING", "메인  ›  환경설정  ›  BarList 항목 매핑"));
             }
             catch (Exception ex)
             {
@@ -1598,7 +1589,7 @@ namespace OVIA.Desktop
             UpdateSaveButtonVisibility();
             lblStatus.Text = "선택한 매핑 열 전체를 삭제했습니다. 저장하기 전까지 실제 설정에는 반영되지 않습니다.";
             lblStatus.ForeColor = TextSub;
-            OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 매핑 열 삭제", OviaMenuHelpStore.GetWorkspacePath("BARLIST_MAPPING", "메인  ›  환경설정  ›  BarList 항목 매핑"));
+            OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 매핑 열 삭제", OviaMenuSettingsStore.GetWorkspacePath("BARLIST_MAPPING", "메인  ›  환경설정  ›  BarList 항목 매핑"));
         }
 
         private bool IsAliasColumn(int columnIndex)
@@ -1650,7 +1641,7 @@ namespace OVIA.Desktop
 
             lblStatus.Text = "선택한 매핑 셀의 내용을 삭제했습니다.";
             lblStatus.ForeColor = TextSub;
-            OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 매핑 셀 삭제", OviaMenuHelpStore.GetWorkspacePath("BARLIST_MAPPING", "메인  ›  환경설정  ›  BarList 항목 매핑"));
+            OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 매핑 셀 삭제", OviaMenuSettingsStore.GetWorkspacePath("BARLIST_MAPPING", "메인  ›  환경설정  ›  BarList 항목 매핑"));
         }
 
         private void ShiftAliasCellsLeft(int rowIndex, int columnIndex)

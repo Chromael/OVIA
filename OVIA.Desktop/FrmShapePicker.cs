@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -29,6 +30,7 @@ namespace OVIA.Desktop
         private Button btnSelectMode;
         private Button btnLineMode;
         private Button btnCircleMode;
+        private Button btnAngleMode;
         private Button btnTextMode;
         private Button btnUndo;
         private Button btnRedo;
@@ -64,7 +66,9 @@ namespace OVIA.Desktop
         {
             this.cadShapeJsonPath = cadShapeJsonPath == null ? "" : cadShapeJsonPath.Trim();
 
-            CadShapeEditDocument loadedDocument = CadShapeEditDocument.Load(this.cadShapeJsonPath);
+            CadShapeEditDocument loadedDocument = CadShapeDisplayNormalizer.CreateEditableDocument(
+                CadShapeEditDocument.Load(this.cadShapeJsonPath)
+            );
             CadShapeEditDocument trueOriginalDocument = loadedDocument;
             string originalSourcePath = loadedDocument.OriginalSourcePath == null ? "" : loadedDocument.OriginalSourcePath.Trim();
             string resolvedRawSourcePath = "";
@@ -82,7 +86,9 @@ namespace OVIA.Desktop
             if (originalSourcePath != "" && File.Exists(originalSourcePath))
             {
                 resolvedRawSourcePath = Path.GetFullPath(originalSourcePath);
-                trueOriginalDocument = CadShapeEditDocument.Load(resolvedRawSourcePath);
+                trueOriginalDocument = CadShapeDisplayNormalizer.CreateEditableDocument(
+                    CadShapeEditDocument.Load(resolvedRawSourcePath)
+                );
             }
             else if (this.cadShapeJsonPath != "" && File.Exists(this.cadShapeJsonPath))
             {
@@ -149,16 +155,17 @@ namespace OVIA.Desktop
             toolbarRows.Controls.Add(primaryToolFlow, 0, 0);
             toolbarRows.Controls.Add(secondaryToolFlow, 0, 1);
 
-            btnSelectMode = CreateToolbarButton("선택·이동", "\uE762", 104, BtnSelectMode_Click, "요소를 선택하거나 이동하고, 빈 공간을 드래그하여 여러 요소를 선택합니다.");
+            btnSelectMode = CreateToolbarButton("선택·이동", "\uE762", 104, BtnSelectMode_Click, "요소를 선택하거나 이동합니다. CAD에서 추출된 곡선·원형은 구성 점이 아니라 객체 전체가 선택됩니다.");
             btnLineMode = CreateToolbarButton("선 추가", "\uE710", 88, BtnLineMode_Click, "연속 선을 추가합니다. 기존 선 끝점 가까이에서는 자동으로 연결됩니다.");
             btnCircleMode = CreateToolbarButton("원 추가", "\uEA3A", 88, BtnCircleMode_Click, "중심점과 반지름 지점을 차례로 클릭하여 원을 추가합니다.");
+            btnAngleMode = CreateToolbarButton("각도 추가", "\u2220", 94, BtnAngleMode_Click, "중심점과 시작 방향을 지정한 뒤 마우스를 원하는 방향으로 돌려 최대 270°까지 각도를 추가합니다.");
             btnTextMode = CreateToolbarButton("문자 추가", "\uE8D2", 94, BtnTextMode_Click, "문자 또는 치수값을 추가하고 즉시 값을 입력합니다.");
             btnDelete = CreateToolbarButton("선택 삭제", "\uE74D", 98, BtnDelete_Click, "선택한 요소를 삭제합니다. Delete 키도 사용할 수 있습니다.");
             btnSplit = CreateToolbarButton("선 분할", "\uE8C6", 88, BtnSplit_Click, "선택한 선을 가운데 지점에서 두 개로 분할합니다.");
             btnUndo = CreateToolbarButton("실행 취소", "\uE7A7", 98, BtnUndo_Click, "마지막 수정 작업을 취소합니다. Ctrl+Z");
             btnRedo = CreateToolbarButton("다시 실행", "\uE7A6", 98, BtnRedo_Click, "취소한 작업을 다시 실행합니다. Ctrl+Y");
-            Button btnHorizontal = CreateToolbarButton("수평 맞춤", "\uE8E4", 98, BtnHorizontal_Click, "선택한 선을 수평으로 맞춥니다.");
-            Button btnVertical = CreateToolbarButton("수직 맞춤", "\uE8E3", 98, BtnVertical_Click, "선택한 선을 수직으로 맞춥니다.");
+            Button btnHorizontal = CreateToolbarButton("수평 맞춤", "\uE8E4", 98, BtnHorizontal_Click, "선택한 선 또는 문자를 수평으로 맞춥니다.");
+            Button btnVertical = CreateToolbarButton("수직 맞춤", "\uE8E3", 98, BtnVertical_Click, "선택한 선 또는 문자를 수직으로 맞춥니다.");
             Button btnFit = CreateToolbarButton("화면 맞춤", "\uE9A6", 98, BtnFit_Click, "형상을 기본 50% 비율로 중앙에 맞춥니다.");
             Button btnZoomIn = CreateToolbarButton("확대", "\uE8A3", 74, BtnZoomIn_Click, "형상과 문자·치수값을 함께 확대합니다.");
             Button btnZoomOut = CreateToolbarButton("축소", "\uE71F", 74, BtnZoomOut_Click, "형상과 문자·치수값을 함께 축소합니다.");
@@ -167,6 +174,7 @@ namespace OVIA.Desktop
             primaryToolFlow.Controls.Add(btnSelectMode);
             primaryToolFlow.Controls.Add(btnLineMode);
             primaryToolFlow.Controls.Add(btnCircleMode);
+            primaryToolFlow.Controls.Add(btnAngleMode);
             primaryToolFlow.Controls.Add(btnTextMode);
             primaryToolFlow.Controls.Add(CreateToolbarSeparator());
             primaryToolFlow.Controls.Add(btnDelete);
@@ -332,7 +340,7 @@ namespace OVIA.Desktop
             selectedGroup.Controls.Add(numRotation);
 
             Label selectedHelp = new Label();
-            selectedHelp.Text = "문자·치수는 캔버스에서 더블클릭하여 직접 수정합니다. 선 끝점 바깥 원형 핸들은 회전, 원의 십자 핸들은 크기 조절입니다.";
+            selectedHelp.Text = "문자·치수는 더블클릭하여 수정하고, 위쪽 핸들로 회전하며 오른쪽 아래 십자 핸들로 확대·축소합니다. 선은 회전 핸들, 원은 십자 핸들로 편집합니다.";
             selectedHelp.ForeColor = Color.FromArgb(103, 112, 126);
             selectedHelp.Location = new Point(18, 153);
             selectedHelp.Size = new Size(290, 30);
@@ -429,7 +437,7 @@ namespace OVIA.Desktop
 
         private Button CreateToolbarButton(string text, string iconGlyph, int width, EventHandler clickHandler, string helpText)
         {
-            Button button = new Button();
+            Button button = new ShapeToolbarButton();
             button.Text = text;
             button.Tag = iconGlyph == null ? "" : iconGlyph;
             button.Height = 34;
@@ -442,7 +450,7 @@ namespace OVIA.Desktop
             button.FlatAppearance.MouseOverBackColor = Color.FromArgb(246, 248, 251);
             button.BackColor = Color.White;
             button.ForeColor = Color.FromArgb(35, 43, 57);
-            button.Font = OviaFluentTheme.FontButton(9F, FontStyle.Bold);
+            button.Font = new Font("맑은 고딕", 9F, FontStyle.Regular, GraphicsUnit.Point);
             button.TextImageRelation = TextImageRelation.ImageBeforeText;
             button.ImageAlign = ContentAlignment.MiddleCenter;
             button.TextAlign = ContentAlignment.MiddleCenter;
@@ -493,7 +501,9 @@ namespace OVIA.Desktop
             Bitmap bitmap = new Bitmap(18, 18);
 
             using (Graphics graphics = Graphics.FromImage(bitmap))
-            using (Font iconFont = OviaIconFont.Create(11.5F, FontStyle.Regular))
+            using (Font iconFont = glyph == "\u2220"
+                ? new Font("Segoe UI Symbol", 11.5F, FontStyle.Bold, GraphicsUnit.Point)
+                : OviaIconFont.Create(11.5F, FontStyle.Regular))
             using (SolidBrush brush = new SolidBrush(color))
             {
                 graphics.Clear(Color.Transparent);
@@ -559,12 +569,12 @@ namespace OVIA.Desktop
 
                 AddHelpSection(helpLayout, "선택과 이동",
                     "요소를 클릭하면 선택됩니다. 빈 공간을 드래그하면 사각영역 안의 선·원·문자·치수를 한꺼번에 선택할 수 있습니다. Ctrl+A는 전체 선택이며, 선택된 요소를 드래그하면 함께 이동합니다.");
-                AddHelpSection(helpLayout, "선·원·문자 추가",
-                    "선 추가는 시작점과 끝점을 순서대로 지정합니다. 원 추가는 중심점과 반지름 위치를 지정합니다. 문자 추가 후 위치를 클릭하면 바로 값을 입력할 수 있습니다. 선 끝점 가까이에서는 자동으로 연결됩니다.");
+                AddHelpSection(helpLayout, "선·원·각도·문자 추가",
+                    "선 추가는 시작점과 끝점을 순서대로 지정합니다. 원 추가는 중심점과 반지름 위치를 지정합니다. 각도 추가는 중심점과 시작 방향을 지정한 뒤 마우스를 원하는 방향으로 돌려 최대 270°까지 만든 다음 끝 위치를 클릭합니다. 문자 추가 후 위치를 클릭하면 바로 값을 입력할 수 있습니다. 선 끝점 가까이에서는 자동으로 연결됩니다.");
                 AddHelpSection(helpLayout, "문자와 수치 수정",
                     "문자 또는 치수값을 더블클릭하거나 선택 후 F2·Enter를 누르면 값을 수정할 수 있습니다. Enter는 적용, Esc는 현재 입력 취소입니다.");
                 AddHelpSection(helpLayout, "회전과 크기 조절",
-                    "선 끝점 바깥의 회전 핸들을 드래그하면 자유 각도로 회전합니다. 원은 원 둘레를 클릭하여 전체 선택한 뒤 십자 핸들을 드래그하면 크기를 조절할 수 있습니다.");
+                    "선 끝점 바깥의 회전 핸들을 드래그하면 자유 각도로 회전합니다. 원은 십자 핸들로 크기를 조절합니다. 각도 원호는 시작·끝·반지름·회전 핸들로 벌어진 각도, 크기, 방향을 조절할 수 있습니다. CAD에서 추출된 곡선·원형은 작은 선분 점이 아니라 하나의 객체로 선택되어 전체 이동·삭제할 수 있습니다. 문자와 수치는 위쪽 회전 핸들로 회전하고 오른쪽 아래 십자 핸들로 개별 확대·축소할 수 있습니다.");
                 AddHelpSection(helpLayout, "캔버스 보기",
                     "가운데 마우스 버튼을 누른 채 드래그하면 캔버스를 이동합니다. Ctrl+마우스 휠 또는 상단 확대·축소 버튼으로 형상과 문자 크기를 함께 조절합니다. 화면 맞춤은 형상을 중앙에 배치합니다.");
                 AddHelpSection(helpLayout, "작업 취소와 삭제",
@@ -662,20 +672,30 @@ namespace OVIA.Desktop
             Dictionary<string, string> values = ParseDimensionText(dimensionText);
             List<CadShapeEditElement> texts = document.GetTextElements();
             string[] legacyKeys = new string[] { "A", "B", "C", "D", "E", "F", "G", "H", "R1", "R2", "R3", "R4" };
+            bool allowLegacySequenceOverrides = document.Version <= 2;
             int i;
 
             for (i = 0; i < texts.Count; i++)
             {
                 string value;
 
-                if (values.TryGetValue(texts[i].TextId, out value))
+                /*
+                 * JSON v3 이상은 각 CAD 문자에 안정 ID(T1...Tn)가 있으므로 해당 ID로만 수정값을
+                 * 적용해야 합니다. 추출 직후 CSV의 A/B/C 값은 형상원본 파싱용 레거시 값이며,
+                 * 이를 텍스트 목록 순서로 덮어쓰면 BarList와 수정 팝업의 치수 위치·값이 달라집니다.
+                 */
+                if (texts[i].TextId != null
+                    && texts[i].TextId.Trim() != ""
+                    && values.TryGetValue(texts[i].TextId, out value))
                 {
                     texts[i].Text = value;
                     texts[i].HasBounds = false;
                     continue;
                 }
 
-                if (i < legacyKeys.Length && values.TryGetValue(legacyKeys[i], out value))
+                if (allowLegacySequenceOverrides
+                    && i < legacyKeys.Length
+                    && values.TryGetValue(legacyKeys[i], out value))
                 {
                     texts[i].Text = value;
                     texts[i].HasBounds = false;
@@ -798,9 +818,19 @@ namespace OVIA.Desktop
                     numRotation.Value = 0;
                     numRotation.Enabled = false;
                 }
+                else if (editor.IsSingleCadCurveObjectSelected)
+                {
+                    lblSelectionType.Text = "곡선 객체";
+                    lblSelectionId.Text = "CAD 원본 곡선";
+                    txtSelectedText.Text = "";
+                    txtSelectedText.Enabled = false;
+                    btnUpdateText.Enabled = false;
+                    numRotation.Value = 0;
+                    numRotation.Enabled = false;
+                }
                 else if (editor.SelectedCount > 1)
                 {
-                    lblSelectionType.Text = editor.SelectedCount.ToString(CultureInfo.InvariantCulture) + "개 요소 선택";
+                    lblSelectionType.Text = editor.SelectedCount.ToString(CultureInfo.InvariantCulture) + "개 객체 선택";
                     lblSelectionId.Text = "";
                     txtSelectedText.Text = "";
                     txtSelectedText.Enabled = false;
@@ -875,11 +905,12 @@ namespace OVIA.Desktop
             SetModeButtonStyle(btnSelectMode, editor.Mode == CadShapeEditorMode.Select);
             SetModeButtonStyle(btnLineMode, editor.Mode == CadShapeEditorMode.AddLine);
             SetModeButtonStyle(btnCircleMode, editor.Mode == CadShapeEditorMode.AddCircle);
+            SetModeButtonStyle(btnAngleMode, editor.Mode == CadShapeEditorMode.AddAngle);
             SetModeButtonStyle(btnTextMode, editor.Mode == CadShapeEditorMode.AddText);
             btnUndo.Enabled = editor.CanUndo;
             btnRedo.Enabled = editor.CanRedo;
             btnDelete.Enabled = editor.SelectedCount > 0;
-            btnSplit.Enabled = editor.SelectedCount == 1 && editor.SelectedElement != null && editor.SelectedElement.Type == "LINE";
+            btnSplit.Enabled = editor.CanSplitSelectedLine;
 
         }
 
@@ -1071,6 +1102,12 @@ namespace OVIA.Desktop
         private void BtnCircleMode_Click(object sender, EventArgs e)
         {
             editor.Mode = CadShapeEditorMode.AddCircle;
+            editor.Focus();
+        }
+
+        private void BtnAngleMode_Click(object sender, EventArgs e)
+        {
+            editor.Mode = CadShapeEditorMode.AddAngle;
             editor.Focus();
         }
 
@@ -1302,6 +1339,213 @@ namespace OVIA.Desktop
         {
             DialogResult = DialogResult.Cancel;
             Close();
+        }
+
+        private sealed class ShapeToolbarButton : Button
+        {
+            private const float ToolbarCornerRadius = 3F;
+            private const int IconTextGap = 7;
+            private bool mouseOver;
+            private bool mouseDown;
+
+            public ShapeToolbarButton()
+            {
+                Cursor = Cursors.Hand;
+                SetStyle(
+                    ControlStyles.UserPaint
+                    | ControlStyles.AllPaintingInWmPaint
+                    | ControlStyles.OptimizedDoubleBuffer
+                    | ControlStyles.ResizeRedraw
+                    | ControlStyles.SupportsTransparentBackColor,
+                    true
+                );
+                UseVisualStyleBackColor = false;
+                FlatStyle = FlatStyle.Flat;
+                FlatAppearance.BorderSize = 0;
+            }
+
+            protected override void OnMouseEnter(EventArgs e)
+            {
+                base.OnMouseEnter(e);
+                mouseOver = true;
+                Invalidate();
+            }
+
+            protected override void OnMouseLeave(EventArgs e)
+            {
+                base.OnMouseLeave(e);
+                mouseOver = false;
+                mouseDown = false;
+                Invalidate();
+            }
+
+            protected override void OnMouseDown(MouseEventArgs mevent)
+            {
+                base.OnMouseDown(mevent);
+
+                if (mevent.Button == MouseButtons.Left)
+                {
+                    mouseDown = true;
+                    Invalidate();
+                }
+            }
+
+            protected override void OnMouseUp(MouseEventArgs mevent)
+            {
+                base.OnMouseUp(mevent);
+                mouseDown = false;
+                Invalidate();
+            }
+
+            protected override void OnEnabledChanged(EventArgs e)
+            {
+                base.OnEnabledChanged(e);
+                Cursor = Enabled ? Cursors.Hand : Cursors.Default;
+                Invalidate();
+            }
+
+            protected override void OnBackColorChanged(EventArgs e)
+            {
+                base.OnBackColorChanged(e);
+                Invalidate();
+            }
+
+            protected override void OnForeColorChanged(EventArgs e)
+            {
+                base.OnForeColorChanged(e);
+                Invalidate();
+            }
+
+            protected override void OnPaintBackground(PaintEventArgs pevent)
+            {
+                // 네 모서리의 투명 영역을 부모 배경으로 직접 칠하므로 기본 사각 배경은 그리지 않습니다.
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                if (Width <= 1 || Height <= 1)
+                {
+                    return;
+                }
+
+                Graphics graphics = e.Graphics;
+                SmoothingMode oldSmoothing = graphics.SmoothingMode;
+                PixelOffsetMode oldPixelOffset = graphics.PixelOffsetMode;
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+                Color outsideColor = Parent == null ? SystemColors.Control : Parent.BackColor;
+                graphics.Clear(outsideColor);
+
+                Color fillColor = BackColor;
+
+                if (!Enabled)
+                {
+                    fillColor = Color.FromArgb(246, 247, 249);
+                }
+                else if (mouseDown)
+                {
+                    fillColor = FlatAppearance.MouseDownBackColor.IsEmpty
+                        ? ControlPaint.Dark(BackColor, 0.04F)
+                        : FlatAppearance.MouseDownBackColor;
+                }
+                else if (mouseOver && !FlatAppearance.MouseOverBackColor.IsEmpty)
+                {
+                    fillColor = FlatAppearance.MouseOverBackColor;
+                }
+
+                Color borderColor = Enabled
+                    ? FlatAppearance.BorderColor
+                    : Color.FromArgb(218, 222, 228);
+                Color textColor = Enabled ? ForeColor : Color.FromArgb(158, 163, 172);
+
+                RectangleF bounds = new RectangleF(0.5F, 0.5F, Math.Max(1F, Width - 1F), Math.Max(1F, Height - 1F));
+
+                using (GraphicsPath path = CreateRoundRectangle(bounds, ToolbarCornerRadius))
+                using (SolidBrush fillBrush = new SolidBrush(fillColor))
+                using (Pen borderPen = new Pen(borderColor, 1F))
+                {
+                    graphics.FillPath(fillBrush, path);
+                    graphics.DrawPath(borderPen, path);
+                }
+
+                string buttonText = Text == null ? "" : Text;
+                Image buttonImage = Image;
+                TextFormatFlags flags = TextFormatFlags.NoPrefix
+                    | TextFormatFlags.NoPadding
+                    | TextFormatFlags.SingleLine
+                    | TextFormatFlags.VerticalCenter;
+                Size textSize = TextRenderer.MeasureText(
+                    graphics,
+                    buttonText,
+                    Font,
+                    new Size(Int32.MaxValue, Math.Max(1, Height)),
+                    flags
+                );
+                int imageWidth = buttonImage == null ? 0 : buttonImage.Width;
+                int imageHeight = buttonImage == null ? 0 : buttonImage.Height;
+                int gap = imageWidth > 0 && buttonText != "" ? IconTextGap : 0;
+                int contentWidth = imageWidth + gap + textSize.Width;
+                int contentX = Math.Max(Padding.Left, (Width - contentWidth) / 2);
+
+                if (buttonImage != null)
+                {
+                    int imageY = (Height - imageHeight) / 2;
+
+                    if (Enabled)
+                    {
+                        graphics.DrawImage(buttonImage, contentX, imageY, imageWidth, imageHeight);
+                    }
+                    else
+                    {
+                        ControlPaint.DrawImageDisabled(graphics, buttonImage, contentX, imageY, outsideColor);
+                    }
+
+                    contentX += imageWidth + gap;
+                }
+
+                Rectangle textBounds = new Rectangle(
+                    contentX,
+                    0,
+                    Math.Max(1, Width - contentX - Padding.Right),
+                    Height
+                );
+                TextRenderer.DrawText(graphics, buttonText, Font, textBounds, textColor, flags);
+
+                if (Focused && ShowFocusCues)
+                {
+                    Rectangle focusBounds = Rectangle.Inflate(ClientRectangle, -4, -4);
+                    ControlPaint.DrawFocusRectangle(graphics, focusBounds, textColor, fillColor);
+                }
+
+                graphics.SmoothingMode = oldSmoothing;
+                graphics.PixelOffsetMode = oldPixelOffset;
+            }
+
+            private static GraphicsPath CreateRoundRectangle(RectangleF rectangle, float radius)
+            {
+                GraphicsPath path = new GraphicsPath();
+                float safeRadius = Math.Max(0F, Math.Min(radius, Math.Min(rectangle.Width, rectangle.Height) / 2F));
+
+                if (safeRadius <= 0.01F)
+                {
+                    path.AddRectangle(rectangle);
+                    path.CloseFigure();
+                    return path;
+                }
+
+                float diameter = safeRadius * 2F;
+                RectangleF arc = new RectangleF(rectangle.Left, rectangle.Top, diameter, diameter);
+                path.AddArc(arc, 180F, 90F);
+                arc.X = rectangle.Right - diameter;
+                path.AddArc(arc, 270F, 90F);
+                arc.Y = rectangle.Bottom - diameter;
+                path.AddArc(arc, 0F, 90F);
+                arc.X = rectangle.Left;
+                path.AddArc(arc, 90F, 90F);
+                path.CloseFigure();
+                return path;
+            }
         }
     }
 }

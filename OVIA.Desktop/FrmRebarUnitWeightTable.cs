@@ -10,7 +10,7 @@ using OVIA.Desktop.Controls;
 
 namespace OVIA.Desktop
 {
-    public class FrmRebarUnitWeightTable : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceHelpProvider, IOviaWorkspaceUnsavedState
+    public class FrmRebarUnitWeightTable : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout, IOviaWorkspaceUnsavedState
     {
         private readonly string companyId;
         private readonly string userId;
@@ -43,16 +43,6 @@ namespace OVIA.Desktop
         private bool isApplyingWorkspaceBounds = false;
         private readonly Dictionary<string, int> userColumnWidths = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
-
-        public string WorkspaceHelpKey { get { return "REBAR_UNIT_WEIGHT"; } }
-        public string WorkspaceHelpTitle { get { return "이형철근 단위중량표"; } }
-        public string WorkspaceHelpText
-        {
-            get
-            {
-                return "규격과 단위무게 기준으로 1톤 단위 조견표와 총길이/중량 계산 기준을 관리합니다. 최고관리자만 수정할 수 있습니다.";
-            }
-        }
         private static readonly double[] StandardLengths = new double[] { 6.0, 6.5, 7.0, 7.5, 8.0, 9.0, 10.0, 11.0, 12.0 };
         private static readonly string[] StandardLengthColumnNames = new string[] { "L6", "L6_5", "L7", "L7_5", "L8", "L9", "L10", "L11", "L12" };
         private static readonly string[] StandardLengthHeaders = new string[] { "6", "6.5", "7", "7.5", "8", "9", "10", "11", "12" };
@@ -131,7 +121,7 @@ namespace OVIA.Desktop
         {
             OviaWorkspaceHeader.AddTo(
                 parent,
-                OviaMenuHelpStore.GetWorkspacePath("REBAR_UNIT_WEIGHT", "메인  ›  환경설정  ›  이형철근 단위중량표"),
+                OviaMenuSettingsStore.GetWorkspacePath("REBAR_UNIT_WEIGHT", "메인  ›  환경설정  ›  이형철근 단위중량표"),
                 delegate { this.Close(); },
                 delegate { this.Close(); },
                 delegate { LoadRowsToGrid(OviaRebarUnitWeightStore.LoadRows()); },
@@ -1129,7 +1119,7 @@ namespace OVIA.Desktop
             selectedSpecStartRow = -1;
             MarkDirtyIfChanged();
             UpdateStatus("선택한 규격이 삭제되었습니다. 저장하기를 눌러 반영하세요.");
-            OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량 규격 삭제", OviaMenuHelpStore.GetWorkspacePath("REBAR_UNIT_WEIGHT", "메인  ›  환경설정  ›  이형철근 단위중량표"));
+            OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량 규격 삭제", OviaMenuSettingsStore.GetWorkspacePath("REBAR_UNIT_WEIGHT", "메인  ›  환경설정  ›  이형철근 단위중량표"));
         }
 
         private void Reset_Click(object sender, EventArgs e)
@@ -1199,7 +1189,7 @@ namespace OVIA.Desktop
                 cleanSignature = BuildGridSignature();
                 isDirty = false;
                 UpdateStatus("이형철근 단위중량표 저장 완료. 이후 BarList 계산 기준에 반영됩니다.");
-                OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량표 저장", OviaMenuHelpStore.GetWorkspacePath("REBAR_UNIT_WEIGHT", "메인  ›  환경설정  ›  이형철근 단위중량표"));
+                OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량표 저장", OviaMenuSettingsStore.GetWorkspacePath("REBAR_UNIT_WEIGHT", "메인  ›  환경설정  ›  이형철근 단위중량표"));
             }
             catch (Exception ex)
             {

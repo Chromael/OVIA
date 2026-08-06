@@ -1774,6 +1774,63 @@ namespace OVIA.AutoCAD_2027
                 }
             }
 
+            /*
+             * OVIA 2026-08-06 _01 - 부분 행 누락 복구:
+             * grid 파서가 일부 DATA 행을 정상 구성한 상태에서는 기존 규격 앵커 복구가 실행되지
+             * 않았습니다. 실제 회귀 도면에서 1~20을 선택했지만 7~20만 남고 1~6이 누락된 직접
+             * 원인입니다. 현재 표의 규격 열에서 복구한 행 수가 더 많을 때만, 번호가 아니라 물리 Y
+             * 중심을 기준으로 누락 행을 병합합니다. 다른 표에서 같은 번호가 반복되는 정상 데이터는
+             * 번호 중복으로 제거하지 않습니다.
+             */
+            if (tableRows.Count > 0 && usedGridParser && selectedTextRows.Count > 0)
+            {
+                string partialAnchoredDiagnostic;
+                List<OviaBarTableRow> partialAnchoredRows = BuildSpecAnchoredBarTableRows(
+                    selectedTextRows,
+                    analysisTextRows,
+                    selectedMinPoint,
+                    selectedMaxPoint,
+                    out partialAnchoredDiagnostic
+                );
+
+                if (partialAnchoredDiagnostic != "")
+                {
+                    diagnostic = AppendDiagnostic(diagnostic, partialAnchoredDiagnostic);
+                }
+
+                int partialAnchoredOverlapFilteredCount = 0;
+
+                if (allowedOutputRectangles != null && allowedOutputRectangles.Count > 0 && partialAnchoredRows.Count > 0)
+                {
+                    partialAnchoredRows = FilterBarTableRowsBySelectionRectangles(
+                        partialAnchoredRows,
+                        allowedOutputRectangles,
+                        out partialAnchoredOverlapFilteredCount
+                    );
+                }
+
+                int partialAnchoredIgnoredRowCount;
+                partialAnchoredRows = FilterActualRebarDataRows(partialAnchoredRows, out partialAnchoredIgnoredRowCount);
+
+                if (partialAnchoredRows.Count > tableRows.Count)
+                {
+                    int mergedMissingRowCount = MergeMissingBarTableRowsByPhysicalCenter(
+                        tableRows,
+                        partialAnchoredRows
+                    );
+
+                    if (mergedMissingRowCount > 0)
+                    {
+                        diagnostic = AppendDiagnostic(
+                            diagnostic,
+                            "규격 물리 행과 비교하여 grid 파서가 누락한 "
+                            + mergedMissingRowCount.ToString(CultureInfo.InvariantCulture)
+                            + "개 철근행을 Y 좌표 기준으로 복구했습니다."
+                        );
+                    }
+                }
+            }
+
             if (tableRows.Count == 0)
             {
                 ed.WriteMessage("\nOVIA: 집계표로 변환할 데이터 행을 찾지 못했습니다.\n");
@@ -1836,6 +1893,31 @@ namespace OVIA.AutoCAD_2027
                     "현재 표의 실제 형상 헤더와 물리 GRID/요약행 차단 경계로 "
                     + recoveredShapeCellBoundCount.ToString(CultureInfo.InvariantCulture)
                     + "개 철근행의 형상 셀 경계를 검증·복구했습니다."
+                );
+            }
+
+            /*
+             * OVIA 2026-08-06 _01 - 형상 셀의 최종 물리 소유권 확정:
+             * 행이 이미 GRID 경계를 가지고 있더라도 그 X 폭이 철근형상 헤더 셀보다 과도하게 넓으면
+             * 번호·규격·길이·수량·총길이·중량 문자가 형상 JSON으로 들어갈 수 있습니다. 헤더 행에는
+             * 철근 도형이 없으므로, 형상 헤더를 실제로 감싸는 두 세로 GRID를 최종 기준으로 사용하고
+             * 각 DATA 중심을 감싸는 전폭 가로 GRID 두 개로 Y 경계를 다시 검증합니다.
+             */
+            int authoritativeShapeCellBoundCount = ApplyAuthoritativePhysicalShapeCellBounds(
+                tableRows,
+                currentTableAnalysisTextRows,
+                analysisGridLines,
+                selectedMinPoint,
+                selectedMaxPoint
+            );
+
+            if (authoritativeShapeCellBoundCount > 0)
+            {
+                diagnostic = AppendDiagnostic(
+                    diagnostic,
+                    "철근형상 헤더를 관통하는 실제 셀 GRID로 "
+                    + authoritativeShapeCellBoundCount.ToString(CultureInfo.InvariantCulture)
+                    + "개 행의 형상 셀 소유권을 최종 확정했습니다."
                 );
             }
 
@@ -2558,6 +2640,479 @@ namespace OVIA.AutoCAD_2027
             }
 
             return gaps[middle];
+        }
+
+        private int MergeMissingBarTableRowsByPhysicalCenter(
+            List<OviaBarTableRow> primaryRows,
+            List<OviaBarTableRow> recoveryRows)
+        {
+            if (primaryRows == null || recoveryRows == null || recoveryRows.Count <= primaryRows.Count)
+            {
+                return 0;
+            }
+
+            List<double> rowHeights = new List<double>();
+            int i;
+
+            for (i = 0; i < recoveryRows.Count; i++)
+            {
+                OviaBarTableRow recoveryRow = recoveryRows[i];
+
+                if (recoveryRow == null)
+                {
+                    continue;
+                }
+
+                double height = recoveryRow.RowBandHeight;
+
+                if (height <= 0.0001 && recoveryRow.HasShapeCellBounds())
+                {
+                    height = Math.Abs(recoveryRow.ShapeCellMaxY - recoveryRow.ShapeCellMinY);
+                }
+
+                if (height > 0.0001)
+                {
+                    rowHeights.Add(height);
+                }
+            }
+
+            double medianRowHeight = GetMedianCadGridValue(rowHeights);
+            double centerTolerance = medianRowHeight > 0.0001
+                ? Math.Max(medianRowHeight * 0.35, 0.20)
+                : 0.50;
+            int mergedCount = 0;
+
+            for (i = 0; i < recoveryRows.Count; i++)
+            {
+                OviaBarTableRow recoveryRow = recoveryRows[i];
+
+                if (recoveryRow == null
+                    || !String.Equals(recoveryRow.RowType, "DATA", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                double recoveryCenterY = GetEffectiveBarTableRowCenterY(recoveryRow);
+                bool alreadyExists = false;
+                int primaryIndex;
+
+                for (primaryIndex = 0; primaryIndex < primaryRows.Count; primaryIndex++)
+                {
+                    OviaBarTableRow primaryRow = primaryRows[primaryIndex];
+
+                    if (primaryRow == null
+                        || !String.Equals(primaryRow.RowType, "DATA", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    double primaryCenterY = GetEffectiveBarTableRowCenterY(primaryRow);
+
+                    if (Math.Abs(primaryCenterY - recoveryCenterY) <= centerTolerance)
+                    {
+                        alreadyExists = true;
+                        break;
+                    }
+                }
+
+                if (!alreadyExists)
+                {
+                    primaryRows.Add(recoveryRow);
+                    mergedCount++;
+                }
+            }
+
+            if (mergedCount > 0)
+            {
+                primaryRows.Sort(delegate (OviaBarTableRow left, OviaBarTableRow right)
+                {
+                    return GetEffectiveBarTableRowCenterY(right).CompareTo(GetEffectiveBarTableRowCenterY(left));
+                });
+
+                for (i = 0; i < primaryRows.Count; i++)
+                {
+                    primaryRows[i].No = i + 1;
+                }
+            }
+
+            return mergedCount;
+        }
+
+        private double GetEffectiveBarTableRowCenterY(OviaBarTableRow row)
+        {
+            if (row == null)
+            {
+                return 0.0;
+            }
+
+            if (Math.Abs(row.RowCenterY) > 0.0001)
+            {
+                return row.RowCenterY;
+            }
+
+            if (row.HasShapeCellBounds())
+            {
+                return (row.ShapeCellMinY + row.ShapeCellMaxY) / 2.0;
+            }
+
+            return 0.0;
+        }
+
+        private int ApplyAuthoritativePhysicalShapeCellBounds(
+            List<OviaBarTableRow> rows,
+            List<OviaTextRow> tableTextRows,
+            List<OviaGridLineSegment> gridLines,
+            Point3d selectedMinPoint,
+            Point3d selectedMaxPoint)
+        {
+            if (rows == null || rows.Count == 0 || tableTextRows == null || tableTextRows.Count == 0)
+            {
+                return 0;
+            }
+
+            OviaHeaderColumn authoritativeShapeColumn;
+
+            if (!TryBuildAuthoritativePhysicalShapeColumn(
+                tableTextRows,
+                gridLines,
+                selectedMinPoint,
+                selectedMaxPoint,
+                out authoritativeShapeColumn))
+            {
+                return 0;
+            }
+
+            double selectedMinX = Math.Min(selectedMinPoint.X, selectedMaxPoint.X);
+            double selectedMaxX = Math.Max(selectedMinPoint.X, selectedMaxPoint.X);
+            double averageTextHeight = GetAverageTextHeight(tableTextRows);
+
+            if (averageTextHeight <= 0.0001)
+            {
+                averageTextHeight = 1.0;
+            }
+
+            List<double> verifiedHorizontalYs = GetVerifiedPhysicalTableHorizontalYs(
+                gridLines,
+                selectedMinX,
+                selectedMaxX,
+                averageTextHeight
+            );
+            double typicalPhysicalRowHeight = GetTypicalPhysicalShapeRowHeight(
+                rows,
+                verifiedHorizontalYs,
+                averageTextHeight
+            );
+            int updatedCount = 0;
+            int i;
+
+            for (i = 0; i < rows.Count; i++)
+            {
+                OviaBarTableRow row = rows[i];
+
+                if (row == null || !String.Equals(row.RowType, "DATA", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                double previousMinX = row.ShapeCellMinX;
+                double previousMaxX = row.ShapeCellMaxX;
+                double previousMinY = row.ShapeCellMinY;
+                double previousMaxY = row.ShapeCellMaxY;
+                string previousSource = row.ShapeCellBoundsSource;
+                bool replaceX = ShouldReplaceShapeCellXWithAuthoritativeGrid(row, authoritativeShapeColumn);
+                bool replacedY = false;
+
+                if (replaceX)
+                {
+                    row.ShapeCellMinX = authoritativeShapeColumn.LeftX;
+                    row.ShapeCellMaxX = authoritativeShapeColumn.RightX;
+                }
+
+                if (verifiedHorizontalYs != null && verifiedHorizontalYs.Count >= 2)
+                {
+                    replacedY = TryApplyVerifiedPhysicalGridShapeRowBounds(
+                        row,
+                        verifiedHorizontalYs,
+                        averageTextHeight,
+                        typicalPhysicalRowHeight
+                    );
+                }
+
+                bool changed = Math.Abs(previousMinX - row.ShapeCellMinX) > 0.0001
+                    || Math.Abs(previousMaxX - row.ShapeCellMaxX) > 0.0001
+                    || Math.Abs(previousMinY - row.ShapeCellMinY) > 0.0001
+                    || Math.Abs(previousMaxY - row.ShapeCellMaxY) > 0.0001;
+
+                if (changed)
+                {
+                    row.ShapeCellBoundsSource = "GRID_HEADER_AUTH";
+                    updatedCount++;
+                }
+                else if ((replaceX || replacedY) && previousSource == "")
+                {
+                    row.ShapeCellBoundsSource = "GRID_HEADER_AUTH";
+                }
+            }
+
+            return updatedCount;
+        }
+
+        private bool ShouldReplaceShapeCellXWithAuthoritativeGrid(
+            OviaBarTableRow row,
+            OviaHeaderColumn authoritativeShapeColumn)
+        {
+            if (row == null || authoritativeShapeColumn == null
+                || authoritativeShapeColumn.RightX <= authoritativeShapeColumn.LeftX)
+            {
+                return false;
+            }
+
+            if (!row.HasShapeCellBounds())
+            {
+                return true;
+            }
+
+            double currentLeft = Math.Min(row.ShapeCellMinX, row.ShapeCellMaxX);
+            double currentRight = Math.Max(row.ShapeCellMinX, row.ShapeCellMaxX);
+            double currentWidth = currentRight - currentLeft;
+            double currentCenter = (currentLeft + currentRight) / 2.0;
+            double authoritativeWidth = authoritativeShapeColumn.RightX - authoritativeShapeColumn.LeftX;
+            double authoritativeCenter = (authoritativeShapeColumn.LeftX + authoritativeShapeColumn.RightX) / 2.0;
+
+            if (currentWidth <= 0.0001 || authoritativeWidth <= 0.0001)
+            {
+                return true;
+            }
+
+            /*
+             * 정상 GRID 경계는 물리 헤더 셀과 거의 같은 폭/중심을 가집니다. 현재 셀이 헤더 셀보다
+             * 30% 이상 넓거나, 중심이 헤더 셀 폭의 20% 이상 이동했거나, 좌우 경계가 12% 이상
+             * 다르면 다른 데이터 열까지 포함한 것으로 보고 헤더 행의 실제 GRID로 교체합니다.
+             */
+            return currentWidth > authoritativeWidth * 1.30
+                || currentWidth < authoritativeWidth * 0.70
+                || Math.Abs(currentCenter - authoritativeCenter) > authoritativeWidth * 0.20
+                || Math.Abs(currentLeft - authoritativeShapeColumn.LeftX) > authoritativeWidth * 0.12
+                || Math.Abs(currentRight - authoritativeShapeColumn.RightX) > authoritativeWidth * 0.12;
+        }
+
+        private bool TryBuildAuthoritativePhysicalShapeColumn(
+            List<OviaTextRow> tableTextRows,
+            List<OviaGridLineSegment> gridLines,
+            Point3d selectedMinPoint,
+            Point3d selectedMaxPoint,
+            out OviaHeaderColumn shapeColumn)
+        {
+            shapeColumn = null;
+
+            if (tableTextRows == null || tableTextRows.Count == 0 || gridLines == null || gridLines.Count == 0)
+            {
+                return false;
+            }
+
+            double selectedMinX = Math.Min(selectedMinPoint.X, selectedMaxPoint.X);
+            double selectedMaxX = Math.Max(selectedMinPoint.X, selectedMaxPoint.X);
+            double selectedMinY = Math.Min(selectedMinPoint.Y, selectedMaxPoint.Y);
+            double selectedMaxY = Math.Max(selectedMinPoint.Y, selectedMaxPoint.Y);
+            double tableWidth = Math.Max(selectedMaxX - selectedMinX, 0.0001);
+            double tableHeight = Math.Max(selectedMaxY - selectedMinY, 0.0001);
+            double averageTextHeight = GetAverageTextHeight(tableTextRows);
+
+            if (averageTextHeight <= 0.0001)
+            {
+                averageTextHeight = Math.Max(tableHeight * 0.02, 1.0);
+            }
+
+            OviaTextRow shapeHeaderText = null;
+            double nearestHeaderDistance = Double.MaxValue;
+            double xMargin = Math.Max(tableWidth * 0.025, 0.5);
+            int i;
+
+            for (i = 0; i < tableTextRows.Count; i++)
+            {
+                OviaTextRow textRow = tableTextRows[i];
+
+                if (textRow == null
+                    || textRow.X < selectedMinX - xMargin
+                    || textRow.X > selectedMaxX + xMargin)
+                {
+                    continue;
+                }
+
+                string title = CleanHeaderText(textRow.TextValue);
+                string key = ClassifyHeaderTitle(title);
+
+                if (!String.Equals(key, "SHAPE", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                double distance = Math.Abs(textRow.Y - selectedMaxY);
+
+                if (distance < nearestHeaderDistance)
+                {
+                    nearestHeaderDistance = distance;
+                    shapeHeaderText = textRow;
+                }
+            }
+
+            if (shapeHeaderText == null)
+            {
+                return false;
+            }
+
+            double axisTolerance = Math.Max(Math.Max(averageTextHeight * 0.10, tableWidth * 0.00025), 0.03);
+            double mergeTolerance = Math.Max(Math.Max(averageTextHeight * 0.20, tableWidth * 0.00045), 0.05);
+            double headerBandMargin = Math.Max(averageTextHeight * 0.45, 0.12);
+            List<double> verticalXs = new List<double>();
+
+            for (i = 0; i < gridLines.Count; i++)
+            {
+                OviaGridLineSegment segment = gridLines[i];
+
+                if (segment == null)
+                {
+                    continue;
+                }
+
+                double dx = Math.Abs(segment.X2 - segment.X1);
+                double minSegmentY = Math.Min(segment.Y1, segment.Y2);
+                double maxSegmentY = Math.Max(segment.Y1, segment.Y2);
+
+                if (dx > axisTolerance
+                    || minSegmentY > shapeHeaderText.Y - headerBandMargin
+                    || maxSegmentY < shapeHeaderText.Y + headerBandMargin)
+                {
+                    continue;
+                }
+
+                double x = (segment.X1 + segment.X2) / 2.0;
+
+                if (x >= selectedMinX - xMargin && x <= selectedMaxX + xMargin)
+                {
+                    verticalXs.Add(x);
+                }
+            }
+
+            verticalXs = MergeGridCoordinates(verticalXs, mergeTolerance, true);
+            verticalXs = LimitGridVerticalCoordinatesToSelectedTable(
+                verticalXs,
+                selectedMinPoint,
+                selectedMaxPoint,
+                mergeTolerance
+            );
+
+            if (verticalXs.Count < 3)
+            {
+                /*
+                 * 셀 단위 세로선이 문자 기준 Y에서 아주 조금 끊긴 도면은 선택 DATA 높이의 72%를
+                 * 실제로 관통하는 세로선으로 한 번 더 복구합니다. 형상 내부선은 각 행 안에서만
+                 * 존재하므로 이 커버리지를 만족하지 않습니다.
+                 */
+                verticalXs = ExtractCoveredGridCoordinates(
+                    gridLines,
+                    true,
+                    axisTolerance,
+                    mergeTolerance,
+                    Math.Max(tableHeight * 0.02, 0.20),
+                    tableHeight * 0.72,
+                    selectedMinY,
+                    selectedMaxY
+                );
+                verticalXs = LimitGridVerticalCoordinatesToSelectedTable(
+                    verticalXs,
+                    selectedMinPoint,
+                    selectedMaxPoint,
+                    mergeTolerance
+                );
+            }
+
+            if (verticalXs.Count < 3)
+            {
+                return false;
+            }
+
+            verticalXs.Sort();
+            double leftX = Double.NaN;
+            double rightX = Double.NaN;
+
+            for (i = 0; i < verticalXs.Count; i++)
+            {
+                double x = verticalXs[i];
+
+                if (x <= shapeHeaderText.X + mergeTolerance && (Double.IsNaN(leftX) || x > leftX))
+                {
+                    leftX = x;
+                }
+
+                if (x >= shapeHeaderText.X - mergeTolerance && (Double.IsNaN(rightX) || x < rightX))
+                {
+                    rightX = x;
+                }
+            }
+
+            if (!Double.IsNaN(leftX) && !Double.IsNaN(rightX) && Math.Abs(rightX - leftX) <= mergeTolerance)
+            {
+                rightX = Double.NaN;
+
+                for (i = 0; i < verticalXs.Count; i++)
+                {
+                    if (verticalXs[i] > leftX + mergeTolerance)
+                    {
+                        rightX = verticalXs[i];
+                        break;
+                    }
+                }
+            }
+
+            if (Double.IsNaN(leftX) || Double.IsNaN(rightX) || rightX <= leftX)
+            {
+                return false;
+            }
+
+            double shapeWidth = rightX - leftX;
+
+            if (shapeWidth < tableWidth * 0.03 || shapeWidth > tableWidth * 0.35)
+            {
+                return false;
+            }
+
+            /*
+             * 동일 헤더 밴드의 규격·길이·수량 등 다른 헤더 중심이 후보 셀 안에 있으면 경계 하나가
+             * 누락되어 여러 데이터 열이 합쳐진 상태입니다. 이 후보는 authoritative로 사용하지 않습니다.
+             */
+            double headerYTolerance = Math.Max(averageTextHeight * 5.0, 2.0);
+
+            for (i = 0; i < tableTextRows.Count; i++)
+            {
+                OviaTextRow textRow = tableTextRows[i];
+
+                if (textRow == null || Math.Abs(textRow.Y - shapeHeaderText.Y) > headerYTolerance)
+                {
+                    continue;
+                }
+
+                string key = ClassifyHeaderTitle(CleanHeaderText(textRow.TextValue));
+
+                if (key == "" || String.Equals(key, "SHAPE", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (textRow.X > leftX + mergeTolerance && textRow.X < rightX - mergeTolerance)
+                {
+                    return false;
+                }
+            }
+
+            shapeColumn = new OviaHeaderColumn();
+            shapeColumn.StandardKey = "SHAPE";
+            shapeColumn.OriginalTitle = "철근형상";
+            shapeColumn.LeftX = leftX;
+            shapeColumn.RightX = rightX;
+            shapeColumn.X = (leftX + rightX) / 2.0;
+            shapeColumn.SourceColumnIndex = -1;
+            return true;
         }
 
         private int RecoverMissingShapeCellBoundsForDataRows(
@@ -3313,10 +3868,7 @@ namespace OVIA.AutoCAD_2027
                 return false;
             }
 
-            MatchCollection matches = Regex.Matches(
-                shapeRawText,
-                @"-?\d+(?:,\d{3})*(?:\.\d+)?|-?\d+(?:\.\d+)?"
-            );
+            MatchCollection matches = GetExpectedCadShapeDimensionMatches(shapeRawText);
             int i;
 
             for (i = 0; i < matches.Count; i++)
@@ -3331,6 +3883,14 @@ namespace OVIA.AutoCAD_2027
             }
 
             return false;
+        }
+
+        private MatchCollection GetExpectedCadShapeDimensionMatches(string shapeRawText)
+        {
+            return Regex.Matches(
+                shapeRawText == null ? "" : shapeRawText,
+                @"(?<![A-Za-z0-9])-?\d+(?:,\d{3})*(?:\.\d+)?(?![A-Za-z0-9])"
+            );
         }
 
         private bool IsSameRecoveredShapeCompareValue(decimal candidate, string compareText)
@@ -8006,10 +8566,7 @@ namespace OVIA.AutoCAD_2027
 
             if (row != null && row.ShapeRawText != null && row.ShapeRawText.Trim() != "")
             {
-                expectedDimensionCount = Regex.Matches(
-                    row.ShapeRawText,
-                    @"-?\d+(?:,\d{3})*(?:\.\d+)?|-?\d+(?:\.\d+)?"
-                ).Count;
+                expectedDimensionCount = CountExpectedCadShapeDimensionValues(row.ShapeRawText);
             }
 
             if (elements != null)
@@ -8055,6 +8612,22 @@ namespace OVIA.AutoCAD_2027
             );
 
             return retainedDimensionCount < minimumRetainedDimensionCount;
+        }
+
+        private int CountExpectedCadShapeDimensionValues(string shapeRawText)
+        {
+            if (shapeRawText == null || shapeRawText.Trim() == "")
+            {
+                return 0;
+            }
+
+            /*
+             * 형상원본에는 A/B/C뿐 아니라 a1~aN, R1, H1 같은 내부 식별 키가 포함될 수 있습니다.
+             * 일반 숫자 정규식으로 개수를 세면 키의 숫자까지 치수로 오인하여 복잡 형상을
+             * CAD_CAPTURE_INCOMPLETE로 차단합니다. 영문자에 바로 붙은 숫자는 식별 키로 제외하고,
+             * 실제 치수값과 각도값(예: 135%%D)만 기대 치수 개수에 포함합니다.
+             */
+            return GetExpectedCadShapeDimensionMatches(shapeRawText).Count;
         }
 
         private bool ValidateCapturedCadShapeCompleteness(
@@ -8210,11 +8783,14 @@ namespace OVIA.AutoCAD_2027
              * 내부 철근선은 길이·위치·컴포넌트 비율만으로 삭제하지 않습니다.
              */
             RemoveInvalidCadShapeElements(elements);
+            RemoveCadShapeTextsOutsidePhysicalCellBounds(elements, captureWidth, captureHeight);
             RemoveCadShapeElementsMatchingTableGrid(elements, row, gridModel, captureWidth, captureHeight);
             RemoveExactCadShapeCellBoundaryLines(elements, row, gridModel, captureWidth, captureHeight);
             RemoveCadShapeHeaderLabelTexts(elements);
             KeepOnlyActualCadShapeElements(row, elements, captureWidth, captureHeight);
             RemoveDuplicateCadShapeElements(elements);
+            RemoveOverlappingCadShapeGhostDimensionTextClusters(elements, captureWidth, captureHeight);
+            RemoveExcessCadShapeNumericTexts(row, elements, captureWidth, captureHeight);
 
             /*
              * OVIA CAD 벡터 형상 v2:
@@ -8287,6 +8863,17 @@ namespace OVIA.AutoCAD_2027
             }
 
             if (string.Equals(entity.Layer, OviaBoxLayerName, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            /*
+             * CAD 화면에서 숨겨진 객체는 형상 JSON에도 들어가면 안 됩니다.
+             * 특히 동적 블록의 AttributeReference가 Invisible 상태이거나 비활성 가시성 상태의
+             * DBText가 원시 BlockTableRecord에 남아 있으면 CAD에는 보이지 않지만 OVIA에는 작은
+             * 중복 숫자로 표시될 수 있습니다.
+             */
+            if (!IsCadShapeEntityVisible(tr, entity))
             {
                 return;
             }
@@ -8429,27 +9016,102 @@ namespace OVIA.AutoCAD_2027
             if (blockReference != null)
             {
                 BlockTableRecord blockRecord = tr.GetObject(blockReference.BlockTableRecord, OpenMode.ForRead, false) as BlockTableRecord;
+                bool preferEvaluatedDisplay = IsCadShapeEvaluatedBlock(blockReference, blockRecord);
+                int blockElementStartCount = elements.Count;
+                int blockTextStartCount = CountCadShapeTextElements(elements);
+                bool collectAttributeReferences = true;
 
-                if (blockRecord != null)
+                /*
+                 * 동적·익명 블록은 현재 화면 상태가 반영된 Explode 결과를 단일 원본으로 사용합니다.
+                 * 이전 구현은 Explode가 성공한 뒤에도 AttributeCollection을 다시 전부 합쳤기 때문에,
+                 * 비활성 가시성 상태에 남아 있는 200/400/500 AttributeReference가 화면 표시 문자와
+                 * 별도 좌표로 추가되어 11번처럼 셀 중앙에 작은 숫자 군집이 생길 수 있었습니다.
+                 *
+                 * Explode 결과에 TEXT가 하나라도 있으면 현재 표시 문자가 이미 확보된 것으로 보고
+                 * AttributeCollection을 다시 합치지 않습니다. Explode가 선만 반환하거나 완전히 실패한
+                 * 예외 블록에서만 가시 AttributeReference와 원시 정의를 fallback으로 사용합니다.
+                 */
+                if (preferEvaluatedDisplay)
                 {
-                    Matrix3d nextTransform = transform * blockReference.BlockTransform;
+                    CollectCadShapeElementsFromExplodedBlock(
+                        tr,
+                        blockReference,
+                        transform,
+                        elements,
+                        minX,
+                        maxX,
+                        minY,
+                        maxY,
+                        width,
+                        height,
+                        depth + 1
+                    );
 
-                    foreach (ObjectId childId in blockRecord)
+                    int explodedTextCount = CountCadShapeTextElements(elements) - blockTextStartCount;
+
+                    if (elements.Count == blockElementStartCount)
                     {
-                        Entity childEntity = tr.GetObject(childId, OpenMode.ForRead, false) as Entity;
-
-                        if (childEntity == null)
-                        {
-                            continue;
-                        }
-
-                        CollectCadShapeElementsFromEntity(tr, childEntity, nextTransform, elements, minX, maxX, minY, maxY, width, height, depth + 1);
+                        CollectCadShapeElementsFromBlockRecord(
+                            tr,
+                            blockReference,
+                            blockRecord,
+                            transform,
+                            elements,
+                            minX,
+                            maxX,
+                            minY,
+                            maxY,
+                            width,
+                            height,
+                            depth
+                        );
                     }
+                    else if (explodedTextCount > 0)
+                    {
+                        collectAttributeReferences = false;
+                    }
+                }
+                else
+                {
+                    CollectCadShapeElementsFromBlockRecord(
+                        tr,
+                        blockReference,
+                        blockRecord,
+                        transform,
+                        elements,
+                        minX,
+                        maxX,
+                        minY,
+                        maxY,
+                        width,
+                        height,
+                        depth
+                    );
 
+                    if (elements.Count == blockElementStartCount)
+                    {
+                        CollectCadShapeElementsFromExplodedBlock(
+                            tr,
+                            blockReference,
+                            transform,
+                            elements,
+                            minX,
+                            maxX,
+                            minY,
+                            maxY,
+                            width,
+                            height,
+                            depth + 1
+                        );
+                    }
+                }
+
+                if (collectAttributeReferences)
+                {
                     /*
-                     * 블록의 치수 숫자가 AttributeReference로 작성된 경우도 함께 수집합니다.
-                     * AttributeReference 위치는 해당 블록이 놓인 상위 공간 기준이므로
-                     * 현재 상위 transform만 적용하고 BlockTransform을 중복 적용하지 않습니다.
+                     * 일반 정적 블록 또는 Explode가 TEXT를 제공하지 못한 예외 블록만 실제 배치
+                     * AttributeReference를 보조 수집합니다. 레이어 OFF/FROZEN, Visible=false,
+                     * Invisible=true 속성은 공통 가시성 검사에서 제외합니다.
                      */
                     foreach (ObjectId attributeId in blockReference.AttributeCollection)
                     {
@@ -8463,27 +9125,6 @@ namespace OVIA.AutoCAD_2027
                         CollectCadShapeElementsFromEntity(tr, attributeEntity, transform, elements, minX, maxX, minY, maxY, width, height, depth + 1);
                     }
                 }
-
-                /*
-                 * 외부 프로그램에서 저장된 동적 블록·익명 블록·특수 블록은 BlockTableRecord를
-                 * 직접 순회했을 때 실제 화면 좌표와 다르거나 표시 형상이 누락될 수 있습니다.
-                 * 문자 추출과 표 선 추출은 이미 Explode 보조 경로를 사용하고 있으므로,
-                 * CAD 철근형상도 같은 방식으로 화면에 보이는 객체를 한 번 더 수집합니다.
-                 * 직접 순회 결과와 중복되는 요소는 최종 중복 제거 단계에서 제거됩니다.
-                 */
-                CollectCadShapeElementsFromExplodedBlock(
-                    tr,
-                    blockReference,
-                    transform,
-                    elements,
-                    minX,
-                    maxX,
-                    minY,
-                    maxY,
-                    width,
-                    height,
-                    depth + 1
-                );
 
                 return;
             }
@@ -8507,6 +9148,225 @@ namespace OVIA.AutoCAD_2027
                     width,
                     height,
                     depth
+                );
+            }
+        }
+
+        private bool IsCadShapeEntityVisible(Entity entity)
+        {
+            if (entity == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!entity.Visible)
+                {
+                    return false;
+                }
+            }
+            catch
+            {
+                // 일부 Proxy 객체는 Visible 조회를 지원하지 않을 수 있으므로 나머지 수집을 계속합니다.
+            }
+
+            AttributeReference attributeReference = entity as AttributeReference;
+
+            if (attributeReference != null)
+            {
+                try
+                {
+                    if (attributeReference.Invisible)
+                    {
+                        return false;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            AttributeDefinition attributeDefinition = entity as AttributeDefinition;
+
+            if (attributeDefinition != null)
+            {
+                try
+                {
+                    if (attributeDefinition.Invisible)
+                    {
+                        return false;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return true;
+        }
+
+        private bool IsCadShapeEntityVisible(Transaction tr, Entity entity)
+        {
+            if (!IsCadShapeEntityVisible(entity))
+            {
+                return false;
+            }
+
+            /*
+             * Entity.Visible은 객체 자체의 표시 플래그만 확인하며 레이어 OFF/FROZEN 상태까지
+             * 보장하지 않습니다. 화면에 보이지 않는 레이어의 문자·속성이 동적 블록 내부에
+             * 남아 있으면 OVIA 형상에만 나타날 수 있으므로 데이터베이스 상의 레이어 표시 상태도
+             * 함께 확인합니다. Explode로 생성된 비DB 객체는 LayerId를 읽지 못할 수 있으므로
+             * 그 경우에는 객체 자체 Visible 판정 결과를 유지합니다.
+             */
+            if (tr != null && entity != null)
+            {
+                try
+                {
+                    ObjectId layerId = entity.LayerId;
+
+                    if (!layerId.IsNull)
+                    {
+                        LayerTableRecord layer = tr.GetObject(layerId, OpenMode.ForRead, false) as LayerTableRecord;
+
+                        if (layer != null && (layer.IsOff || layer.IsFrozen))
+                        {
+                            return false;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Explode 임시 객체·Proxy 객체는 LayerId 조회가 실패할 수 있습니다.
+                }
+            }
+
+            return true;
+        }
+
+        private int CountCadShapeTextElements(List<OviaCadShapeElement> elements)
+        {
+            if (elements == null || elements.Count == 0)
+            {
+                return 0;
+            }
+
+            int count = 0;
+            int i;
+
+            for (i = 0; i < elements.Count; i++)
+            {
+                OviaCadShapeElement item = elements[i];
+
+                if (item != null
+                    && item.Type == "TEXT"
+                    && item.Text != null
+                    && item.Text.Trim() != "")
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private bool IsCadShapeEvaluatedBlock(BlockReference blockReference, BlockTableRecord blockRecord)
+        {
+            if (blockReference == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (blockReference.IsDynamicBlock)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                ObjectId dynamicBlockId = blockReference.DynamicBlockTableRecord;
+
+                if (!dynamicBlockId.IsNull && dynamicBlockId != blockReference.BlockTableRecord)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            if (blockRecord != null)
+            {
+                try
+                {
+                    if (blockRecord.IsAnonymous
+                        || (blockRecord.Name != null
+                            && blockRecord.Name.StartsWith("*U", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return true;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return false;
+        }
+
+        private void CollectCadShapeElementsFromBlockRecord(
+            Transaction tr,
+            BlockReference blockReference,
+            BlockTableRecord blockRecord,
+            Matrix3d parentTransform,
+            List<OviaCadShapeElement> elements,
+            double minX,
+            double maxX,
+            double minY,
+            double maxY,
+            double width,
+            double height,
+            int depth)
+        {
+            if (tr == null
+                || blockReference == null
+                || blockRecord == null
+                || elements == null
+                || depth > 8)
+            {
+                return;
+            }
+
+            Matrix3d nextTransform = parentTransform * blockReference.BlockTransform;
+
+            foreach (ObjectId childId in blockRecord)
+            {
+                Entity childEntity = tr.GetObject(childId, OpenMode.ForRead, false) as Entity;
+
+                if (childEntity == null)
+                {
+                    continue;
+                }
+
+                CollectCadShapeElementsFromEntity(
+                    tr,
+                    childEntity,
+                    nextTransform,
+                    elements,
+                    minX,
+                    maxX,
+                    minY,
+                    maxY,
+                    width,
+                    height,
+                    depth + 1
                 );
             }
         }
@@ -11178,10 +12038,7 @@ namespace OVIA.AutoCAD_2027
 
             if (row.ShapeRawText != null && row.ShapeRawText.Trim() != "")
             {
-                expectedDimensionCount = Regex.Matches(
-                    row.ShapeRawText,
-                    @"-?\d+(?:,\d{3})*(?:\.\d+)?|-?\d+(?:\.\d+)?"
-                ).Count;
+                expectedDimensionCount = CountExpectedCadShapeDimensionValues(row.ShapeRawText);
             }
 
             int retainedDimensionCount = 0;
@@ -11823,6 +12680,70 @@ namespace OVIA.AutoCAD_2027
             );
         }
 
+        private void RemoveCadShapeTextsOutsidePhysicalCellBounds(
+            List<OviaCadShapeElement> elements,
+            double width,
+            double height)
+        {
+            if (elements == null || elements.Count == 0 || width <= 0.0001 || height <= 0.0001)
+            {
+                return;
+            }
+
+            /*
+             * 형상 셀 선택창은 셀 경계에 걸친 문자와 (UP)/(DOWN)을 놓치지 않기 위해
+             * 상·하·좌·우로 조금 확장합니다. SelectCrossingWindow의 확장 영역은 객체 발견용일 뿐이며,
+             * 발견된 TEXT의 실제 소속 셀까지 확장해서는 안 됩니다.
+             *
+             * 이전 구현은 Y(행) 소속만 확인했기 때문에, 물리 형상 셀 X 범위가 넓게 잡히거나
+             * 인접 열의 문자가 셀 경계에 살짝 교차하면 번호·철근규격·길이·수량·총길이·중량까지
+             * 철근형상 TEXT로 저장될 수 있었습니다. 첨부 2026-08-06 CSV의 21~38번에서 한 행의
+             * 전체 데이터가 OVIA_CAD_SHAPE_TEXTS에 들어간 것이 이 실패 형태입니다.
+             *
+             * 각 TEXT는 물리 형상 셀의 정규화 X/Y 범위 안에 실제 extents 중심 또는 기준점이
+             * 존재하는 경우에만 현재 셀 소유로 인정합니다. 단, (UP)/(DOWN)은 기존 요구사항대로
+             * 형상 셀 우측에 배치될 수 있으므로 X축에만 최대 셀 폭 25%의 예외를 허용합니다.
+             * 일반 숫자·문자는 extents가 셀라인과 교차했다는 이유만으로 인접 셀에 배정하지 않습니다.
+             */
+            double ownershipToleranceX = Math.Max(width * 0.001, 0.005);
+            double ownershipToleranceY = Math.Max(height * 0.001, 0.005);
+            int i;
+
+            for (i = elements.Count - 1; i >= 0; i--)
+            {
+                OviaCadShapeElement item = elements[i];
+
+                if (item == null || item.Type != "TEXT")
+                {
+                    continue;
+                }
+
+                double centerX;
+                double centerY;
+                GetCadShapeTextCenter(item, out centerX, out centerY);
+
+                bool centerBelongsToRow = centerY >= -ownershipToleranceY
+                    && centerY <= height + ownershipToleranceY;
+                bool referenceBelongsToRow = item.Y1 >= -ownershipToleranceY
+                    && item.Y1 <= height + ownershipToleranceY;
+
+                bool isDirectionLabel = IsCadShapeDirectionLabel(item.Text);
+                double rightOwnershipMargin = isDirectionLabel
+                    ? Math.Max(width * 0.25, 0.20)
+                    : ownershipToleranceX;
+                double minOwnedX = -ownershipToleranceX;
+                double maxOwnedX = width + rightOwnershipMargin;
+                bool centerBelongsToColumn = centerX >= minOwnedX && centerX <= maxOwnedX;
+                bool referenceBelongsToColumn = item.X1 >= minOwnedX && item.X1 <= maxOwnedX;
+
+                if ((!centerBelongsToRow && !referenceBelongsToRow)
+                    || (!centerBelongsToColumn && !referenceBelongsToColumn))
+                {
+                    elements.RemoveAt(i);
+                }
+            }
+        }
+
         private void KeepOnlyActualCadShapeElements(OviaBarTableRow row, List<OviaCadShapeElement> elements, double width, double height)
         {
             if (elements == null || elements.Count == 0)
@@ -11914,6 +12835,649 @@ namespace OVIA.AutoCAD_2027
                     continue;
                 }
             }
+        }
+
+        private void RemoveOverlappingCadShapeGhostDimensionTextClusters(
+            List<OviaCadShapeElement> elements,
+            double width,
+            double height)
+        {
+            if (elements == null || elements.Count < 2)
+            {
+                return;
+            }
+
+            /*
+             * 동적 블록의 비활성 가시성 상태 문자가 현재 표시 Explode 결과와 함께 들어오면
+             * 화면에는 없는 200/400/500 숫자뿐 아니라 91°/74° 같은 각도도 동일한 작은 영역에
+             * 겹쳐 저장될 수 있습니다. 이전 _21 안전장치는 순수 숫자만 대상으로 삼아 복합 형상의
+             * 숨김 각도 사본은 통과했습니다.
+             *
+             * 순수 숫자와 각도를 같은 "형상 치수 문자" 범주로 묶어 강하게 겹치는 군집을 찾습니다.
+             * 군집 안의 값 중 군집 밖의 서로 겹치지 않는 정상 위치에 같은 종류·같은 값이 존재하는
+             * 후보를 찾고, 그 후보끼리 직접 겹치는 하위 군집만 비활성 상태 사본으로 제거합니다.
+             * 따라서 CAD에 실제로 서로 다른 위치에 반복된 500, 200, 135° 등은 그대로 보존합니다.
+             */
+            List<int> dimensionTextIndexes = new List<int>();
+            int i;
+
+            for (i = 0; i < elements.Count; i++)
+            {
+                OviaCadShapeElement item = elements[i];
+                string ignoredKind;
+                decimal ignoredValue;
+
+                if (item != null
+                    && item.Type == "TEXT"
+                    && TryParseCadShapeDimensionText(item.Text, out ignoredKind, out ignoredValue))
+                {
+                    dimensionTextIndexes.Add(i);
+                }
+            }
+
+            if (dimensionTextIndexes.Count < 2)
+            {
+                return;
+            }
+
+            HashSet<int> visited = new HashSet<int>();
+            HashSet<int> removeIndexes = new HashSet<int>();
+            int textPosition;
+
+            for (textPosition = 0; textPosition < dimensionTextIndexes.Count; textPosition++)
+            {
+                int seedIndex = dimensionTextIndexes[textPosition];
+
+                if (visited.Contains(seedIndex))
+                {
+                    continue;
+                }
+
+                List<int> cluster = new List<int>();
+                Queue<int> queue = new Queue<int>();
+                queue.Enqueue(seedIndex);
+                visited.Add(seedIndex);
+
+                while (queue.Count > 0)
+                {
+                    int currentIndex = queue.Dequeue();
+                    cluster.Add(currentIndex);
+                    int comparePosition;
+
+                    for (comparePosition = 0; comparePosition < dimensionTextIndexes.Count; comparePosition++)
+                    {
+                        int compareIndex = dimensionTextIndexes[comparePosition];
+
+                        if (visited.Contains(compareIndex))
+                        {
+                            continue;
+                        }
+
+                        if (AreCadShapeDimensionTextsStronglyOverlapping(
+                            elements[currentIndex],
+                            elements[compareIndex],
+                            width,
+                            height))
+                        {
+                            visited.Add(compareIndex);
+                            queue.Enqueue(compareIndex);
+                        }
+                    }
+                }
+
+                if (cluster.Count < 2)
+                {
+                    continue;
+                }
+
+                HashSet<int> clusterSet = new HashSet<int>(cluster);
+                List<int> outsideDuplicatedClusterItems = new List<int>();
+                int clusterPosition;
+
+                for (clusterPosition = 0; clusterPosition < cluster.Count; clusterPosition++)
+                {
+                    int clusterIndex = cluster[clusterPosition];
+
+                    if (HasIndependentOutsideCadShapeDimensionCopy(
+                        clusterIndex,
+                        clusterSet,
+                        dimensionTextIndexes,
+                        elements,
+                        width,
+                        height))
+                    {
+                        outsideDuplicatedClusterItems.Add(clusterIndex);
+                    }
+                }
+
+                /*
+                 * 숨김 91°/74°가 정상 130°/135°와 하나의 겹침 컴포넌트로 연결되더라도
+                 * 컴포넌트 전체를 지우지 않습니다. 외부 정상 사본이 있는 후보끼리 직접 겹치는
+                 * 2개 이상의 하위 군집만 제거하여 외부 사본이 없는 정상 치수를 보존합니다.
+                 */
+                if (outsideDuplicatedClusterItems.Count < 2)
+                {
+                    continue;
+                }
+
+                HashSet<int> duplicatedVisited = new HashSet<int>();
+                int duplicatedPosition;
+
+                for (duplicatedPosition = 0; duplicatedPosition < outsideDuplicatedClusterItems.Count; duplicatedPosition++)
+                {
+                    int duplicatedSeed = outsideDuplicatedClusterItems[duplicatedPosition];
+
+                    if (duplicatedVisited.Contains(duplicatedSeed))
+                    {
+                        continue;
+                    }
+
+                    List<int> duplicatedSubCluster = new List<int>();
+                    Queue<int> duplicatedQueue = new Queue<int>();
+                    duplicatedQueue.Enqueue(duplicatedSeed);
+                    duplicatedVisited.Add(duplicatedSeed);
+
+                    while (duplicatedQueue.Count > 0)
+                    {
+                        int duplicatedCurrent = duplicatedQueue.Dequeue();
+                        duplicatedSubCluster.Add(duplicatedCurrent);
+                        int duplicatedComparePosition;
+
+                        for (duplicatedComparePosition = 0; duplicatedComparePosition < outsideDuplicatedClusterItems.Count; duplicatedComparePosition++)
+                        {
+                            int duplicatedCompare = outsideDuplicatedClusterItems[duplicatedComparePosition];
+
+                            if (duplicatedVisited.Contains(duplicatedCompare))
+                            {
+                                continue;
+                            }
+
+                            if (AreCadShapeDimensionTextsStronglyOverlapping(
+                                elements[duplicatedCurrent],
+                                elements[duplicatedCompare],
+                                width,
+                                height))
+                            {
+                                duplicatedVisited.Add(duplicatedCompare);
+                                duplicatedQueue.Enqueue(duplicatedCompare);
+                            }
+                        }
+                    }
+
+                    if (duplicatedSubCluster.Count < 2)
+                    {
+                        continue;
+                    }
+
+                    int removePosition;
+
+                    for (removePosition = 0; removePosition < duplicatedSubCluster.Count; removePosition++)
+                    {
+                        removeIndexes.Add(duplicatedSubCluster[removePosition]);
+                    }
+                }
+            }
+
+            if (removeIndexes.Count == 0)
+            {
+                return;
+            }
+
+            List<int> orderedRemoveIndexes = new List<int>(removeIndexes);
+            orderedRemoveIndexes.Sort();
+
+            for (i = orderedRemoveIndexes.Count - 1; i >= 0; i--)
+            {
+                elements.RemoveAt(orderedRemoveIndexes[i]);
+            }
+        }
+
+
+        private bool HasIndependentOutsideCadShapeDimensionCopy(
+            int targetIndex,
+            HashSet<int> clusterSet,
+            List<int> dimensionTextIndexes,
+            List<OviaCadShapeElement> elements,
+            double width,
+            double height)
+        {
+            if (clusterSet == null
+                || dimensionTextIndexes == null
+                || elements == null
+                || targetIndex < 0
+                || targetIndex >= elements.Count)
+            {
+                return false;
+            }
+
+            string targetKind;
+            decimal targetValue;
+
+            if (!TryParseCadShapeDimensionText(elements[targetIndex].Text, out targetKind, out targetValue))
+            {
+                return false;
+            }
+
+            int outsidePosition;
+
+            for (outsidePosition = 0; outsidePosition < dimensionTextIndexes.Count; outsidePosition++)
+            {
+                int outsideIndex = dimensionTextIndexes[outsidePosition];
+
+                if (clusterSet.Contains(outsideIndex))
+                {
+                    continue;
+                }
+
+                string outsideKind;
+                decimal outsideValue;
+
+                if (TryParseCadShapeDimensionText(elements[outsideIndex].Text, out outsideKind, out outsideValue)
+                    && String.Equals(targetKind, outsideKind, StringComparison.Ordinal)
+                    && AreDecimalValuesEqualAtThreeDecimals(targetValue, outsideValue)
+                    && IsCadShapeDimensionTextSpatiallyIsolated(
+                        outsideIndex,
+                        dimensionTextIndexes,
+                        elements,
+                        width,
+                        height))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsCadShapeDimensionTextSpatiallyIsolated(
+            int targetIndex,
+            List<int> dimensionTextIndexes,
+            List<OviaCadShapeElement> elements,
+            double width,
+            double height)
+        {
+            if (dimensionTextIndexes == null || elements == null || targetIndex < 0 || targetIndex >= elements.Count)
+            {
+                return false;
+            }
+
+            int i;
+
+            for (i = 0; i < dimensionTextIndexes.Count; i++)
+            {
+                int compareIndex = dimensionTextIndexes[i];
+
+                if (compareIndex == targetIndex || compareIndex < 0 || compareIndex >= elements.Count)
+                {
+                    continue;
+                }
+
+                if (AreCadShapeDimensionTextsStronglyOverlapping(
+                    elements[targetIndex],
+                    elements[compareIndex],
+                    width,
+                    height))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool AreCadShapeDimensionTextsStronglyOverlapping(
+            OviaCadShapeElement first,
+            OviaCadShapeElement second,
+            double width,
+            double height)
+        {
+            double firstMinX;
+            double firstMinY;
+            double firstMaxX;
+            double firstMaxY;
+            double secondMinX;
+            double secondMinY;
+            double secondMaxX;
+            double secondMaxY;
+
+            if (!TryGetCadShapeTextBoundsForOverlap(first, width, height, out firstMinX, out firstMinY, out firstMaxX, out firstMaxY)
+                || !TryGetCadShapeTextBoundsForOverlap(second, width, height, out secondMinX, out secondMinY, out secondMaxX, out secondMaxY))
+            {
+                return false;
+            }
+
+            double intersectionWidth = Math.Min(firstMaxX, secondMaxX) - Math.Max(firstMinX, secondMinX);
+            double intersectionHeight = Math.Min(firstMaxY, secondMaxY) - Math.Max(firstMinY, secondMinY);
+            double firstWidth = Math.Max(firstMaxX - firstMinX, 0.0001);
+            double firstHeight = Math.Max(firstMaxY - firstMinY, 0.0001);
+            double secondWidth = Math.Max(secondMaxX - secondMinX, 0.0001);
+            double secondHeight = Math.Max(secondMaxY - secondMinY, 0.0001);
+
+            if (intersectionWidth > 0.0 && intersectionHeight > 0.0)
+            {
+                double intersectionArea = intersectionWidth * intersectionHeight;
+                double smallerArea = Math.Min(firstWidth * firstHeight, secondWidth * secondHeight);
+
+                if (smallerArea > 0.000001 && intersectionArea / smallerArea >= 0.50)
+                {
+                    return true;
+                }
+            }
+
+            double firstCenterX = (firstMinX + firstMaxX) / 2.0;
+            double firstCenterY = (firstMinY + firstMaxY) / 2.0;
+            double secondCenterX = (secondMinX + secondMaxX) / 2.0;
+            double secondCenterY = (secondMinY + secondMaxY) / 2.0;
+            double deltaX = firstCenterX - secondCenterX;
+            double deltaY = firstCenterY - secondCenterY;
+            double centerDistance = Math.Sqrt(deltaX * deltaX + deltaY * deltaY);
+            double textScale = Math.Max(Math.Min(firstHeight, secondHeight), Math.Min(width, height) * 0.005);
+
+            return centerDistance <= Math.Max(textScale * 0.70, 0.01);
+        }
+
+        private bool TryGetCadShapeTextBoundsForOverlap(
+            OviaCadShapeElement item,
+            double width,
+            double height,
+            out double minX,
+            out double minY,
+            out double maxX,
+            out double maxY)
+        {
+            minX = 0.0;
+            minY = 0.0;
+            maxX = 0.0;
+            maxY = 0.0;
+
+            if (item == null || item.Type != "TEXT")
+            {
+                return false;
+            }
+
+            if (item.HasBounds
+                && item.BoundsMaxX > item.BoundsMinX
+                && item.BoundsMaxY > item.BoundsMinY)
+            {
+                minX = item.BoundsMinX;
+                minY = item.BoundsMinY;
+                maxX = item.BoundsMaxX;
+                maxY = item.BoundsMaxY;
+                return true;
+            }
+
+            double estimatedHeight = Math.Max(item.Height, Math.Max(Math.Min(width, height) * 0.015, 0.1));
+            double estimatedWidth = Math.Max(
+                estimatedHeight * 0.55 * Math.Max(item.Text == null ? 0 : item.Text.Length, 1),
+                estimatedHeight
+            );
+
+            minX = item.X1 - estimatedWidth / 2.0;
+            maxX = item.X1 + estimatedWidth / 2.0;
+            minY = item.Y1 - estimatedHeight / 2.0;
+            maxY = item.Y1 + estimatedHeight / 2.0;
+            return true;
+        }
+
+        private bool TryParseCadShapeDimensionText(string value, out string kind, out decimal number)
+        {
+            kind = "";
+            number = 0M;
+
+            if (value == null)
+            {
+                return false;
+            }
+
+            string normalized = value.Trim();
+
+            if (normalized == "")
+            {
+                return false;
+            }
+
+            normalized = normalized
+                .Replace("%%D", "°")
+                .Replace("%%d", "°")
+                .Replace("˚", "°")
+                .Replace("º", "°");
+
+            bool isAngle = normalized.EndsWith("°", StringComparison.Ordinal);
+
+            if (isAngle)
+            {
+                normalized = normalized.Substring(0, normalized.Length - 1).Trim();
+            }
+
+            if (!TryParseDecimalText(normalized, out number))
+            {
+                return false;
+            }
+
+            kind = isAngle ? "ANGLE" : "NUMBER";
+            return true;
+        }
+
+        private void RemoveExcessCadShapeNumericTexts(
+            OviaBarTableRow row,
+            List<OviaCadShapeElement> elements,
+            double width,
+            double height)
+        {
+            if (row == null
+                || row.ShapeRawText == null
+                || row.ShapeRawText.Trim() == ""
+                || elements == null
+                || elements.Count == 0)
+            {
+                return;
+            }
+
+            Dictionary<decimal, int> expectedCounts = BuildExpectedCadShapeNumericCounts(row.ShapeRawText);
+
+            if (expectedCounts.Count == 0)
+            {
+                return;
+            }
+
+            Dictionary<decimal, List<int>> candidateIndexes = new Dictionary<decimal, List<int>>();
+            int i;
+
+            for (i = 0; i < elements.Count; i++)
+            {
+                OviaCadShapeElement item = elements[i];
+                decimal numericValue;
+
+                if (item == null
+                    || item.Type != "TEXT"
+                    || !TryParseDecimalText(item.Text, out numericValue))
+                {
+                    continue;
+                }
+
+                decimal key = Math.Round(numericValue, 3, MidpointRounding.AwayFromZero);
+
+                if (!expectedCounts.ContainsKey(key))
+                {
+                    continue;
+                }
+
+                List<int> indexes;
+
+                if (!candidateIndexes.TryGetValue(key, out indexes))
+                {
+                    indexes = new List<int>();
+                    candidateIndexes.Add(key, indexes);
+                }
+
+                indexes.Add(i);
+            }
+
+            double geometryMinX;
+            double geometryMinY;
+            double geometryMaxX;
+            double geometryMaxY;
+            bool hasGeometry = GetCadShapeContentBounds(
+                elements,
+                false,
+                out geometryMinX,
+                out geometryMinY,
+                out geometryMaxX,
+                out geometryMaxY
+            );
+            HashSet<int> removeIndexes = new HashSet<int>();
+
+            foreach (KeyValuePair<decimal, List<int>> pair in candidateIndexes)
+            {
+                int expectedCount;
+
+                if (!expectedCounts.TryGetValue(pair.Key, out expectedCount)
+                    || pair.Value.Count <= expectedCount)
+                {
+                    continue;
+                }
+
+                pair.Value.Sort(delegate(int firstIndex, int secondIndex)
+                {
+                    OviaCadShapeElement first = elements[firstIndex];
+                    OviaCadShapeElement second = elements[secondIndex];
+                    double firstOverflow = GetCadShapeTextCellOverflowDistance(first, width, height);
+                    double secondOverflow = GetCadShapeTextCellOverflowDistance(second, width, height);
+                    int overflowCompare = firstOverflow.CompareTo(secondOverflow);
+
+                    if (overflowCompare != 0)
+                    {
+                        return overflowCompare;
+                    }
+
+                    if (hasGeometry)
+                    {
+                        double firstGeometryDistance = GetCadShapeTextGeometryDistance(
+                            first,
+                            geometryMinX,
+                            geometryMinY,
+                            geometryMaxX,
+                            geometryMaxY
+                        );
+                        double secondGeometryDistance = GetCadShapeTextGeometryDistance(
+                            second,
+                            geometryMinX,
+                            geometryMinY,
+                            geometryMaxX,
+                            geometryMaxY
+                        );
+                        int geometryCompare = firstGeometryDistance.CompareTo(secondGeometryDistance);
+
+                        if (geometryCompare != 0)
+                        {
+                            return geometryCompare;
+                        }
+                    }
+
+                    return firstIndex.CompareTo(secondIndex);
+                });
+
+                for (i = expectedCount; i < pair.Value.Count; i++)
+                {
+                    removeIndexes.Add(pair.Value[i]);
+                }
+            }
+
+            if (removeIndexes.Count == 0)
+            {
+                return;
+            }
+
+            List<int> orderedRemoveIndexes = new List<int>(removeIndexes);
+            orderedRemoveIndexes.Sort();
+
+            for (i = orderedRemoveIndexes.Count - 1; i >= 0; i--)
+            {
+                elements.RemoveAt(orderedRemoveIndexes[i]);
+            }
+        }
+
+        private Dictionary<decimal, int> BuildExpectedCadShapeNumericCounts(string shapeRawText)
+        {
+            Dictionary<decimal, int> counts = new Dictionary<decimal, int>();
+
+            if (shapeRawText == null || shapeRawText.Trim() == "")
+            {
+                return counts;
+            }
+
+            MatchCollection matches = GetExpectedCadShapeDimensionMatches(shapeRawText);
+            int i;
+
+            for (i = 0; i < matches.Count; i++)
+            {
+                decimal value;
+
+                if (!TryParseDecimalText(matches[i].Value, out value))
+                {
+                    continue;
+                }
+
+                decimal key = Math.Round(value, 3, MidpointRounding.AwayFromZero);
+                int count;
+                counts.TryGetValue(key, out count);
+                counts[key] = count + 1;
+            }
+
+            return counts;
+        }
+
+        private double GetCadShapeTextCellOverflowDistance(OviaCadShapeElement item, double width, double height)
+        {
+            double centerX;
+            double centerY;
+            GetCadShapeTextCenter(item, out centerX, out centerY);
+            double overflowX = centerX < 0.0
+                ? -centerX
+                : (centerX > width ? centerX - width : 0.0);
+            double overflowY = centerY < 0.0
+                ? -centerY
+                : (centerY > height ? centerY - height : 0.0);
+
+            return Math.Sqrt(overflowX * overflowX + overflowY * overflowY);
+        }
+
+        private double GetCadShapeTextGeometryDistance(
+            OviaCadShapeElement item,
+            double minX,
+            double minY,
+            double maxX,
+            double maxY)
+        {
+            double centerX;
+            double centerY;
+            GetCadShapeTextCenter(item, out centerX, out centerY);
+            double distanceX = centerX < minX
+                ? minX - centerX
+                : (centerX > maxX ? centerX - maxX : 0.0);
+            double distanceY = centerY < minY
+                ? minY - centerY
+                : (centerY > maxY ? centerY - maxY : 0.0);
+
+            return Math.Sqrt(distanceX * distanceX + distanceY * distanceY);
+        }
+
+        private void GetCadShapeTextCenter(OviaCadShapeElement item, out double centerX, out double centerY)
+        {
+            centerX = 0.0;
+            centerY = 0.0;
+
+            if (item == null)
+            {
+                return;
+            }
+
+            centerX = item.HasBounds
+                ? (item.BoundsMinX + item.BoundsMaxX) / 2.0
+                : item.X1;
+            centerY = item.HasBounds
+                ? (item.BoundsMinY + item.BoundsMaxY) / 2.0
+                : item.Y1;
         }
 
         private void RemoveExternalRowValueTexts(OviaBarTableRow row, List<OviaCadShapeElement> elements, double minX, double minY, double maxX, double maxY, bool useBox)
@@ -12225,28 +13789,84 @@ namespace OVIA.AutoCAD_2027
             double cropMaxX;
             double cropMaxY;
             bool hasBounds = GetCadShapeContentBounds(elements, true, out cropMinX, out cropMinY, out cropMaxX, out cropMaxY);
+            double physicalCellWidth = row == null ? 0.0 : Math.Abs(row.ShapeCellMaxX - row.ShapeCellMinX);
+            double physicalCellHeight = row == null ? 0.0 : Math.Abs(row.ShapeCellMaxY - row.ShapeCellMinY);
+            bool preservePhysicalCellLayout = physicalCellWidth > 0.0001 && physicalCellHeight > 0.0001;
+            double offsetX;
+            double offsetY;
+            double outputWidth;
+            double outputHeight;
 
-            if (!hasBounds)
+            if (preservePhysicalCellLayout)
             {
-                cropMinX = 0;
-                cropMinY = 0;
-                cropMaxX = row == null ? 100 : Math.Max(row.ShapeCellMaxX - row.ShapeCellMinX, 100);
-                cropMaxY = row == null ? 60 : Math.Max(row.ShapeCellMaxY - row.ShapeCellMinY, 60);
+                /*
+                 * JSON v3 SOURCE_CELL 레이아웃:
+                 * 철근형상 콘텐츠만 타이트하게 잘라 저장하면 CAD 셀 안에서의 좌우·상하 여백과
+                 * 문자/숫자/철근선의 상대 좌표가 사라집니다. 이후 BarList에서 전체 콘텐츠를
+                 * 다시 중앙 확대하면서 긴 설명문자가 철근규격 컬럼까지 넘어가는 원인이 됩니다.
+                 *
+                 * 새 추출본은 실제 철근형상 물리 셀의 0~width / 0~height 좌표계를 그대로 저장합니다.
+                 * 단, 고정 기능인 (DOWN)/(UP)이 셀 가장자리에 조금 벗어나 배치된 도면은 해당 방향
+                 * 문자의 실제 bounds까지만 viewport를 확장하여 누락시키지 않습니다.
+                 */
+                double viewportMinX = 0.0;
+                double viewportMinY = 0.0;
+                double viewportMaxX = physicalCellWidth;
+                double viewportMaxY = physicalCellHeight;
+                int directionIndex;
+
+                for (directionIndex = 0; directionIndex < elements.Count; directionIndex++)
+                {
+                    OviaCadShapeElement directionItem = elements[directionIndex];
+
+                    if (directionItem == null
+                        || directionItem.Type != "TEXT"
+                        || !IsCadShapeDirectionLabel(directionItem.Text))
+                    {
+                        continue;
+                    }
+
+                    if (directionItem.HasBounds)
+                    {
+                        viewportMinX = Math.Min(viewportMinX, directionItem.BoundsMinX);
+                        viewportMinY = Math.Min(viewportMinY, directionItem.BoundsMinY);
+                        viewportMaxX = Math.Max(viewportMaxX, directionItem.BoundsMaxX);
+                        viewportMaxY = Math.Max(viewportMaxY, directionItem.BoundsMaxY);
+                    }
+                    else
+                    {
+                        viewportMinX = Math.Min(viewportMinX, directionItem.X1);
+                        viewportMinY = Math.Min(viewportMinY, directionItem.Y1);
+                        viewportMaxX = Math.Max(viewportMaxX, directionItem.X1);
+                        viewportMaxY = Math.Max(viewportMaxY, directionItem.Y1);
+                    }
+                }
+
+                offsetX = viewportMinX;
+                offsetY = viewportMinY;
+                outputWidth = Math.Max(viewportMaxX - viewportMinX, 1.0);
+                outputHeight = Math.Max(viewportMaxY - viewportMinY, 1.0);
             }
+            else
+            {
+                // 물리 셀 경계를 확인할 수 없는 과거/예외 데이터는 기존 content-bounds 호환 방식을 유지합니다.
+                if (!hasBounds)
+                {
+                    cropMinX = 0;
+                    cropMinY = 0;
+                    cropMaxX = 100;
+                    cropMaxY = 60;
+                }
 
-            double contentWidth = Math.Max(cropMaxX - cropMinX, 1.0);
-            double contentHeight = Math.Max(cropMaxY - cropMinY, 1.0);
-
-            /*
-             * v3에서는 문자 실제 extents까지 content bounds에 포함되므로
-             * 단순 기준점만 사용하던 v2보다 잘림 방지 여백을 정확하게 계산할 수 있습니다.
-             */
-            double padX = Math.Max(contentWidth * 0.06, 0.8);
-            double padY = Math.Max(contentHeight * 0.08, 0.8);
-            double offsetX = cropMinX - padX;
-            double offsetY = cropMinY - padY;
-            double outputWidth = contentWidth + padX * 2.0;
-            double outputHeight = contentHeight + padY * 2.0;
+                double contentWidth = Math.Max(cropMaxX - cropMinX, 1.0);
+                double contentHeight = Math.Max(cropMaxY - cropMinY, 1.0);
+                double padX = Math.Max(contentWidth * 0.06, 0.8);
+                double padY = Math.Max(contentHeight * 0.08, 0.8);
+                offsetX = cropMinX - padX;
+                offsetY = cropMinY - padY;
+                outputWidth = contentWidth + padX * 2.0;
+                outputHeight = contentHeight + padY * 2.0;
+            }
 
             List<OviaCadShapeElement> orderedTexts = GetCadShapeTextElementsInReadingOrder(elements);
             Dictionary<OviaCadShapeElement, string> textIds = new Dictionary<OviaCadShapeElement, string>();
@@ -12262,6 +13882,9 @@ namespace OVIA.AutoCAD_2027
             sb.Append("  \"version\": 3,\r\n");
             sb.Append("  \"source\": \"CAD\",\r\n");
             sb.Append("  \"coordinateSystem\": \"TOP_LEFT_Y_DOWN\",\r\n");
+            sb.Append("  \"layoutPolicy\": ");
+            AppendJsonString(sb, preservePhysicalCellLayout ? "SOURCE_CELL" : "CONTENT_BOUNDS");
+            sb.Append(",\r\n");
             sb.Append("  \"textPolicy\": {\"fontFamily\": \"맑은 고딕\", \"fontSizePt\": 8, \"preservePosition\": true, \"editableTextIds\": true},\r\n");
             sb.Append("  \"rowNo\": ").Append(row == null ? 0 : row.No).Append(",\r\n");
             sb.Append("  \"cell\": {");
@@ -15261,6 +16884,7 @@ namespace OVIA.AutoCAD_2027
             string qtyText = GetGridColumnTextByHeaderBounds(textRows, columns, "QUANTITY_EA", rowTopY, rowBottomY, tolerance, shapeColumn, false);
             string totalLengthText = GetGridColumnTextByHeaderBounds(textRows, columns, "TOTAL_LENGTH_M", rowTopY, rowBottomY, tolerance, shapeColumn, false);
             string totalWeightText = GetGridColumnTextByHeaderBounds(textRows, columns, "TOTAL_WEIGHT", rowTopY, rowBottomY, tolerance, shapeColumn, false);
+            string noteText = GetGridColumnTextByHeaderBounds(textRows, columns, "NOTE", rowTopY, rowBottomY, tolerance, shapeColumn, false);
 
             if (totalWeightText == "")
             {
@@ -15343,10 +16967,16 @@ namespace OVIA.AutoCAD_2027
                 if (value != "")
                 {
                     row.TotalWeight = ConvertKgTextToTonText(value);
-                    if (!HasUsableNoteColumn(textRows, columns, rowTopY, rowBottomY, tolerance))
+
+                    if (HasUsableNoteColumn(textRows, columns, rowTopY, rowBottomY, tolerance))
+                    {
+                        row.Note = NormalizeGridNoteText(noteText);
+                    }
+                    else
                     {
                         row.Note = "";
                     }
+
                     return;
                 }
             }
@@ -15364,7 +16994,11 @@ namespace OVIA.AutoCAD_2027
                 }
             }
 
-            if (!HasUsableNoteColumn(textRows, columns, rowTopY, rowBottomY, tolerance))
+            if (HasUsableNoteColumn(textRows, columns, rowTopY, rowBottomY, tolerance))
+            {
+                row.Note = NormalizeGridNoteText(noteText);
+            }
+            else
             {
                 row.Note = "";
             }
@@ -15387,7 +17021,8 @@ namespace OVIA.AutoCAD_2027
             List<OviaTextRow> candidates = new List<OviaTextRow>();
             double physicalTopY = Math.Max(rowTopY, rowBottomY);
             double physicalBottomY = Math.Min(rowTopY, rowBottomY);
-            double yMargin = targetIsShape ? 0.0 : Math.Max(tolerance * 2.5, 0.5);
+            bool strictPhysicalRow = targetIsShape || String.Equals(key, "NOTE", StringComparison.OrdinalIgnoreCase);
+            double yMargin = strictPhysicalRow ? 0.0 : Math.Max(tolerance * 2.5, 0.5);
             double xMargin = Math.Max(tolerance * 0.6, 0.15);
             int i;
 
@@ -15406,7 +17041,7 @@ namespace OVIA.AutoCAD_2027
                  * 형상 열에 같은 여유를 적용하면 위·아래 행의 다단 치수가 동시에 들어옵니다.
                  * 행 경계는 실제 테이블 수평선으로 확정되어 있으므로 SHAPE만 무여유 구간을 사용합니다.
                  */
-                if (targetIsShape)
+                if (strictPhysicalRow)
                 {
                     if (text.Y < physicalBottomY || text.Y > physicalTopY)
                     {
@@ -15514,10 +17149,36 @@ namespace OVIA.AutoCAD_2027
                 }
             }
 
-            if (!HasUsableNoteColumn(textRows, columns, rowTopY, rowBottomY, tolerance))
+            if (HasUsableNoteColumn(textRows, columns, rowTopY, rowBottomY, tolerance))
+            {
+                string noteText = GetGridColumnTextByHeaderBounds(
+                    textRows,
+                    columns,
+                    "NOTE",
+                    rowTopY,
+                    rowBottomY,
+                    tolerance,
+                    shapeColumn,
+                    false
+                );
+                row.Note = NormalizeGridNoteText(noteText);
+            }
+            else
             {
                 row.Note = "";
             }
+        }
+
+        private string NormalizeGridNoteText(string text)
+        {
+            text = CleanCellText(text);
+
+            if (text == "" || IsHeaderRow(text) || IsSummaryText(text))
+            {
+                return "";
+            }
+
+            return text.Trim();
         }
 
         private bool IsKgWeightColumn(List<OviaTextRow> textRows, List<OviaHeaderColumn> columns, double rowTopY, double rowBottomY, double tolerance)
@@ -15563,12 +17224,18 @@ namespace OVIA.AutoCAD_2027
                 return false;
             }
 
-            if (!HeaderTitleMeansNote(noteColumn.OriginalTitle))
-            {
-                return false;
-            }
-
-            if (!HasNoteTextNearColumn(textRows, noteColumn, rowTopY, rowBottomY, tolerance))
+            /*
+             * 2026-08-06 _02 비고 열 유효성:
+             * 기존 코드는 현재 DATA 행에서 위쪽 약 4개 행 범위 안에 "비고" 헤더가 다시 보여야만
+             * 비고 열을 유효하다고 판정했습니다. 표 아래쪽의 8번 이후 행은 헤더와 멀어져
+             * 실제 "시공용" 문자를 읽고도 마지막 단계에서 row.Note를 비워 버렸습니다.
+             *
+             * 비고 열의 소유권은 행마다 재판정하지 않고, 표 헤더 분석으로 확정된 NOTE 열 전체에
+             * 적용합니다. OriginalTitle이 불완전한 fallback 표만 선택영역 전체의 같은 X열에서
+             * 비고/NOTE/REMARK 헤더를 한 번 더 확인합니다.
+             */
+            if (!HeaderTitleMeansNote(noteColumn.OriginalTitle)
+                && !HasNoteTextNearColumn(textRows, noteColumn, rowTopY, rowBottomY, tolerance))
             {
                 return false;
             }
@@ -15591,10 +17258,11 @@ namespace OVIA.AutoCAD_2027
                 return false;
             }
 
-            double rowHeight = Math.Abs(rowTopY - rowBottomY);
-            double xMargin = Math.Max((column.RightX - column.LeftX) * 0.35, Math.Max(tolerance * 2.0, 0.5));
-            double yTop = rowTopY + Math.Max(rowHeight * 4.0, Math.Max(tolerance * 25.0, 8.0));
-            double yBottom = rowBottomY;
+            /*
+             * NOTE 열 헤더는 표 전체에서 한 번만 존재합니다. 현재 DATA 행과 헤더의 거리를 제한하면
+             * 긴 표의 아래쪽 행에서 정상 비고가 삭제되므로 Y 범위를 두지 않고 선택영역 전체를 검사합니다.
+             */
+            double xMargin = Math.Max((column.RightX - column.LeftX) * 0.20, Math.Max(tolerance * 1.5, 0.35));
             int i;
 
             for (i = 0; i < textRows.Count; i++)
@@ -15607,11 +17275,6 @@ namespace OVIA.AutoCAD_2027
                 }
 
                 if (text.X < column.LeftX - xMargin || text.X > column.RightX + xMargin)
-                {
-                    continue;
-                }
-
-                if (text.Y < yBottom || text.Y > yTop)
                 {
                     continue;
                 }
@@ -18120,6 +19783,11 @@ namespace OVIA.AutoCAD_2027
                 return;
             }
 
+            if (!IsCadShapeEntityVisible(tr, entity))
+            {
+                return;
+            }
+
             DBText dbText = entity as DBText;
 
             if (dbText != null)
@@ -18190,59 +19858,78 @@ namespace OVIA.AutoCAD_2027
 
             if (blockReference != null)
             {
-                foreach (ObjectId attributeId in blockReference.AttributeCollection)
+                BlockTableRecord blockRecord = tr.GetObject(blockReference.BlockTableRecord, OpenMode.ForRead, false) as BlockTableRecord;
+                bool preferEvaluatedDisplay = IsCadShapeEvaluatedBlock(blockReference, blockRecord);
+                int blockRowStartCount = rows.Count;
+
+                /*
+                 * 형상 셀 원문을 만드는 일반 TEXT 스캐너도 CAD 형상 JSON 수집기와 동일한
+                 * 블록 우선순위를 사용해야 합니다. 이전에는 AttributeCollection, 원시
+                 * BlockTableRecord, Explode 결과를 모두 합쳐 OVIA_형상원본 자체에 숨김 상태의
+                 * 200/400/500이 중복 기록됐고, 후단 기대 개수 필터가 이를 정상 반복 치수로
+                 * 오인했습니다.
+                 */
+                if (preferEvaluatedDisplay)
                 {
-                    AttributeReference attribute = tr.GetObject(attributeId, OpenMode.ForRead, false) as AttributeReference;
+                    CollectTextRowsFromExplodedBlock(
+                        tr,
+                        blockReference,
+                        rows,
+                        minPoint,
+                        maxPoint,
+                        depth + 1
+                    );
 
-                    if (attribute == null)
+                    if (rows.Count == blockRowStartCount)
                     {
-                        continue;
-                    }
-
-                    Point3d attrPosition = attribute.Position;
-
-                    if (depth > 0)
-                    {
-                        attrPosition = attrPosition.TransformBy(transform);
-                    }
-
-                    if (IsPointInsideWindow(attrPosition, minPoint, maxPoint))
-                    {
-                        AddOviaTextRow(
+                        CollectTextRowsFromBlockAttributes(
+                            tr,
+                            blockReference,
+                            transform,
                             rows,
-                            attribute,
-                            "AttributeReference",
-                            attribute.TextString,
-                            attrPosition,
-                            attribute.Height,
-                            attribute.Rotation
+                            minPoint,
+                            maxPoint,
+                            depth
+                        );
+                        CollectTextRowsFromBlockRecord(
+                            tr,
+                            blockReference,
+                            blockRecord,
+                            transform,
+                            rows,
+                            minPoint,
+                            maxPoint,
+                            depth
                         );
                     }
                 }
-
-                /*
-                 * 블록 내부 문자 추출 1차: BlockTableRecord 직접 순회
-                 * 일반 블록은 이 방식으로 내부 DBText/MText를 읽을 수 있습니다.
-                 */
-                BlockTableRecord blockRecord = tr.GetObject(blockReference.BlockTableRecord, OpenMode.ForRead, false) as BlockTableRecord;
-
-                if (blockRecord != null)
+                else
                 {
-                    Matrix3d nextTransform = transform * blockReference.BlockTransform;
+                    CollectTextRowsFromBlockAttributes(
+                        tr,
+                        blockReference,
+                        transform,
+                        rows,
+                        minPoint,
+                        maxPoint,
+                        depth
+                    );
+                    CollectTextRowsFromBlockRecord(
+                        tr,
+                        blockReference,
+                        blockRecord,
+                        transform,
+                        rows,
+                        minPoint,
+                        maxPoint,
+                        depth
+                    );
 
-                    foreach (ObjectId childId in blockRecord)
+                    if (rows.Count == blockRowStartCount)
                     {
-                        Entity childEntity = tr.GetObject(childId, OpenMode.ForRead, false) as Entity;
-
-                        if (childEntity == null)
-                        {
-                            continue;
-                        }
-
-                        CollectTextRowsFromEntity(
+                        CollectTextRowsFromExplodedBlock(
                             tr,
-                            childEntity,
-                            nextTransform,
+                            blockReference,
                             rows,
                             minPoint,
                             maxPoint,
@@ -18251,24 +19938,95 @@ namespace OVIA.AutoCAD_2027
                     }
                 }
 
-                /*
-                 * 블록 내부 문자 추출 2차: Explode 보조 방식
-                 * 일부 외부 CAD 저장 DWG, 동적 블록, 특수 블록은 직접 순회 좌표 변환이 맞지 않을 수 있습니다.
-                 * 이때 Explode로 현재 화면 좌표 기준 복제 객체를 만든 뒤 다시 읽습니다.
-                 */
-                CollectTextRowsFromExplodedBlock(
-                    blockReference,
+                return;
+            }
+        }
+
+        private void CollectTextRowsFromBlockAttributes(
+            Transaction tr,
+            BlockReference blockReference,
+            Matrix3d transform,
+            List<OviaTextRow> rows,
+            Point3d minPoint,
+            Point3d maxPoint,
+            int depth)
+        {
+            if (tr == null || blockReference == null || rows == null)
+            {
+                return;
+            }
+
+            foreach (ObjectId attributeId in blockReference.AttributeCollection)
+            {
+                AttributeReference attribute = tr.GetObject(attributeId, OpenMode.ForRead, false) as AttributeReference;
+
+                if (attribute == null || !IsCadShapeEntityVisible(tr, attribute))
+                {
+                    continue;
+                }
+
+                Matrix3d attributeTransform = depth > 0 ? transform : Matrix3d.Identity;
+                Point3d attrPosition = GetTextReferencePoint(attribute, attribute.Position, attributeTransform);
+
+                if (IsPointInsideWindow(attrPosition, minPoint, maxPoint))
+                {
+                    AddOviaTextRow(
+                        rows,
+                        attribute,
+                        "AttributeReference",
+                        attribute.TextString,
+                        attrPosition,
+                        attribute.Height,
+                        attribute.Rotation
+                    );
+                }
+            }
+        }
+
+        private void CollectTextRowsFromBlockRecord(
+            Transaction tr,
+            BlockReference blockReference,
+            BlockTableRecord blockRecord,
+            Matrix3d transform,
+            List<OviaTextRow> rows,
+            Point3d minPoint,
+            Point3d maxPoint,
+            int depth)
+        {
+            if (tr == null
+                || blockReference == null
+                || blockRecord == null
+                || rows == null
+                || depth > 8)
+            {
+                return;
+            }
+
+            Matrix3d nextTransform = transform * blockReference.BlockTransform;
+
+            foreach (ObjectId childId in blockRecord)
+            {
+                Entity childEntity = tr.GetObject(childId, OpenMode.ForRead, false) as Entity;
+
+                if (childEntity == null)
+                {
+                    continue;
+                }
+
+                CollectTextRowsFromEntity(
+                    tr,
+                    childEntity,
+                    nextTransform,
                     rows,
                     minPoint,
                     maxPoint,
                     depth + 1
                 );
-
-                return;
             }
         }
 
         private void CollectTextRowsFromExplodedBlock(
+            Transaction tr,
             BlockReference blockReference,
             List<OviaTextRow> rows,
             Point3d minPoint,
@@ -18313,6 +20071,11 @@ namespace OVIA.AutoCAD_2027
 
                 try
                 {
+                    if (!IsCadShapeEntityVisible(tr, explodedEntity))
+                    {
+                        continue;
+                    }
+
                     DBText dbText = explodedEntity as DBText;
 
                     if (dbText != null)
@@ -18384,6 +20147,7 @@ namespace OVIA.AutoCAD_2027
                     if (nestedBlock != null)
                     {
                         CollectTextRowsFromExplodedBlock(
+                            tr,
                             nestedBlock,
                             rows,
                             minPoint,
