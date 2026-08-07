@@ -3371,7 +3371,17 @@ namespace OVIA.Desktop
 
             string header = grid.Columns[e.ColumnIndex].HeaderText;
 
-            if (IsBarListNumericDisplayHeader(header) && e.Value != null)
+            if (IsTotalLengthDisplayHeader(header) && e.Value != null)
+            {
+                string formatted = FormatBarListTotalLengthForDisplay(e.Value.ToString());
+
+                if (formatted != "")
+                {
+                    e.Value = formatted;
+                    e.FormattingApplied = true;
+                }
+            }
+            else if (IsBarListNumericDisplayHeader(header) && e.Value != null)
             {
                 string formatted = FormatBarListNumberForDisplay(e.Value.ToString());
 
@@ -8403,6 +8413,27 @@ namespace OVIA.Desktop
                 || normalized == "총중량";
         }
 
+        private bool IsTotalLengthDisplayHeader(string header)
+        {
+            string normalized = NormalizeInternalColumnToken(header);
+
+            return normalized == "총길이M"
+                || normalized == "총길이";
+        }
+
+        private string FormatBarListTotalLengthForDisplay(string text)
+        {
+            decimal value;
+
+            if (!TryParseDecimalNumber(text, out value))
+            {
+                return FormatBarListNumberForDisplay(text);
+            }
+
+            decimal rounded = Decimal.Round(value, 2, MidpointRounding.AwayFromZero);
+            return rounded.ToString("#,0.00", CultureInfo.InvariantCulture);
+        }
+
         private string FormatBarListNumberForDisplay(string text)
         {
             if (text == null)
@@ -8457,7 +8488,7 @@ namespace OVIA.Desktop
             int rowCount = 0;
             double totalQty = 0;
             double totalLength = 0;
-            double totalWeight = 0;
+            decimal totalWeight = 0M;
 
             int qtyCol = FindColumnIndex("수량");
             int lengthCol = FindColumnIndex("총길이");
@@ -8486,102 +8517,27 @@ namespace OVIA.Desktop
 
                 if (weightCol >= 0)
                 {
-                    totalWeight += ParseNumber(GetCellText(r, weightCol));
+                    decimal rowWeight;
+
+                    if (TryParseDecimalNumber(GetCellText(r, weightCol), out rowWeight))
+                    {
+                        totalWeight += rowWeight;
+                    }
                 }
             }
 
             lblRowCount.Text = rowCount.ToString("N0", CultureInfo.InvariantCulture);
             lblTotalQty.Text = totalQty.ToString("#,0.###", CultureInfo.InvariantCulture);
-            lblTotalLength.Text = totalLength.ToString("#,0.###", CultureInfo.InvariantCulture);
+            lblTotalLength.Text = totalLength.ToString("#,0.00", CultureInfo.InvariantCulture);
 
-            decimal preciseTotalWeightTon;
-
-            if (TryCalculatePreciseSummaryWeightTon(out preciseTotalWeightTon))
-            {
-                /*
-                 * 행별 중량 셀은 화면 계약에 따라 소수 셋째 자리로 표시하지만,
-                 * 합계는 각 행의 표시값을 다시 더하지 않습니다.
-                 * 길이×수량×단위중량의 반올림 전 값을 모두 합산한 뒤 마지막에 한 번만
-                 * 소수 셋째 자리 반올림하여 CAD 총합계와 같은 계산 순서를 사용합니다.
-                 */
-                decimal roundedTotalWeight = Decimal.Round(preciseTotalWeightTon, 3, MidpointRounding.AwayFromZero);
-                lblTotalWeight.Text = roundedTotalWeight.ToString("#,0.###", CultureInfo.InvariantCulture);
-            }
-            else
-            {
-                // 규격/길이/수량 또는 단위중량이 없는 수동·비표준 데이터는 기존 셀 합산을 유지합니다.
-                lblTotalWeight.Text = totalWeight.ToString("#,0.###", CultureInfo.InvariantCulture);
-            }
+            /*
+             * 상단 중량 합계는 현재 OVIA 리스트의 중량(Ton) 셀 값을 그대로 합산합니다.
+             * 행별 중량 셀은 기존 계산/검증 계약에 따라 소수 셋째 자리 값을 유지하며,
+             * 화면에 표시된 각 행의 중량 합과 상단 카드 값이 항상 일치해야 합니다.
+             */
+            lblTotalWeight.Text = totalWeight.ToString("#,0.###", CultureInfo.InvariantCulture);
 
             RefreshProjectContextHeaderFromGrid();
-        }
-
-        private bool TryCalculatePreciseSummaryWeightTon(out decimal totalWeightTon)
-        {
-            totalWeightTon = 0M;
-
-            int specCol = FindRebarSpecColumnIndex();
-            int lengthCol = FindSingleLengthColumnIndex();
-            int qtyCol = FindQuantityColumnIndex();
-
-            if (specCol < 0 || lengthCol < 0 || qtyCol < 0)
-            {
-                return false;
-            }
-
-            Dictionary<string, double> unitWeights = OviaRebarUnitWeightStore.LoadEnabledUnitWeights();
-
-            if (unitWeights == null || unitWeights.Count == 0)
-            {
-                return false;
-            }
-
-            int dataRowCount = 0;
-            int calculatedRowCount = 0;
-            int r;
-
-            for (r = 0; r < grid.Rows.Count; r++)
-            {
-                if (grid.Rows[r].IsNewRow)
-                {
-                    continue;
-                }
-
-                dataRowCount++;
-
-                string baseSpec = ExtractBaseRebarSpec(GetCellText(r, specCol));
-                double unitWeightKgM;
-                decimal lengthMm;
-                decimal qty;
-
-                if (baseSpec == ""
-                    || !unitWeights.TryGetValue(baseSpec, out unitWeightKgM)
-                    || !TryParseDecimalNumber(GetCellText(r, lengthCol), out lengthMm)
-                    || !TryParseDecimalNumber(GetCellText(r, qtyCol), out qty)
-                    || lengthMm <= 0M
-                    || qty <= 0M)
-                {
-                    return false;
-                }
-
-                decimal unitWeightDecimal;
-
-                if (!Decimal.TryParse(
-                    unitWeightKgM.ToString("R", CultureInfo.InvariantCulture),
-                    NumberStyles.Float,
-                    CultureInfo.InvariantCulture,
-                    out unitWeightDecimal))
-                {
-                    return false;
-                }
-
-                decimal rowLengthM = (lengthMm / 1000M) * qty;
-                decimal rowWeightTon = (rowLengthM * unitWeightDecimal) / 1000M;
-                totalWeightTon += rowWeightTon;
-                calculatedRowCount++;
-            }
-
-            return dataRowCount > 0 && calculatedRowCount == dataRowCount;
         }
 
         private void MarkUnsaved()
