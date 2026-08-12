@@ -29,8 +29,10 @@ namespace OVIA.Desktop
         private NumericUpDown numRotation;
         private Button btnSelectMode;
         private Button btnLineMode;
+        private Button btnRectangleMode;
         private Button btnCircleMode;
         private Button btnAngleMode;
+        private Button btnScrewMode;
         private Button btnTextMode;
         private Button btnUndo;
         private Button btnRedo;
@@ -157,8 +159,10 @@ namespace OVIA.Desktop
 
             btnSelectMode = CreateToolbarButton("선택·이동", "\uE762", 104, BtnSelectMode_Click, "요소를 선택하거나 이동합니다. CAD에서 추출된 곡선·원형은 구성 점이 아니라 객체 전체가 선택됩니다.");
             btnLineMode = CreateToolbarButton("선 추가", "\uE710", 88, BtnLineMode_Click, "연속 선을 추가합니다. 기존 선 끝점 가까이에서는 자동으로 연결됩니다.");
-            btnCircleMode = CreateToolbarButton("원 추가", "\uEA3A", 88, BtnCircleMode_Click, "중심점과 반지름 지점을 차례로 클릭하여 원을 추가합니다.");
-            btnAngleMode = CreateToolbarButton("각도 추가", "\u2220", 94, BtnAngleMode_Click, "중심점과 시작 방향을 지정한 뒤 마우스를 원하는 방향으로 돌려 최대 270°까지 각도를 추가합니다.");
+            btnRectangleMode = CreateToolbarButton("사각형 추가", "\uF12A", 104, BtnRectangleMode_Click, "첫 모서리와 반대편 모서리를 지정하여 사각형을 추가합니다. 생성 후 길이·폭을 각각 조절하거나 비례 확대·축소·회전할 수 있습니다.");
+            btnCircleMode = CreateToolbarButton("원 추가", "\uEA3A", 88, BtnCircleMode_Click, "중심점과 반지름 지점을 차례로 클릭하여 원을 추가합니다. 생성 후 가로·세로를 각각 조절하여 타원으로 수정할 수 있습니다.");
+            btnAngleMode = CreateToolbarButton("각도 추가", "\uF0B4", 94, BtnAngleMode_Click, "중심점과 시작 방향을 지정한 뒤 마우스를 원하는 방향으로 돌려 최대 270°까지 각도를 추가합니다.");
+            btnScrewMode = CreateToolbarButton("나사 추가", "\uEE6F", 94, BtnScrewMode_Click, "시작점과 끝점을 지정하여 나사 형상을 추가합니다. 전체 객체의 길이·폭을 각각 조절하거나 비례 확대·축소·회전할 수 있습니다.");
             btnTextMode = CreateToolbarButton("문자 추가", "\uE8D2", 94, BtnTextMode_Click, "문자 또는 치수값을 추가하고 즉시 값을 입력합니다.");
             btnDelete = CreateToolbarButton("선택 삭제", "\uE74D", 98, BtnDelete_Click, "선택한 요소를 삭제합니다. Delete 키도 사용할 수 있습니다.");
             btnSplit = CreateToolbarButton("선 분할", "\uE8C6", 88, BtnSplit_Click, "선택한 선을 가운데 지점에서 두 개로 분할합니다.");
@@ -173,15 +177,18 @@ namespace OVIA.Desktop
 
             primaryToolFlow.Controls.Add(btnSelectMode);
             primaryToolFlow.Controls.Add(btnLineMode);
+            primaryToolFlow.Controls.Add(btnRectangleMode);
             primaryToolFlow.Controls.Add(btnCircleMode);
             primaryToolFlow.Controls.Add(btnAngleMode);
+            primaryToolFlow.Controls.Add(btnScrewMode);
             primaryToolFlow.Controls.Add(btnTextMode);
             primaryToolFlow.Controls.Add(CreateToolbarSeparator());
             primaryToolFlow.Controls.Add(btnDelete);
             primaryToolFlow.Controls.Add(btnSplit);
-            primaryToolFlow.Controls.Add(btnUndo);
-            primaryToolFlow.Controls.Add(btnRedo);
 
+            secondaryToolFlow.Controls.Add(btnUndo);
+            secondaryToolFlow.Controls.Add(btnRedo);
+            secondaryToolFlow.Controls.Add(CreateToolbarSeparator());
             secondaryToolFlow.Controls.Add(btnHorizontal);
             secondaryToolFlow.Controls.Add(btnVertical);
             secondaryToolFlow.Controls.Add(btnFit);
@@ -568,17 +575,17 @@ namespace OVIA.Desktop
                 helpLayout.Controls.Add(intro, 0, 0);
 
                 AddHelpSection(helpLayout, "선택과 이동",
-                    "요소를 클릭하면 선택됩니다. 빈 공간을 드래그하면 사각영역 안의 선·원·문자·치수를 한꺼번에 선택할 수 있습니다. Ctrl+A는 전체 선택이며, 선택된 요소를 드래그하면 함께 이동합니다.");
-                AddHelpSection(helpLayout, "선·원·각도·문자 추가",
-                    "선 추가는 시작점과 끝점을 순서대로 지정합니다. 원 추가는 중심점과 반지름 위치를 지정합니다. 각도 추가는 중심점과 시작 방향을 지정한 뒤 마우스를 원하는 방향으로 돌려 최대 270°까지 만든 다음 끝 위치를 클릭합니다. 문자 추가 후 위치를 클릭하면 바로 값을 입력할 수 있습니다. 선 끝점 가까이에서는 자동으로 연결됩니다.");
+                    "요소를 클릭하면 선택됩니다. 빈 공간을 드래그하면 사각영역 안의 선·원·문자·치수를 한꺼번에 선택할 수 있습니다. Ctrl+A는 전체 선택이며, 선택된 요소를 드래그하면 함께 이동합니다. 사각형·나사·새로 추가한 원/타원은 구성 선 중 하나를 클릭해도 객체 전체가 선택됩니다.");
+                AddHelpSection(helpLayout, "선·사각형·원·각도·나사·문자 추가",
+                    "선 추가는 시작점과 끝점을 순서대로 지정합니다. 사각형 추가는 첫 모서리와 반대편 모서리를 지정합니다. 원 추가는 중심점과 반지름 위치를 지정합니다. 각도 추가는 중심점과 시작 방향을 지정한 뒤 마우스를 원하는 방향으로 돌려 최대 270°까지 만든 다음 끝 위치를 클릭합니다. 나사 추가는 나사의 시작점과 끝점을 지정합니다. 문자 추가 후 위치를 클릭하면 바로 값을 입력할 수 있습니다. 선 끝점 가까이에서는 자동으로 연결됩니다.");
                 AddHelpSection(helpLayout, "문자와 수치 수정",
                     "문자 또는 치수값을 더블클릭하거나 선택 후 F2·Enter를 누르면 값을 수정할 수 있습니다. Enter는 적용, Esc는 현재 입력 취소입니다.");
                 AddHelpSection(helpLayout, "회전과 크기 조절",
-                    "선 끝점 바깥의 회전 핸들을 드래그하면 자유 각도로 회전합니다. 원은 십자 핸들로 크기를 조절합니다. 각도 원호는 시작·끝·반지름·회전 핸들로 벌어진 각도, 크기, 방향을 조절할 수 있습니다. CAD에서 추출된 곡선·원형은 작은 선분 점이 아니라 하나의 객체로 선택되어 전체 이동·삭제할 수 있습니다. 문자와 수치는 위쪽 회전 핸들로 회전하고 오른쪽 아래 십자 핸들로 개별 확대·축소할 수 있습니다.");
+                    "선 끝점 바깥의 회전 핸들을 드래그하면 자유 각도로 회전합니다. 새로 추가한 원은 하나의 객체로 선택되며 가로·세로 핸들로 폭과 높이를 따로 조절해 타원으로 만들 수 있고, 우하단 핸들로 비례 확대·축소할 수 있습니다. 각도 원호는 시작·끝·반지름·회전 핸들로 벌어진 각도, 크기, 방향을 조절할 수 있습니다. 사각형과 나사도 객체 전체 선택 후 가로·세로 핸들로 길이와 폭을 각각 조절하고, 우하단 핸들로 비례 확대·축소하며, 위쪽 원형 핸들로 회전합니다. CAD에서 추출된 곡선·원형은 작은 선분 점이 아니라 하나의 객체로 선택되어 전체 이동·삭제할 수 있습니다. 문자와 수치는 위쪽 회전 핸들로 회전하고 오른쪽 아래 십자 크기 핸들로 개별 확대·축소할 수 있습니다.");
                 AddHelpSection(helpLayout, "캔버스 보기",
                     "가운데 마우스 버튼을 누른 채 드래그하면 캔버스를 이동합니다. Ctrl+마우스 휠 또는 상단 확대·축소 버튼으로 형상과 문자 크기를 함께 조절합니다. 화면 맞춤은 형상을 중앙에 배치합니다.");
                 AddHelpSection(helpLayout, "작업 취소와 삭제",
-                    "Ctrl+Z는 실행 취소, Ctrl+Y는 다시 실행입니다. Delete는 선택 요소 삭제, Esc 또는 마우스 우클릭은 현재 선·원 작성이나 선택 작업을 종료합니다.");
+                    "Ctrl+C는 선택 객체 복사, Ctrl+V는 붙여넣기입니다. 드래그로 여러 객체를 선택한 경우에도 한 번에 복사·붙여넣기할 수 있습니다. Ctrl+Z는 실행 취소, Ctrl+Y는 다시 실행입니다. Delete는 선택 요소 삭제, Esc 또는 마우스 우클릭은 현재 추가 작업이나 선택 작업을 종료합니다.");
                 AddHelpSection(helpLayout, "수정 적용",
                     "수정 적용을 누르면 편집한 형상과 문자·치수값이 BarList 철근형상 셀에 반영됩니다. 취소를 누르면 현재 창에서 변경한 내용은 적용하지 않습니다.");
 
@@ -818,6 +825,21 @@ namespace OVIA.Desktop
                     numRotation.Value = 0;
                     numRotation.Enabled = false;
                 }
+                else if (editor.IsSingleManualObjectSelected)
+                {
+                    string kind = editor.SelectedObjectGroupKind;
+                    lblSelectionType.Text = String.Equals(kind, "RECTANGLE", StringComparison.OrdinalIgnoreCase)
+                        ? "사각형 객체"
+                        : (String.Equals(kind, "SCREW", StringComparison.OrdinalIgnoreCase)
+                            ? "나사 객체"
+                            : (String.Equals(kind, "ELLIPSE", StringComparison.OrdinalIgnoreCase) ? "원·타원 객체" : "그룹 객체"));
+                    lblSelectionId.Text = "하나의 객체로 선택됨";
+                    txtSelectedText.Text = "";
+                    txtSelectedText.Enabled = false;
+                    btnUpdateText.Enabled = false;
+                    numRotation.Value = 0;
+                    numRotation.Enabled = false;
+                }
                 else if (editor.IsSingleCadCurveObjectSelected)
                 {
                     lblSelectionType.Text = "곡선 객체";
@@ -876,12 +898,26 @@ namespace OVIA.Desktop
             int arcCount = 0;
             int circleCount = 0;
             int textCount = 0;
+            HashSet<string> ellipseGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             int i;
 
             for (i = 0; i < editor.Document.Elements.Count; i++)
             {
                 CadShapeEditElement element = editor.Document.Elements[i];
                 if (element == null) continue;
+
+                if (element.Type == "LINE"
+                    && String.Equals(element.ObjectGroupKind, "ELLIPSE", StringComparison.OrdinalIgnoreCase)
+                    && element.ObjectGroupId != null
+                    && element.ObjectGroupId.Trim() != "")
+                {
+                    if (ellipseGroups.Add(element.ObjectGroupId.Trim()))
+                    {
+                        circleCount++;
+                    }
+                    continue;
+                }
+
                 if (element.Type == "LINE") lineCount++;
                 else if (element.Type == "ARC") arcCount++;
                 else if (element.Type == "CIRCLE") circleCount++;
@@ -904,8 +940,10 @@ namespace OVIA.Desktop
 
             SetModeButtonStyle(btnSelectMode, editor.Mode == CadShapeEditorMode.Select);
             SetModeButtonStyle(btnLineMode, editor.Mode == CadShapeEditorMode.AddLine);
+            SetModeButtonStyle(btnRectangleMode, editor.Mode == CadShapeEditorMode.AddRectangle);
             SetModeButtonStyle(btnCircleMode, editor.Mode == CadShapeEditorMode.AddCircle);
             SetModeButtonStyle(btnAngleMode, editor.Mode == CadShapeEditorMode.AddAngle);
+            SetModeButtonStyle(btnScrewMode, editor.Mode == CadShapeEditorMode.AddScrew);
             SetModeButtonStyle(btnTextMode, editor.Mode == CadShapeEditorMode.AddText);
             btnUndo.Enabled = editor.CanUndo;
             btnRedo.Enabled = editor.CanRedo;
@@ -1099,6 +1137,12 @@ namespace OVIA.Desktop
             editor.Focus();
         }
 
+        private void BtnRectangleMode_Click(object sender, EventArgs e)
+        {
+            editor.Mode = CadShapeEditorMode.AddRectangle;
+            editor.Focus();
+        }
+
         private void BtnCircleMode_Click(object sender, EventArgs e)
         {
             editor.Mode = CadShapeEditorMode.AddCircle;
@@ -1108,6 +1152,12 @@ namespace OVIA.Desktop
         private void BtnAngleMode_Click(object sender, EventArgs e)
         {
             editor.Mode = CadShapeEditorMode.AddAngle;
+            editor.Focus();
+        }
+
+        private void BtnScrewMode_Click(object sender, EventArgs e)
+        {
+            editor.Mode = CadShapeEditorMode.AddScrew;
             editor.Focus();
         }
 

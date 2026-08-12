@@ -1,7 +1,23 @@
 ﻿{
-  "version": "ovia-barlist-mapping-2026.07.14.012",
-  "updatedAt": "2026-07-14",
+  "version": "ovia-barlist-mapping-2026.08.12.013",
+  "updatedAt": "2026-08-12",
   "standardColumns": [
+    {
+      "key": "part",
+      "displayName": "부위",
+      "dataType": "text",
+      "priority": 100,
+      "aliases": [
+        "부위",
+        "위치",
+        "층",
+        "구간",
+        "시공부위",
+        "ZONE",
+        "AREA",
+        "LOCATION"
+      ]
+    },
     {
       "key": "no",
       "displayName": "번호",
@@ -18,22 +34,6 @@
         "부호번호",
         "기호",
         "ITEM"
-      ]
-    },
-    {
-      "key": "part",
-      "displayName": "부위",
-      "dataType": "text",
-      "priority": 100,
-      "aliases": [
-        "부위",
-        "위치",
-        "층",
-        "구간",
-        "시공부위",
-        "ZONE",
-        "AREA",
-        "LOCATION"
       ]
     },
     {

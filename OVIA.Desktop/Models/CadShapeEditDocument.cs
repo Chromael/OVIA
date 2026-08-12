@@ -60,6 +60,8 @@ namespace OVIA.Desktop
                     element.Type = GetString(item, "type").ToUpperInvariant();
                     element.Text = GetString(item, "text");
                     element.TextId = GetString(item, "textId");
+                    element.ObjectGroupId = GetString(item, "objectGroupId");
+                    element.ObjectGroupKind = GetString(item, "objectGroupKind").ToUpperInvariant();
                     element.X1 = GetNumber(item, "x1", GetNumber(item, "x", 0D));
                     element.Y1 = GetNumber(item, "y1", GetNumber(item, "y", 0D));
                     element.X2 = GetNumber(item, "x2", 0D);
@@ -378,6 +380,16 @@ namespace OVIA.Desktop
                     }
                 }
 
+                if (element.ObjectGroupId != null && element.ObjectGroupId.Trim() != "")
+                {
+                    sb.Append(", \"objectGroupId\": ").Append(JsonString(element.ObjectGroupId.Trim()));
+
+                    if (element.ObjectGroupKind != null && element.ObjectGroupKind.Trim() != "")
+                    {
+                        sb.Append(", \"objectGroupKind\": ").Append(JsonString(element.ObjectGroupKind.Trim().ToUpperInvariant()));
+                    }
+                }
+
                 sb.Append(", \"colorIndex\": ").Append(element.ColorIndex.ToString(CultureInfo.InvariantCulture));
                 sb.Append("}");
             }
@@ -551,6 +563,8 @@ namespace OVIA.Desktop
         public string Type = "";
         public string Text = "";
         public string TextId = "";
+        public string ObjectGroupId = "";
+        public string ObjectGroupKind = "";
         public double X1 = 0D;
         public double Y1 = 0D;
         public double X2 = 0D;

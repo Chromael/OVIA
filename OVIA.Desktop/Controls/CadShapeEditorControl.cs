@@ -12,8 +12,10 @@ namespace OVIA.Desktop
     {
         Select,
         AddLine,
+        AddRectangle,
         AddCircle,
         AddAngle,
+        AddScrew,
         AddText
     }
 
@@ -30,6 +32,10 @@ namespace OVIA.Desktop
         private const double CadCurveObjectMinimumTurnDegrees = 5D;
         private const double CadCurveObjectMaximumJoinDegrees = 45D;
         private const double CadCurveObjectMaximumLengthRatio = 12D;
+        private const int ManualObjectRotationHandlePart = 13;
+        private const int ManualObjectResizeHandlePart = 14;
+        private const int ManualObjectWidthResizeHandlePart = 15;
+        private const int ManualObjectHeightResizeHandlePart = 16;
 
         private CadShapeEditDocument document;
         private CadShapeEditDocument originalDocument;
@@ -39,6 +45,8 @@ namespace OVIA.Desktop
         private readonly Dictionary<int, CadShapeEditElement> dragStartElements;
         private readonly Dictionary<int, int> cadCurveObjectGroupByElementIndex;
         private readonly Dictionary<int, List<int>> cadCurveObjectMembers;
+        private readonly Dictionary<int, string> explicitObjectGroupKindByGroupId;
+        private readonly List<CadShapeEditElement> copiedElements;
         private CadShapeEditorMode mode;
         private int selectedIndex;
         private bool isDragging;
@@ -50,6 +58,8 @@ namespace OVIA.Desktop
         private PointF panOffset;
         private bool hasPendingLineStart;
         private PointF pendingLineStart;
+        private bool hasPendingRectangleStart;
+        private PointF pendingRectangleStart;
         private bool hasPendingCircleCenter;
         private PointF pendingCircleCenter;
         private bool hasPendingAngleCenter;
@@ -59,6 +69,9 @@ namespace OVIA.Desktop
         private bool hasPendingAngleSweep;
         private double pendingAngleLastDegrees;
         private double pendingAngleSweep;
+        private bool hasPendingScrewStart;
+        private PointF pendingScrewStart;
+        private int pasteSequence;
         private bool isMarqueeSelecting;
         private Point marqueeStartScreen;
         private Point marqueeCurrentScreen;
@@ -90,6 +103,8 @@ namespace OVIA.Desktop
             dragStartElements = new Dictionary<int, CadShapeEditElement>();
             cadCurveObjectGroupByElementIndex = new Dictionary<int, int>();
             cadCurveObjectMembers = new Dictionary<int, List<int>>();
+            explicitObjectGroupKindByGroupId = new Dictionary<int, string>();
+            copiedElements = new List<CadShapeEditElement>();
             mode = CadShapeEditorMode.Select;
             selectedIndex = -1;
             zoom = DefaultFitZoom;
@@ -143,7 +158,34 @@ namespace OVIA.Desktop
             get
             {
                 int groupId;
-                return TryGetSingleSelectedCadCurveObjectGroup(out groupId);
+                return TryGetSingleSelectedCadCurveObjectGroup(out groupId)
+                    && !explicitObjectGroupKindByGroupId.ContainsKey(groupId);
+            }
+        }
+
+        public bool IsSingleManualObjectSelected
+        {
+            get
+            {
+                int groupId;
+                return TryGetSingleSelectedCadCurveObjectGroup(out groupId)
+                    && explicitObjectGroupKindByGroupId.ContainsKey(groupId);
+            }
+        }
+
+        public string SelectedObjectGroupKind
+        {
+            get
+            {
+                int groupId;
+                string kind;
+                if (TryGetSingleSelectedCadCurveObjectGroup(out groupId)
+                    && explicitObjectGroupKindByGroupId.TryGetValue(groupId, out kind))
+                {
+                    return kind == null ? "" : kind;
+                }
+
+                return "";
             }
         }
 
@@ -172,11 +214,13 @@ namespace OVIA.Desktop
                 CommitInlineTextEdit();
                 mode = value;
                 hasPendingLineStart = false;
+                hasPendingRectangleStart = false;
                 hasPendingCircleCenter = false;
                 hasPendingAngleCenter = false;
                 hasPendingAngleStart = false;
                 hasPendingAngleSweep = false;
                 pendingAngleSweep = 0D;
+                hasPendingScrewStart = false;
                 isDragging = false;
                 isMarqueeSelecting = false;
                 Invalidate();
@@ -210,15 +254,19 @@ namespace OVIA.Desktop
             undoStack.Clear();
             redoStack.Clear();
             ClearSelection(false);
+            copiedElements.Clear();
+            pasteSequence = 0;
             zoom = DefaultFitZoom;
             panOffset = PointF.Empty;
             ResetViewBoundsFromDocument();
             hasPendingLineStart = false;
+            hasPendingRectangleStart = false;
             hasPendingCircleCenter = false;
             hasPendingAngleCenter = false;
             hasPendingAngleStart = false;
             hasPendingAngleSweep = false;
             pendingAngleSweep = 0D;
+            hasPendingScrewStart = false;
             isMarqueeSelecting = false;
             Invalidate();
             OnSelectionChanged();
@@ -261,11 +309,13 @@ namespace OVIA.Desktop
             RebuildCadCurveObjectGroups();
             ClearSelection(false);
             hasPendingLineStart = false;
+            hasPendingRectangleStart = false;
             hasPendingCircleCenter = false;
             hasPendingAngleCenter = false;
             hasPendingAngleStart = false;
             hasPendingAngleSweep = false;
             pendingAngleSweep = 0D;
+            hasPendingScrewStart = false;
             Invalidate();
             OnSelectionChanged();
             OnDocumentChanged();
@@ -286,11 +336,13 @@ namespace OVIA.Desktop
             RebuildCadCurveObjectGroups();
             ClearSelection(false);
             hasPendingLineStart = false;
+            hasPendingRectangleStart = false;
             hasPendingCircleCenter = false;
             hasPendingAngleCenter = false;
             hasPendingAngleStart = false;
             hasPendingAngleSweep = false;
             pendingAngleSweep = 0D;
+            hasPendingScrewStart = false;
             Invalidate();
             OnSelectionChanged();
             OnDocumentChanged();
@@ -311,11 +363,13 @@ namespace OVIA.Desktop
             RebuildCadCurveObjectGroups();
             ClearSelection(false);
             hasPendingLineStart = false;
+            hasPendingRectangleStart = false;
             hasPendingCircleCenter = false;
             hasPendingAngleCenter = false;
             hasPendingAngleStart = false;
             hasPendingAngleSweep = false;
             pendingAngleSweep = 0D;
+            hasPendingScrewStart = false;
             zoom = DefaultFitZoom;
             panOffset = PointF.Empty;
             ResetViewBoundsFromDocument();
@@ -352,6 +406,105 @@ namespace OVIA.Desktop
             Invalidate();
             OnSelectionChanged();
             OnDocumentChanged();
+        }
+
+        public bool CopySelected()
+        {
+            CommitInlineTextEdit();
+
+            if (document == null || selectedIndices.Count == 0)
+            {
+                return false;
+            }
+
+            List<int> indexes = GetSelectedIndexesAscending();
+            copiedElements.Clear();
+            int i;
+
+            for (i = 0; i < indexes.Count; i++)
+            {
+                int index = indexes[i];
+                if (index >= 0 && index < document.Elements.Count && document.Elements[index] != null)
+                {
+                    copiedElements.Add(document.Elements[index].Clone());
+                }
+            }
+
+            pasteSequence = 0;
+            return copiedElements.Count > 0;
+        }
+
+        public bool PasteCopied()
+        {
+            CommitInlineTextEdit();
+
+            if (document == null || copiedElements.Count == 0)
+            {
+                return false;
+            }
+
+            PushUndo();
+            Dictionary<string, string> remappedGroups = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            List<int> newIndexes = new List<int>();
+            double offsetWorld = 18D / Math.Max(GetTransform().Scale, 0.0001D) * Math.Min(pasteSequence + 1, 6);
+            int i;
+
+            for (i = 0; i < copiedElements.Count; i++)
+            {
+                CadShapeEditElement copy = copiedElements[i] == null ? null : copiedElements[i].Clone();
+                if (copy == null)
+                {
+                    continue;
+                }
+
+                if (copy.ObjectGroupId != null && copy.ObjectGroupId.Trim() != "")
+                {
+                    string sourceGroupId = copy.ObjectGroupId.Trim();
+                    string newGroupId;
+                    if (!remappedGroups.TryGetValue(sourceGroupId, out newGroupId))
+                    {
+                        newGroupId = CreateManualObjectGroupId(copy.ObjectGroupKind == null ? "GROUP" : copy.ObjectGroupKind);
+                        remappedGroups[sourceGroupId] = newGroupId;
+                    }
+
+                    copy.ObjectGroupId = newGroupId;
+                }
+
+                TranslateElement(copy, offsetWorld, offsetWorld);
+                document.Elements.Add(copy);
+                newIndexes.Add(document.Elements.Count - 1);
+            }
+
+            if (newIndexes.Count == 0)
+            {
+                return false;
+            }
+
+            pasteSequence++;
+            document.EnsureTextIds();
+            RebuildCadCurveObjectGroups();
+            selectedIndices.Clear();
+
+            for (i = 0; i < newIndexes.Count; i++)
+            {
+                selectedIndices.Add(newIndexes[i]);
+            }
+
+            selectedIndex = newIndexes[0];
+            mode = CadShapeEditorMode.Select;
+            hasPendingLineStart = false;
+            hasPendingRectangleStart = false;
+            hasPendingCircleCenter = false;
+            hasPendingAngleCenter = false;
+            hasPendingAngleStart = false;
+            hasPendingAngleSweep = false;
+            pendingAngleSweep = 0D;
+            hasPendingScrewStart = false;
+            Invalidate();
+            OnModeChanged();
+            OnSelectionChanged();
+            OnDocumentChanged();
+            return true;
         }
 
         public void SplitSelectedLine()
@@ -644,8 +797,10 @@ namespace OVIA.Desktop
             DrawBackgroundGrid(g);
             DrawElements(g);
             DrawPendingLine(g);
+            DrawPendingRectangle(g);
             DrawPendingCircle(g);
             DrawPendingAngle(g);
+            DrawPendingScrew(g);
             DrawMarquee(g);
             DrawOverlay(g);
         }
@@ -681,15 +836,19 @@ namespace OVIA.Desktop
             if (e.Button == MouseButtons.Right)
             {
                 hasPendingLineStart = false;
+                hasPendingRectangleStart = false;
                 hasPendingCircleCenter = false;
                 hasPendingAngleCenter = false;
                 hasPendingAngleStart = false;
                 hasPendingAngleSweep = false;
                 pendingAngleSweep = 0D;
+                hasPendingScrewStart = false;
 
                 if (mode == CadShapeEditorMode.AddLine
+                    || mode == CadShapeEditorMode.AddRectangle
                     || mode == CadShapeEditorMode.AddCircle
-                    || mode == CadShapeEditorMode.AddAngle)
+                    || mode == CadShapeEditorMode.AddAngle
+                    || mode == CadShapeEditorMode.AddScrew)
                 {
                     Mode = CadShapeEditorMode.Select;
                 }
@@ -714,6 +873,12 @@ namespace OVIA.Desktop
                 return;
             }
 
+            if (mode == CadShapeEditorMode.AddRectangle)
+            {
+                HandleAddRectangleClick(world);
+                return;
+            }
+
             if (mode == CadShapeEditorMode.AddCircle)
             {
                 HandleAddCircleClick(world);
@@ -723,6 +888,12 @@ namespace OVIA.Desktop
             if (mode == CadShapeEditorMode.AddAngle)
             {
                 HandleAddAngleClick(world);
+                return;
+            }
+
+            if (mode == CadShapeEditorMode.AddScrew)
+            {
+                HandleAddScrewClick(world);
                 return;
             }
 
@@ -758,8 +929,15 @@ namespace OVIA.Desktop
                     SetPrimarySelectedIndex(hitIndex);
                 }
 
-                // CAD 곡선은 샘플 선분의 끝점이 아니라 원본 곡선 객체 전체를 이동합니다.
-                hitPart = 3;
+                // CAD 곡선과 수동 그룹 객체는 구성 선분이 아니라 객체 전체를 이동합니다.
+                // 수동 사각형/나사/원·타원 그룹의 전용 회전·크기 핸들은 hitPart를 유지합니다.
+                if (hitPart != ManualObjectRotationHandlePart
+                    && hitPart != ManualObjectResizeHandlePart
+                    && hitPart != ManualObjectWidthResizeHandlePart
+                    && hitPart != ManualObjectHeightResizeHandlePart)
+                {
+                    hitPart = 3;
+                }
             }
             else
             {
@@ -781,7 +959,14 @@ namespace OVIA.Desktop
             isDragging = true;
             dragKind = hitPart;
             dragStartWorld = world;
-            CaptureDragStartElements(hitPart == 3 && selectedIndices.Count > 1);
+            CaptureDragStartElements(
+                selectedIndices.Count > 1
+                && (hitPart == 3
+                    || hitPart == ManualObjectRotationHandlePart
+                    || hitPart == ManualObjectResizeHandlePart
+                    || hitPart == ManualObjectWidthResizeHandlePart
+                    || hitPart == ManualObjectHeightResizeHandlePart)
+            );
             PushUndo();
         }
 
@@ -861,6 +1046,14 @@ namespace OVIA.Desktop
                 return;
             }
 
+            if ((mode == CadShapeEditorMode.AddRectangle && hasPendingRectangleStart)
+                || (mode == CadShapeEditorMode.AddScrew && hasPendingScrewStart))
+            {
+                Cursor = Cursors.Cross;
+                Invalidate();
+                return;
+            }
+
             int hoverIndex;
             int hoverPart;
             HitTest(e.Location, out hoverIndex, out hoverPart);
@@ -910,7 +1103,19 @@ namespace OVIA.Desktop
         {
             base.OnKeyDown(e);
 
-            if (e.Control && e.KeyCode == Keys.Z)
+            if (e.Control && e.KeyCode == Keys.C && mode == CadShapeEditorMode.Select)
+            {
+                CopySelected();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+            else if (e.Control && e.KeyCode == Keys.V)
+            {
+                PasteCopied();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+            else if (e.Control && e.KeyCode == Keys.Z)
             {
                 Undo();
                 e.Handled = true;
@@ -943,9 +1148,13 @@ namespace OVIA.Desktop
                 else
                 {
                     hasPendingLineStart = false;
+                    hasPendingRectangleStart = false;
                     hasPendingCircleCenter = false;
                     hasPendingAngleCenter = false;
                     hasPendingAngleStart = false;
+                    hasPendingAngleSweep = false;
+                    pendingAngleSweep = 0D;
+                    hasPendingScrewStart = false;
                     Mode = CadShapeEditorMode.Select;
                 }
 
@@ -954,15 +1163,19 @@ namespace OVIA.Desktop
             }
             else if (e.KeyCode == Keys.Enter
                 && (mode == CadShapeEditorMode.AddLine
+                    || mode == CadShapeEditorMode.AddRectangle
                     || mode == CadShapeEditorMode.AddCircle
-                    || mode == CadShapeEditorMode.AddAngle))
+                    || mode == CadShapeEditorMode.AddAngle
+                    || mode == CadShapeEditorMode.AddScrew))
             {
                 hasPendingLineStart = false;
+                hasPendingRectangleStart = false;
                 hasPendingCircleCenter = false;
                 hasPendingAngleCenter = false;
                 hasPendingAngleStart = false;
                 hasPendingAngleSweep = false;
                 pendingAngleSweep = 0D;
+                hasPendingScrewStart = false;
                 Mode = CadShapeEditorMode.Select;
                 e.Handled = true;
                 e.SuppressKeyPress = true;
@@ -1012,6 +1225,58 @@ namespace OVIA.Desktop
             OnDocumentChanged();
         }
 
+        private void HandleAddRectangleClick(PointF world)
+        {
+            if (!hasPendingRectangleStart)
+            {
+                pendingRectangleStart = world;
+                hasPendingRectangleStart = true;
+                Invalidate();
+                return;
+            }
+
+            if (Math.Abs(world.X - pendingRectangleStart.X) < 0.1F
+                || Math.Abs(world.Y - pendingRectangleStart.Y) < 0.1F)
+            {
+                return;
+            }
+
+            PushUndo();
+            string groupId = CreateManualObjectGroupId("RECTANGLE");
+            int firstIndex = document.Elements.Count;
+            PointF topLeft = new PointF(
+                Math.Min(pendingRectangleStart.X, world.X),
+                Math.Min(pendingRectangleStart.Y, world.Y)
+            );
+            PointF bottomRight = new PointF(
+                Math.Max(pendingRectangleStart.X, world.X),
+                Math.Max(pendingRectangleStart.Y, world.Y)
+            );
+            PointF topRight = new PointF(bottomRight.X, topLeft.Y);
+            PointF bottomLeft = new PointF(topLeft.X, bottomRight.Y);
+
+            document.Elements.Add(CreateManualGroupLine(topLeft, topRight, groupId, "RECTANGLE"));
+            document.Elements.Add(CreateManualGroupLine(topRight, bottomRight, groupId, "RECTANGLE"));
+            document.Elements.Add(CreateManualGroupLine(bottomRight, bottomLeft, groupId, "RECTANGLE"));
+            document.Elements.Add(CreateManualGroupLine(bottomLeft, topLeft, groupId, "RECTANGLE"));
+
+            RebuildCadCurveObjectGroups();
+            List<int> members;
+            if (TryGetCadCurveObjectMembers(firstIndex, out members))
+            {
+                SetSelectedCadCurveObject(firstIndex, members);
+            }
+            else
+            {
+                SetSelectedIndex(firstIndex);
+            }
+
+            hasPendingRectangleStart = false;
+            Mode = CadShapeEditorMode.Select;
+            Invalidate();
+            OnDocumentChanged();
+        }
+
         private void HandleAddCircleClick(PointF world)
         {
             if (!hasPendingCircleCenter)
@@ -1030,20 +1295,141 @@ namespace OVIA.Desktop
             }
 
             PushUndo();
-            CadShapeEditElement circle = new CadShapeEditElement();
-            circle.Type = "CIRCLE";
-            circle.CX = pendingCircleCenter.X;
-            circle.CY = pendingCircleCenter.Y;
-            circle.Radius = radius;
-            circle.StartAngle = 0D;
-            circle.EndAngle = 360D;
-            document.Elements.Add(circle);
+            string groupId = CreateManualObjectGroupId("ELLIPSE");
+            int firstIndex = document.Elements.Count;
+            const int segmentCount = 96;
+            int i;
+
+            for (i = 0; i < segmentCount; i++)
+            {
+                double firstAngle = Math.PI * 2D * i / segmentCount;
+                double secondAngle = Math.PI * 2D * (i + 1) / segmentCount;
+                PointF first = new PointF(
+                    (float)(pendingCircleCenter.X + Math.Cos(firstAngle) * radius),
+                    (float)(pendingCircleCenter.Y + Math.Sin(firstAngle) * radius)
+                );
+                PointF second = new PointF(
+                    (float)(pendingCircleCenter.X + Math.Cos(secondAngle) * radius),
+                    (float)(pendingCircleCenter.Y + Math.Sin(secondAngle) * radius)
+                );
+                document.Elements.Add(CreateManualGroupLine(first, second, groupId, "ELLIPSE"));
+            }
+
             RebuildCadCurveObjectGroups();
-            SetSelectedIndex(document.Elements.Count - 1);
+            List<int> members;
+            if (TryGetCadCurveObjectMembers(firstIndex, out members))
+            {
+                SetSelectedCadCurveObject(firstIndex, members);
+            }
+            else
+            {
+                SetSelectedIndex(firstIndex);
+            }
+
             hasPendingCircleCenter = false;
             Mode = CadShapeEditorMode.Select;
             Invalidate();
             OnDocumentChanged();
+        }
+
+        private void HandleAddScrewClick(PointF world)
+        {
+            if (!hasPendingScrewStart)
+            {
+                pendingScrewStart = world;
+                hasPendingScrewStart = true;
+                Invalidate();
+                return;
+            }
+
+            List<PointF> points = BuildScrewPoints(pendingScrewStart, world);
+            if (points.Count < 4)
+            {
+                return;
+            }
+
+            PushUndo();
+            string groupId = CreateManualObjectGroupId("SCREW");
+            int firstIndex = document.Elements.Count;
+            int i;
+
+            for (i = 1; i < points.Count; i++)
+            {
+                document.Elements.Add(CreateManualGroupLine(points[i - 1], points[i], groupId, "SCREW"));
+            }
+
+            RebuildCadCurveObjectGroups();
+            List<int> members;
+            if (TryGetCadCurveObjectMembers(firstIndex, out members))
+            {
+                SetSelectedCadCurveObject(firstIndex, members);
+            }
+            else
+            {
+                SetSelectedIndex(firstIndex);
+            }
+
+            hasPendingScrewStart = false;
+            Mode = CadShapeEditorMode.Select;
+            Invalidate();
+            OnDocumentChanged();
+        }
+
+        private List<PointF> BuildScrewPoints(PointF start, PointF end)
+        {
+            List<PointF> points = new List<PointF>();
+            double dx = end.X - start.X;
+            double dy = end.Y - start.Y;
+            double length = Math.Sqrt(dx * dx + dy * dy);
+
+            if (length < 0.2D)
+            {
+                return points;
+            }
+
+            double ux = dx / length;
+            double uy = dy / length;
+            double px = -uy;
+            double py = ux;
+            double halfWidth = Math.Max(length * 0.16D, 0.18D);
+            int segmentCount = 14;
+            int i;
+
+            points.Add(start);
+
+            for (i = 1; i < segmentCount; i++)
+            {
+                double t = (double)i / segmentCount;
+                double centerX = start.X + dx * t;
+                double centerY = start.Y + dy * t;
+                double side = (i % 2 == 0 ? -halfWidth : halfWidth);
+                points.Add(new PointF(
+                    (float)(centerX + px * side),
+                    (float)(centerY + py * side)
+                ));
+            }
+
+            points.Add(end);
+            return points;
+        }
+
+        private CadShapeEditElement CreateManualGroupLine(PointF start, PointF end, string groupId, string groupKind)
+        {
+            CadShapeEditElement line = new CadShapeEditElement();
+            line.Type = "LINE";
+            line.X1 = start.X;
+            line.Y1 = start.Y;
+            line.X2 = end.X;
+            line.Y2 = end.Y;
+            line.ObjectGroupId = groupId == null ? "" : groupId;
+            line.ObjectGroupKind = groupKind == null ? "" : groupKind.ToUpperInvariant();
+            return line;
+        }
+
+        private string CreateManualObjectGroupId(string groupKind)
+        {
+            string prefix = groupKind == null || groupKind.Trim() == "" ? "GROUP" : groupKind.Trim().ToUpperInvariant();
+            return prefix + "_" + Guid.NewGuid().ToString("N");
         }
 
         private void HandleAddAngleClick(PointF world)
@@ -1254,6 +1640,30 @@ namespace OVIA.Desktop
         {
             if (dragStartElements.Count == 0)
             {
+                return;
+            }
+
+            if (dragKind == ManualObjectRotationHandlePart && dragStartElements.Count > 1)
+            {
+                ApplyManualObjectRotation(currentWorld);
+                return;
+            }
+
+            if (dragKind == ManualObjectResizeHandlePart && dragStartElements.Count > 1)
+            {
+                ApplyManualObjectScale(currentWorld);
+                return;
+            }
+
+            if (dragKind == ManualObjectWidthResizeHandlePart && dragStartElements.Count > 1)
+            {
+                ApplyManualObjectAxisScale(currentWorld, true);
+                return;
+            }
+
+            if (dragKind == ManualObjectHeightResizeHandlePart && dragStartElements.Count > 1)
+            {
+                ApplyManualObjectAxisScale(currentWorld, false);
                 return;
             }
 
@@ -1490,25 +1900,558 @@ namespace OVIA.Desktop
                     continue;
                 }
 
-                if (target.Type == "LINE")
+                CopyElementGeometry(target, start);
+                TranslateElement(target, dx, dy);
+            }
+        }
+
+        private void ApplyManualObjectRotation(PointF currentWorld)
+        {
+            double minX;
+            double minY;
+            double maxX;
+            double maxY;
+            if (!TryGetDragStartWorldBounds(out minX, out minY, out maxX, out maxY))
+            {
+                return;
+            }
+
+            PointF center = new PointF((float)((minX + maxX) / 2D), (float)((minY + maxY) / 2D));
+            double startDx = dragStartWorld.X - center.X;
+            double startDy = dragStartWorld.Y - center.Y;
+            double currentDx = currentWorld.X - center.X;
+            double currentDy = currentWorld.Y - center.Y;
+
+            if ((Math.Abs(startDx) < 0.0001D && Math.Abs(startDy) < 0.0001D)
+                || (Math.Abs(currentDx) < 0.0001D && Math.Abs(currentDy) < 0.0001D))
+            {
+                return;
+            }
+
+            double startAngle = Math.Atan2(startDy, startDx);
+            double currentAngle = Math.Atan2(currentDy, currentDx);
+            double deltaRadians = currentAngle - startAngle;
+            double deltaDegrees = deltaRadians * 180D / Math.PI;
+
+            foreach (KeyValuePair<int, CadShapeEditElement> pair in dragStartElements)
+            {
+                int index = pair.Key;
+                CadShapeEditElement start = pair.Value;
+                if (index < 0 || index >= document.Elements.Count || start == null || document.Elements[index] == null)
                 {
-                    target.X1 = start.X1 + dx;
-                    target.Y1 = start.Y1 + dy;
-                    target.X2 = start.X2 + dx;
-                    target.Y2 = start.Y2 + dy;
+                    continue;
                 }
-                else if (target.Type == "TEXT")
+
+                CadShapeEditElement target = document.Elements[index];
+                CopyElementGeometry(target, start);
+                RotateElementAround(target, center, deltaRadians, deltaDegrees);
+            }
+        }
+
+        private void ApplyManualObjectScale(PointF currentWorld)
+        {
+            double minX;
+            double minY;
+            double maxX;
+            double maxY;
+            if (!TryGetDragStartWorldBounds(out minX, out minY, out maxX, out maxY))
+            {
+                return;
+            }
+
+            PointF center = new PointF((float)((minX + maxX) / 2D), (float)((minY + maxY) / 2D));
+            double baseDistance = Distance(center, dragStartWorld);
+            double currentDistance = Distance(center, currentWorld);
+
+            if (baseDistance < 0.0001D || currentDistance < 0.0001D)
+            {
+                return;
+            }
+
+            double factor = Math.Max(0.12D, Math.Min(8D, currentDistance / baseDistance));
+
+            foreach (KeyValuePair<int, CadShapeEditElement> pair in dragStartElements)
+            {
+                int index = pair.Key;
+                CadShapeEditElement start = pair.Value;
+                if (index < 0 || index >= document.Elements.Count || start == null || document.Elements[index] == null)
                 {
-                    target.X1 = start.X1 + dx;
-                    target.Y1 = start.Y1 + dy;
-                    target.HasBounds = false;
+                    continue;
                 }
-                else if (target.Type == "ARC" || target.Type == "CIRCLE")
+
+                CadShapeEditElement target = document.Elements[index];
+                CopyElementGeometry(target, start);
+                ScaleElementAround(target, center, factor);
+            }
+        }
+
+        private void ApplyManualObjectAxisScale(PointF currentWorld, bool resizeWidth)
+        {
+            int groupId;
+            if (!TryGetSingleSelectedManualObjectGroup(out groupId))
+            {
+                return;
+            }
+
+            List<int> members;
+            string kind;
+            if (!cadCurveObjectMembers.TryGetValue(groupId, out members)
+                || members == null
+                || !explicitObjectGroupKindByGroupId.TryGetValue(groupId, out kind))
+            {
+                return;
+            }
+
+            PointF center;
+            PointF axisX;
+            PointF axisY;
+            double halfWidth;
+            double halfHeight;
+            if (!TryGetManualObjectWorldFrame(members, dragStartElements, kind, out center, out axisX, out axisY, out halfWidth, out halfHeight))
+            {
+                return;
+            }
+
+            double baseProjection = resizeWidth
+                ? Math.Abs(Dot(dragStartWorld.X - center.X, dragStartWorld.Y - center.Y, axisX))
+                : Math.Abs(Dot(dragStartWorld.X - center.X, dragStartWorld.Y - center.Y, axisY));
+            double currentProjection = resizeWidth
+                ? Math.Abs(Dot(currentWorld.X - center.X, currentWorld.Y - center.Y, axisX))
+                : Math.Abs(Dot(currentWorld.X - center.X, currentWorld.Y - center.Y, axisY));
+
+            if (baseProjection < 0.0001D || currentProjection < 0.0001D)
+            {
+                return;
+            }
+
+            double factor = Math.Max(0.12D, Math.Min(8D, currentProjection / baseProjection));
+            double scaleX = resizeWidth ? factor : 1D;
+            double scaleY = resizeWidth ? 1D : factor;
+
+            foreach (KeyValuePair<int, CadShapeEditElement> pair in dragStartElements)
+            {
+                int index = pair.Key;
+                CadShapeEditElement start = pair.Value;
+                if (index < 0 || index >= document.Elements.Count || start == null || document.Elements[index] == null)
                 {
-                    target.CX = start.CX + dx;
-                    target.CY = start.CY + dy;
+                    continue;
+                }
+
+                CadShapeEditElement target = document.Elements[index];
+                CopyElementGeometry(target, start);
+                ScaleElementAroundAxes(target, center, axisX, axisY, scaleX, scaleY);
+            }
+        }
+
+        private bool TryGetManualObjectWorldFrame(
+            List<int> members,
+            Dictionary<int, CadShapeEditElement> sourceElements,
+            string kind,
+            out PointF center,
+            out PointF axisX,
+            out PointF axisY,
+            out double halfWidth,
+            out double halfHeight)
+        {
+            center = PointF.Empty;
+            axisX = new PointF(1F, 0F);
+            axisY = new PointF(0F, 1F);
+            halfWidth = 0D;
+            halfHeight = 0D;
+
+            if (members == null || members.Count == 0)
+            {
+                return false;
+            }
+
+            List<CadShapeEditElement> ordered = new List<CadShapeEditElement>();
+            int i;
+            for (i = 0; i < members.Count; i++)
+            {
+                int index = members[i];
+                CadShapeEditElement element = null;
+
+                if (sourceElements != null)
+                {
+                    sourceElements.TryGetValue(index, out element);
+                }
+                else if (document != null && index >= 0 && index < document.Elements.Count)
+                {
+                    element = document.Elements[index];
+                }
+
+                if (element != null)
+                {
+                    ordered.Add(element);
                 }
             }
+
+            if (ordered.Count == 0)
+            {
+                return false;
+            }
+
+            string normalizedKind = kind == null ? "" : kind.Trim().ToUpperInvariant();
+            PointF axisStart = PointF.Empty;
+            PointF axisEnd = PointF.Empty;
+            bool axisFound = false;
+
+            if (normalizedKind == "SCREW")
+            {
+                CadShapeEditElement first = ordered[0];
+                CadShapeEditElement last = ordered[ordered.Count - 1];
+                if (first.Type == "LINE" && last.Type == "LINE")
+                {
+                    axisStart = new PointF((float)first.X1, (float)first.Y1);
+                    axisEnd = new PointF((float)last.X2, (float)last.Y2);
+                    axisFound = Distance(axisStart, axisEnd) > 0.0001F;
+                }
+            }
+            else if (normalizedKind == "ELLIPSE")
+            {
+                double sumX = 0D;
+                double sumY = 0D;
+                int pointCount = 0;
+
+                for (i = 0; i < ordered.Count; i++)
+                {
+                    CadShapeEditElement element = ordered[i];
+                    if (element.Type != "LINE")
+                    {
+                        continue;
+                    }
+
+                    sumX += element.X1 + element.X2;
+                    sumY += element.Y1 + element.Y2;
+                    pointCount += 2;
+                }
+
+                if (pointCount > 0 && ordered[0].Type == "LINE")
+                {
+                    axisStart = new PointF((float)(sumX / pointCount), (float)(sumY / pointCount));
+                    axisEnd = new PointF((float)ordered[0].X1, (float)ordered[0].Y1);
+                    axisFound = Distance(axisStart, axisEnd) > 0.0001F;
+                }
+            }
+
+            if (!axisFound)
+            {
+                for (i = 0; i < ordered.Count; i++)
+                {
+                    CadShapeEditElement element = ordered[i];
+                    if (element.Type != "LINE")
+                    {
+                        continue;
+                    }
+
+                    axisStart = new PointF((float)element.X1, (float)element.Y1);
+                    axisEnd = new PointF((float)element.X2, (float)element.Y2);
+                    if (Distance(axisStart, axisEnd) > 0.0001F)
+                    {
+                        axisFound = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!axisFound)
+            {
+                return false;
+            }
+
+            double axisDx = axisEnd.X - axisStart.X;
+            double axisDy = axisEnd.Y - axisStart.Y;
+            double axisLength = Math.Sqrt(axisDx * axisDx + axisDy * axisDy);
+            if (axisLength < 0.0001D)
+            {
+                return false;
+            }
+
+            axisX = new PointF((float)(axisDx / axisLength), (float)(axisDy / axisLength));
+            axisY = new PointF(-axisX.Y, axisX.X);
+
+            double minU = Double.MaxValue;
+            double minV = Double.MaxValue;
+            double maxU = Double.MinValue;
+            double maxV = Double.MinValue;
+            bool found = false;
+
+            for (i = 0; i < ordered.Count; i++)
+            {
+                CadShapeEditElement element = ordered[i];
+                if (element.Type == "LINE")
+                {
+                    IncludeProjectedPoint(ref minU, ref minV, ref maxU, ref maxV, element.X1, element.Y1, axisX, axisY);
+                    IncludeProjectedPoint(ref minU, ref minV, ref maxU, ref maxV, element.X2, element.Y2, axisX, axisY);
+                    found = true;
+                }
+                else if (element.Type == "TEXT")
+                {
+                    IncludeProjectedPoint(ref minU, ref minV, ref maxU, ref maxV, element.X1, element.Y1, axisX, axisY);
+                    found = true;
+                }
+            }
+
+            if (!found)
+            {
+                return false;
+            }
+
+            double centerU = (minU + maxU) / 2D;
+            double centerV = (minV + maxV) / 2D;
+            center = new PointF(
+                (float)(axisX.X * centerU + axisY.X * centerV),
+                (float)(axisX.Y * centerU + axisY.Y * centerV)
+            );
+            halfWidth = Math.Max(0.05D, (maxU - minU) / 2D);
+            halfHeight = Math.Max(0.05D, (maxV - minV) / 2D);
+            return true;
+        }
+
+        private static void IncludeProjectedPoint(
+            ref double minU,
+            ref double minV,
+            ref double maxU,
+            ref double maxV,
+            double x,
+            double y,
+            PointF axisX,
+            PointF axisY)
+        {
+            double u = Dot(x, y, axisX);
+            double v = Dot(x, y, axisY);
+            minU = Math.Min(minU, u);
+            minV = Math.Min(minV, v);
+            maxU = Math.Max(maxU, u);
+            maxV = Math.Max(maxV, v);
+        }
+
+        private static double Dot(double x, double y, PointF axis)
+        {
+            return x * axis.X + y * axis.Y;
+        }
+
+        private static PointF ScaleWorldPointAroundAxes(
+            PointF point,
+            PointF center,
+            PointF axisX,
+            PointF axisY,
+            double scaleX,
+            double scaleY)
+        {
+            double dx = point.X - center.X;
+            double dy = point.Y - center.Y;
+            double localX = Dot(dx, dy, axisX) * scaleX;
+            double localY = Dot(dx, dy, axisY) * scaleY;
+            return new PointF(
+                (float)(center.X + axisX.X * localX + axisY.X * localY),
+                (float)(center.Y + axisX.Y * localX + axisY.Y * localY)
+            );
+        }
+
+        private static void ScaleElementAroundAxes(
+            CadShapeEditElement element,
+            PointF center,
+            PointF axisX,
+            PointF axisY,
+            double scaleX,
+            double scaleY)
+        {
+            if (element == null)
+            {
+                return;
+            }
+
+            if (element.Type == "LINE")
+            {
+                PointF first = ScaleWorldPointAroundAxes(new PointF((float)element.X1, (float)element.Y1), center, axisX, axisY, scaleX, scaleY);
+                PointF second = ScaleWorldPointAroundAxes(new PointF((float)element.X2, (float)element.Y2), center, axisX, axisY, scaleX, scaleY);
+                element.X1 = first.X;
+                element.Y1 = first.Y;
+                element.X2 = second.X;
+                element.Y2 = second.Y;
+            }
+            else if (element.Type == "TEXT")
+            {
+                PointF position = ScaleWorldPointAroundAxes(new PointF((float)element.X1, (float)element.Y1), center, axisX, axisY, scaleX, scaleY);
+                element.X1 = position.X;
+                element.Y1 = position.Y;
+                element.TextScale = Math.Max(MinTextScale, Math.Min(MaxTextScale, element.TextScale * Math.Sqrt(Math.Abs(scaleX * scaleY))));
+                element.HasBounds = false;
+            }
+        }
+
+        private bool TryGetDragStartWorldBounds(out double minX, out double minY, out double maxX, out double maxY)
+        {
+            minX = Double.MaxValue;
+            minY = Double.MaxValue;
+            maxX = Double.MinValue;
+            maxY = Double.MinValue;
+            bool found = false;
+
+            foreach (CadShapeEditElement element in dragStartElements.Values)
+            {
+                if (element == null)
+                {
+                    continue;
+                }
+
+                if (element.Type == "LINE")
+                {
+                    IncludeWorldPoint(ref minX, ref minY, ref maxX, ref maxY, element.X1, element.Y1);
+                    IncludeWorldPoint(ref minX, ref minY, ref maxX, ref maxY, element.X2, element.Y2);
+                    found = true;
+                }
+                else if (element.Type == "ARC" || element.Type == "CIRCLE")
+                {
+                    double radius = Math.Abs(element.Radius);
+                    IncludeWorldPoint(ref minX, ref minY, ref maxX, ref maxY, element.CX - radius, element.CY - radius);
+                    IncludeWorldPoint(ref minX, ref minY, ref maxX, ref maxY, element.CX + radius, element.CY + radius);
+                    found = true;
+                }
+                else if (element.Type == "TEXT")
+                {
+                    IncludeWorldPoint(ref minX, ref minY, ref maxX, ref maxY, element.X1, element.Y1);
+                    found = true;
+                }
+            }
+
+            return found;
+        }
+
+        private static void IncludeWorldPoint(ref double minX, ref double minY, ref double maxX, ref double maxY, double x, double y)
+        {
+            minX = Math.Min(minX, x);
+            minY = Math.Min(minY, y);
+            maxX = Math.Max(maxX, x);
+            maxY = Math.Max(maxY, y);
+        }
+
+        private static void CopyElementGeometry(CadShapeEditElement target, CadShapeEditElement source)
+        {
+            target.X1 = source.X1;
+            target.Y1 = source.Y1;
+            target.X2 = source.X2;
+            target.Y2 = source.Y2;
+            target.CX = source.CX;
+            target.CY = source.CY;
+            target.Radius = source.Radius;
+            target.StartAngle = source.StartAngle;
+            target.EndAngle = source.EndAngle;
+            target.Height = source.Height;
+            target.TextScale = source.TextScale;
+            target.Rotation = source.Rotation;
+            target.HasBounds = source.HasBounds;
+            target.BoundsMinX = source.BoundsMinX;
+            target.BoundsMinY = source.BoundsMinY;
+            target.BoundsMaxX = source.BoundsMaxX;
+            target.BoundsMaxY = source.BoundsMaxY;
+        }
+
+        private static void TranslateElement(CadShapeEditElement element, double dx, double dy)
+        {
+            if (element == null)
+            {
+                return;
+            }
+
+            if (element.Type == "LINE")
+            {
+                element.X1 += dx;
+                element.Y1 += dy;
+                element.X2 += dx;
+                element.Y2 += dy;
+            }
+            else if (element.Type == "TEXT")
+            {
+                element.X1 += dx;
+                element.Y1 += dy;
+                element.HasBounds = false;
+            }
+            else if (element.Type == "ARC" || element.Type == "CIRCLE")
+            {
+                element.CX += dx;
+                element.CY += dy;
+            }
+        }
+
+        private static void RotateElementAround(CadShapeEditElement element, PointF center, double radians, double deltaDegrees)
+        {
+            if (element == null)
+            {
+                return;
+            }
+
+            if (element.Type == "LINE")
+            {
+                PointF first = RotateWorldPoint(new PointF((float)element.X1, (float)element.Y1), center, radians);
+                PointF second = RotateWorldPoint(new PointF((float)element.X2, (float)element.Y2), center, radians);
+                element.X1 = first.X;
+                element.Y1 = first.Y;
+                element.X2 = second.X;
+                element.Y2 = second.Y;
+            }
+            else if (element.Type == "TEXT")
+            {
+                PointF position = RotateWorldPoint(new PointF((float)element.X1, (float)element.Y1), center, radians);
+                element.X1 = position.X;
+                element.Y1 = position.Y;
+                element.Rotation += deltaDegrees;
+                element.HasBounds = false;
+            }
+            else if (element.Type == "ARC" || element.Type == "CIRCLE")
+            {
+                PointF arcCenter = RotateWorldPoint(new PointF((float)element.CX, (float)element.CY), center, radians);
+                element.CX = arcCenter.X;
+                element.CY = arcCenter.Y;
+
+                if (element.Type == "ARC")
+                {
+                    element.StartAngle += deltaDegrees;
+                    element.EndAngle += deltaDegrees;
+                }
+            }
+        }
+
+        private static void ScaleElementAround(CadShapeEditElement element, PointF center, double factor)
+        {
+            if (element == null)
+            {
+                return;
+            }
+
+            if (element.Type == "LINE")
+            {
+                element.X1 = center.X + (element.X1 - center.X) * factor;
+                element.Y1 = center.Y + (element.Y1 - center.Y) * factor;
+                element.X2 = center.X + (element.X2 - center.X) * factor;
+                element.Y2 = center.Y + (element.Y2 - center.Y) * factor;
+            }
+            else if (element.Type == "TEXT")
+            {
+                element.X1 = center.X + (element.X1 - center.X) * factor;
+                element.Y1 = center.Y + (element.Y1 - center.Y) * factor;
+                element.TextScale = Math.Max(MinTextScale, Math.Min(MaxTextScale, element.TextScale * factor));
+                element.HasBounds = false;
+            }
+            else if (element.Type == "ARC" || element.Type == "CIRCLE")
+            {
+                element.CX = center.X + (element.CX - center.X) * factor;
+                element.CY = center.Y + (element.CY - center.Y) * factor;
+                element.Radius = Math.Max(0.1D, Math.Abs(element.Radius) * factor);
+            }
+        }
+
+        private static PointF RotateWorldPoint(PointF point, PointF center, double radians)
+        {
+            double cos = Math.Cos(radians);
+            double sin = Math.Sin(radians);
+            double dx = point.X - center.X;
+            double dy = point.Y - center.Y;
+            return new PointF(
+                (float)(center.X + dx * cos - dy * sin),
+                (float)(center.Y + dx * sin + dy * cos)
+            );
         }
 
         private void AdjustTranslationForEndpointSnap(ref double dx, ref double dy)
@@ -1568,6 +2511,48 @@ namespace OVIA.Desktop
             hitIndex = -1;
             hitPart = 0;
             float threshold = 8F;
+
+            int manualObjectGroupId;
+            if (TryGetSingleSelectedManualObjectGroup(out manualObjectGroupId))
+            {
+                List<int> manualMembers;
+                if (cadCurveObjectMembers.TryGetValue(manualObjectGroupId, out manualMembers) && manualMembers != null)
+                {
+                    PointF rotationHandle;
+                    PointF resizeHandle;
+                    PointF widthResizeHandle;
+                    PointF heightResizeHandle;
+                    GetManualObjectEditHandles(manualObjectGroupId, manualMembers, out rotationHandle, out resizeHandle, out widthResizeHandle, out heightResizeHandle);
+
+                    if (Distance(rotationHandle, screenPoint) <= 11F)
+                    {
+                        hitIndex = selectedIndex;
+                        hitPart = ManualObjectRotationHandlePart;
+                        return;
+                    }
+
+                    if (Distance(widthResizeHandle, screenPoint) <= 11F)
+                    {
+                        hitIndex = selectedIndex;
+                        hitPart = ManualObjectWidthResizeHandlePart;
+                        return;
+                    }
+
+                    if (Distance(heightResizeHandle, screenPoint) <= 11F)
+                    {
+                        hitIndex = selectedIndex;
+                        hitPart = ManualObjectHeightResizeHandlePart;
+                        return;
+                    }
+
+                    if (Distance(resizeHandle, screenPoint) <= 11F)
+                    {
+                        hitIndex = selectedIndex;
+                        hitPart = ManualObjectResizeHandlePart;
+                        return;
+                    }
+                }
+            }
 
             CadShapeEditElement primary = SelectedElement;
             if (primary != null && selectedIndices.Count == 1)
@@ -1733,8 +2718,10 @@ namespace OVIA.Desktop
         private Cursor GetCursorForHit(int hitIndex, int hitPart)
         {
             if (mode == CadShapeEditorMode.AddLine
+                || mode == CadShapeEditorMode.AddRectangle
                 || mode == CadShapeEditorMode.AddCircle
                 || mode == CadShapeEditorMode.AddAngle
+                || mode == CadShapeEditorMode.AddScrew
                 || mode == CadShapeEditorMode.AddText)
             {
                 return Cursors.Cross;
@@ -1745,9 +2732,28 @@ namespace OVIA.Desktop
                 return Cursors.Default;
             }
 
-            if (hitPart == 4 || hitPart == 5 || hitPart == 10 || hitPart == 11)
+            if (hitPart == 4
+                || hitPart == 5
+                || hitPart == 10
+                || hitPart == 11
+                || hitPart == ManualObjectRotationHandlePart)
             {
                 return GetRotationCursor();
+            }
+
+            if (hitPart == ManualObjectResizeHandlePart)
+            {
+                return Cursors.SizeNWSE;
+            }
+
+            if (hitPart == ManualObjectWidthResizeHandlePart)
+            {
+                return Cursors.SizeWE;
+            }
+
+            if (hitPart == ManualObjectHeightResizeHandlePart)
+            {
+                return Cursors.SizeNS;
             }
 
             if (hitPart == 1 || hitPart == 2 || hitPart == 6 || hitPart == 7 || hitPart == 8 || hitPart == 9 || hitPart == 12)
@@ -1851,21 +2857,77 @@ namespace OVIA.Desktop
         {
             cadCurveObjectGroupByElementIndex.Clear();
             cadCurveObjectMembers.Clear();
+            explicitObjectGroupKindByGroupId.Clear();
 
             if (document == null || document.Elements == null || document.Elements.Count < CadCurveObjectMinimumSegments)
             {
                 return;
             }
 
-            double connectionTolerance = GetCadCurveObjectConnectionTolerance();
             int nextGroupId = 1;
+            Dictionary<string, List<int>> explicitGroups = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, string> explicitKinds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            int explicitIndex;
+
+            for (explicitIndex = 0; explicitIndex < document.Elements.Count; explicitIndex++)
+            {
+                CadShapeEditElement explicitElement = document.Elements[explicitIndex];
+                if (explicitElement == null
+                    || explicitElement.ObjectGroupId == null
+                    || explicitElement.ObjectGroupId.Trim() == "")
+                {
+                    continue;
+                }
+
+                string objectGroupId = explicitElement.ObjectGroupId.Trim();
+                List<int> explicitMembers;
+                if (!explicitGroups.TryGetValue(objectGroupId, out explicitMembers))
+                {
+                    explicitMembers = new List<int>();
+                    explicitGroups[objectGroupId] = explicitMembers;
+                }
+
+                explicitMembers.Add(explicitIndex);
+                if (!explicitKinds.ContainsKey(objectGroupId)
+                    && explicitElement.ObjectGroupKind != null
+                    && explicitElement.ObjectGroupKind.Trim() != "")
+                {
+                    explicitKinds[objectGroupId] = explicitElement.ObjectGroupKind.Trim().ToUpperInvariant();
+                }
+            }
+
+            foreach (KeyValuePair<string, List<int>> explicitPair in explicitGroups)
+            {
+                List<int> explicitMembers = explicitPair.Value;
+                if (explicitMembers == null || explicitMembers.Count < 2)
+                {
+                    continue;
+                }
+
+                int explicitGroupId = nextGroupId++;
+                cadCurveObjectMembers[explicitGroupId] = explicitMembers;
+                string explicitKind;
+                explicitObjectGroupKindByGroupId[explicitGroupId] = explicitKinds.TryGetValue(explicitPair.Key, out explicitKind)
+                    ? explicitKind
+                    : "GROUP";
+
+                int memberIndex;
+                for (memberIndex = 0; memberIndex < explicitMembers.Count; memberIndex++)
+                {
+                    cadCurveObjectGroupByElementIndex[explicitMembers[memberIndex]] = explicitGroupId;
+                }
+            }
+
+            double connectionTolerance = GetCadCurveObjectConnectionTolerance();
             int index = 0;
 
             while (index < document.Elements.Count)
             {
                 CadShapeEditElement first = document.Elements[index];
 
-                if (first == null || first.Type != "LINE")
+                if (first == null
+                    || first.Type != "LINE"
+                    || cadCurveObjectGroupByElementIndex.ContainsKey(index))
                 {
                     index++;
                     continue;
@@ -1881,7 +2943,12 @@ namespace OVIA.Desktop
                     CadShapeEditElement previous = document.Elements[nextIndex - 1];
                     CadShapeEditElement next = document.Elements[nextIndex];
 
-                    if (previous == null || next == null || previous.Type != "LINE" || next.Type != "LINE")
+                    if (previous == null
+                        || next == null
+                        || previous.Type != "LINE"
+                        || next.Type != "LINE"
+                        || cadCurveObjectGroupByElementIndex.ContainsKey(nextIndex - 1)
+                        || cadCurveObjectGroupByElementIndex.ContainsKey(nextIndex))
                     {
                         break;
                     }
@@ -2207,6 +3274,12 @@ namespace OVIA.Desktop
                 && AreAllIndicesSelected(members);
         }
 
+        private bool TryGetSingleSelectedManualObjectGroup(out int groupId)
+        {
+            return TryGetSingleSelectedCadCurveObjectGroup(out groupId)
+                && explicitObjectGroupKindByGroupId.ContainsKey(groupId);
+        }
+
         private void SetSelectedIndex(int value)
         {
             if (value < -1 || value >= document.Elements.Count)
@@ -2522,6 +3595,62 @@ namespace OVIA.Desktop
                 return;
             }
 
+            if (explicitObjectGroupKindByGroupId.ContainsKey(groupId))
+            {
+                string kind = explicitObjectGroupKindByGroupId[groupId];
+                PointF center;
+                PointF axisX;
+                PointF axisY;
+                double halfWidth;
+                double halfHeight;
+                if (!TryGetManualObjectWorldFrame(members, null, kind, out center, out axisX, out axisY, out halfWidth, out halfHeight))
+                {
+                    return;
+                }
+
+                PointF topLeft = WorldToScreen(new PointF(
+                    (float)(center.X - axisX.X * halfWidth - axisY.X * halfHeight),
+                    (float)(center.Y - axisX.Y * halfWidth - axisY.Y * halfHeight)
+                ));
+                PointF topRight = WorldToScreen(new PointF(
+                    (float)(center.X + axisX.X * halfWidth - axisY.X * halfHeight),
+                    (float)(center.Y + axisX.Y * halfWidth - axisY.Y * halfHeight)
+                ));
+                PointF bottomRight = WorldToScreen(new PointF(
+                    (float)(center.X + axisX.X * halfWidth + axisY.X * halfHeight),
+                    (float)(center.Y + axisX.Y * halfWidth + axisY.Y * halfHeight)
+                ));
+                PointF bottomLeft = WorldToScreen(new PointF(
+                    (float)(center.X - axisX.X * halfWidth + axisY.X * halfHeight),
+                    (float)(center.Y - axisX.Y * halfWidth + axisY.Y * halfHeight)
+                ));
+
+                using (Pen border = new Pen(Color.FromArgb(19, 104, 206), 1F))
+                {
+                    border.DashStyle = DashStyle.Dash;
+                    g.DrawPolygon(border, new PointF[] { topLeft, topRight, bottomRight, bottomLeft });
+                }
+
+                PointF rotationHandle;
+                PointF resizeHandle;
+                PointF widthResizeHandle;
+                PointF heightResizeHandle;
+                GetManualObjectEditHandles(groupId, members, out rotationHandle, out resizeHandle, out widthResizeHandle, out heightResizeHandle);
+                PointF topCenter = new PointF((topLeft.X + topRight.X) / 2F, (topLeft.Y + topRight.Y) / 2F);
+
+                using (Pen guide = new Pen(Color.FromArgb(19, 104, 206), 1F))
+                {
+                    guide.DashStyle = DashStyle.Dot;
+                    g.DrawLine(guide, topCenter, rotationHandle);
+                }
+
+                DrawRotationHandle(g, rotationHandle);
+                DrawHandle(g, widthResizeHandle, true);
+                DrawHandle(g, heightResizeHandle, true);
+                DrawHandle(g, resizeHandle, true);
+                return;
+            }
+
             RectangleF bounds = GetElementGroupScreenBounds(members);
             if (bounds.IsEmpty)
             {
@@ -2533,6 +3662,66 @@ namespace OVIA.Desktop
             {
                 border.DashStyle = DashStyle.Dash;
                 g.DrawRectangle(border, bounds.X, bounds.Y, bounds.Width, bounds.Height);
+            }
+        }
+
+        private void GetManualObjectEditHandles(
+            int groupId,
+            List<int> members,
+            out PointF rotationHandle,
+            out PointF resizeHandle,
+            out PointF widthResizeHandle,
+            out PointF heightResizeHandle)
+        {
+            rotationHandle = PointF.Empty;
+            resizeHandle = PointF.Empty;
+            widthResizeHandle = PointF.Empty;
+            heightResizeHandle = PointF.Empty;
+
+            string kind;
+            PointF center;
+            PointF axisX;
+            PointF axisY;
+            double halfWidth;
+            double halfHeight;
+            if (!explicitObjectGroupKindByGroupId.TryGetValue(groupId, out kind)
+                || !TryGetManualObjectWorldFrame(members, null, kind, out center, out axisX, out axisY, out halfWidth, out halfHeight))
+            {
+                return;
+            }
+
+            double rotationOffsetWorld = 26D / Math.Max(0.001D, GetTransform().Scale);
+            PointF rotationWorld = new PointF(
+                (float)(center.X - axisY.X * (halfHeight + rotationOffsetWorld)),
+                (float)(center.Y - axisY.Y * (halfHeight + rotationOffsetWorld))
+            );
+            PointF resizeWorld = new PointF(
+                (float)(center.X + axisX.X * halfWidth + axisY.X * halfHeight),
+                (float)(center.Y + axisX.Y * halfWidth + axisY.Y * halfHeight)
+            );
+            PointF widthWorld = new PointF(
+                (float)(center.X + axisX.X * halfWidth),
+                (float)(center.Y + axisX.Y * halfWidth)
+            );
+            PointF heightWorld = new PointF(
+                (float)(center.X + axisY.X * halfHeight),
+                (float)(center.Y + axisY.Y * halfHeight)
+            );
+
+            rotationHandle = WorldToScreen(rotationWorld);
+            resizeHandle = WorldToScreen(resizeWorld);
+            widthResizeHandle = WorldToScreen(widthWorld);
+            heightResizeHandle = WorldToScreen(heightWorld);
+        }
+
+        private void DrawRotationHandle(Graphics g, PointF center)
+        {
+            RectangleF rect = new RectangleF(center.X - 5F, center.Y - 5F, 10F, 10F);
+            using (SolidBrush brush = new SolidBrush(Color.White))
+            using (Pen pen = new Pen(Color.FromArgb(19, 104, 206), 1.5F))
+            {
+                g.FillEllipse(brush, rect);
+                g.DrawEllipse(pen, rect);
             }
         }
 
@@ -2726,6 +3915,31 @@ namespace OVIA.Desktop
             DrawHandle(g, start, false);
         }
 
+        private void DrawPendingRectangle(Graphics g)
+        {
+            if (!hasPendingRectangleStart || mode != CadShapeEditorMode.AddRectangle)
+            {
+                return;
+            }
+
+            PointF start = WorldToScreen(pendingRectangleStart);
+            PointF current = WorldToScreen(ScreenToWorld(currentMouseScreen));
+            RectangleF bounds = RectangleF.FromLTRB(
+                Math.Min(start.X, current.X),
+                Math.Min(start.Y, current.Y),
+                Math.Max(start.X, current.X),
+                Math.Max(start.Y, current.Y)
+            );
+
+            using (Pen pen = new Pen(Color.FromArgb(19, 104, 206), 1.5F))
+            {
+                pen.DashStyle = DashStyle.Dash;
+                g.DrawRectangle(pen, bounds.X, bounds.Y, bounds.Width, bounds.Height);
+            }
+
+            DrawHandle(g, start, false);
+        }
+
         private void DrawPendingCircle(Graphics g)
         {
             if (!hasPendingCircleCenter || mode != CadShapeEditorMode.AddCircle)
@@ -2806,6 +4020,32 @@ namespace OVIA.Desktop
             }
         }
 
+        private void DrawPendingScrew(Graphics g)
+        {
+            if (!hasPendingScrewStart || mode != CadShapeEditorMode.AddScrew)
+            {
+                return;
+            }
+
+            List<PointF> points = BuildScrewPoints(pendingScrewStart, ScreenToWorld(currentMouseScreen));
+            if (points.Count < 2)
+            {
+                return;
+            }
+
+            using (Pen pen = new Pen(Color.FromArgb(19, 104, 206), 1.5F))
+            {
+                pen.DashStyle = DashStyle.Dash;
+                int i;
+                for (i = 1; i < points.Count; i++)
+                {
+                    g.DrawLine(pen, WorldToScreen(points[i - 1]), WorldToScreen(points[i]));
+                }
+            }
+
+            DrawHandle(g, WorldToScreen(pendingScrewStart), false);
+        }
+
         private void DrawMarquee(Graphics g)
         {
             if (!isMarqueeSelecting)
@@ -2833,6 +4073,11 @@ namespace OVIA.Desktop
                 modeText = "연속 선 그리기";
                 guide = "끝점은 기존 선 끝점에 자동 연결됩니다. Enter·Esc·우클릭으로 종료합니다.";
             }
+            else if (mode == CadShapeEditorMode.AddRectangle)
+            {
+                modeText = "사각형 추가";
+                guide = "첫 모서리와 반대편 모서리를 차례로 클릭합니다. 생성 후 전체 선택되어 회전·크기 조절할 수 있습니다.";
+            }
             else if (mode == CadShapeEditorMode.AddCircle)
             {
                 modeText = "원 추가";
@@ -2843,6 +4088,11 @@ namespace OVIA.Desktop
                 modeText = "각도 추가";
                 guide = "중심점과 시작 방향을 클릭한 뒤 마우스를 원하는 방향으로 돌려 최대 270°까지 만든 다음 끝 위치를 클릭합니다.";
             }
+            else if (mode == CadShapeEditorMode.AddScrew)
+            {
+                modeText = "나사 추가";
+                guide = "나사의 시작점과 끝점을 차례로 클릭합니다. 생성된 나사선은 하나의 객체로 선택되며 가로·세로 핸들로 길이와 폭을 따로 조절할 수 있습니다.";
+            }
             else if (mode == CadShapeEditorMode.AddText)
             {
                 modeText = "문자 추가";
@@ -2851,12 +4101,14 @@ namespace OVIA.Desktop
             else
             {
                 int selectedObjectCount = GetSelectedObjectCount();
-                modeText = IsSingleCadCurveObjectSelected
+                modeText = IsSingleManualObjectSelected
+                    ? GetManualObjectDisplayName(SelectedObjectGroupKind) + " 선택"
+                    : (IsSingleCadCurveObjectSelected
                     ? "곡선 객체 선택"
                     : (selectedObjectCount > 1
                         ? selectedObjectCount.ToString() + "개 선택"
-                        : "선택·이동");
-                guide = "빈 공간을 드래그하면 영역 안의 요소를 함께 선택합니다. 문자·치수는 더블클릭하여 수정합니다.";
+                        : "선택·이동"));
+                guide = "빈 공간을 드래그하면 영역 안의 요소를 함께 선택합니다. Ctrl+C로 복사하고 Ctrl+V로 붙여넣을 수 있습니다. 문자·치수는 더블클릭하여 수정합니다.";
             }
 
             using (Font titleFont = OviaFluentTheme.FontKorean(9F, FontStyle.Bold))
@@ -2867,6 +4119,26 @@ namespace OVIA.Desktop
                 g.DrawString(modeText + "  |  " + Math.Round(zoom * 100F).ToString("0") + "%", titleFont, titleBrush, 12F, 10F);
                 g.DrawString(guide, guideFont, guideBrush, 12F, 32F);
             }
+        }
+
+        private string GetManualObjectDisplayName(string kind)
+        {
+            if (String.Equals(kind, "RECTANGLE", StringComparison.OrdinalIgnoreCase))
+            {
+                return "사각형 객체";
+            }
+
+            if (String.Equals(kind, "SCREW", StringComparison.OrdinalIgnoreCase))
+            {
+                return "나사 객체";
+            }
+
+            if (String.Equals(kind, "ELLIPSE", StringComparison.OrdinalIgnoreCase))
+            {
+                return "원·타원 객체";
+            }
+
+            return "그룹 객체";
         }
 
         private void DrawHandle(Graphics g, PointF center, bool resizeHandle)

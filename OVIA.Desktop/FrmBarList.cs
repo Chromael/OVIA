@@ -3626,6 +3626,7 @@ namespace OVIA.Desktop
             double exportedLength = 0.0;
             decimal exportedWeight = 0M;
             List<int> visibleColumnIndexes = new List<int>();
+            List<DataGridViewColumn> visibleGridColumns = new List<DataGridViewColumn>();
             BarListExcelDocument document = new BarListExcelDocument();
             int c;
 
@@ -3638,7 +3639,18 @@ namespace OVIA.Desktop
                     continue;
                 }
 
-                visibleColumnIndexes.Add(c);
+                visibleGridColumns.Add(gridColumn);
+            }
+
+            visibleGridColumns.Sort(delegate(DataGridViewColumn left, DataGridViewColumn right)
+            {
+                return left.DisplayIndex.CompareTo(right.DisplayIndex);
+            });
+
+            for (c = 0; c < visibleGridColumns.Count; c++)
+            {
+                DataGridViewColumn gridColumn = visibleGridColumns[c];
+                visibleColumnIndexes.Add(gridColumn.Index);
                 document.Columns.Add(CreateBarListExcelColumn(gridColumn));
             }
 
@@ -5209,9 +5221,9 @@ namespace OVIA.Desktop
         {
             string[] headers = new string[]
             {
-                "번호", "부위", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(Ton)", "비고", "원본 도면"
+                "부위", "번호", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(Ton)", "비고", "원본 도면"
             };
-            float[] fillWeights = new float[] { 48F, 58F, 70F, 130F, 74F, 68F, 78F, 76F, 96F, 120F };
+            float[] fillWeights = new float[] { 58F, 48F, 70F, 130F, 74F, 68F, 78F, 76F, 96F, 120F };
             int i;
 
             for (i = 0; i < headers.Length; i++)
@@ -5270,8 +5282,8 @@ namespace OVIA.Desktop
                     }
 
                     int previewRowIndex = previewGrid.Rows.Add(
-                        GetCsvCellText(row, noColumn),
                         GetCsvCellText(row, partColumn),
+                        GetCsvCellText(row, noColumn),
                         GetCsvCellText(row, specColumn),
                         shapeText,
                         FormatBarListNumberForDisplay(GetCsvCellText(row, lengthColumn)),
@@ -10833,11 +10845,9 @@ namespace OVIA.Desktop
 
             int insertIndex = FindNumberColumnIndex();
 
-            if (insertIndex >= 0)
-            {
-                insertIndex = insertIndex + 1;
-            }
-            else
+            // OVIA 표준 표시 순서는 "부위 → 번호"입니다.
+            // 원본 CAD/CSV의 실제 열 위치는 헤더 매핑으로 읽으므로 여기서는 화면 열 위치만 고정합니다.
+            if (insertIndex < 0)
             {
                 insertIndex = 0;
             }
@@ -10906,6 +10916,37 @@ namespace OVIA.Desktop
             }
 
             return -1;
+        }
+
+        private void EnsurePartAndNumberColumnOrder()
+        {
+            if (grid == null || grid.Columns.Count == 0)
+            {
+                return;
+            }
+
+            int partColumnIndex = FindPartColumnIndex();
+            int numberColumnIndex = FindNumberColumnIndex();
+
+            if (partColumnIndex < 0 || numberColumnIndex < 0 || partColumnIndex == numberColumnIndex)
+            {
+                return;
+            }
+
+            DataGridViewColumn partColumn = grid.Columns[partColumnIndex];
+            DataGridViewColumn numberColumn = grid.Columns[numberColumnIndex];
+
+            // DisplayIndex만 조정하여 행 데이터/CSV 원본 인덱스와 CAD 추출 매핑은 건드리지 않습니다.
+            // 숨김 OVIA 메타데이터 열이 있더라도 사용자에게 보이는 첫 두 표준 열은 항상 부위/번호입니다.
+            if (partColumn.DisplayIndex != 0)
+            {
+                partColumn.DisplayIndex = 0;
+            }
+
+            if (numberColumn.DisplayIndex != 1)
+            {
+                numberColumn.DisplayIndex = 1;
+            }
         }
 
         private void EnsureShapeNumberColumnExists()
@@ -11172,9 +11213,10 @@ namespace OVIA.Desktop
             int i;
 
             // 형상번호/형번은 업체별 임의 코드이므로 OVIA 표준 컬럼에서 사용하지 않습니다.
-            // 사용자 화면은 번호, 부위, 철근규격, CAD 원본 철근형상을 중심으로 구성합니다.
+            // 사용자 화면은 부위, 번호, 철근규격, CAD 원본 철근형상을 중심으로 구성합니다.
             EnsurePartColumnExists();
             RemoveDeprecatedShapeNumberColumns();
+            EnsurePartAndNumberColumnOrder();
             EnsureSourceDrawingColumnPosition();
 
             grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
@@ -12162,16 +12204,27 @@ namespace OVIA.Desktop
         {
             using (StreamWriter writer = new StreamWriter(filePath, false, new UTF8Encoding(true)))
             {
+                List<DataGridViewColumn> orderedColumns = new List<DataGridViewColumn>();
                 int i;
 
                 for (i = 0; i < grid.Columns.Count; i++)
+                {
+                    orderedColumns.Add(grid.Columns[i]);
+                }
+
+                orderedColumns.Sort(delegate(DataGridViewColumn left, DataGridViewColumn right)
+                {
+                    return left.DisplayIndex.CompareTo(right.DisplayIndex);
+                });
+
+                for (i = 0; i < orderedColumns.Count; i++)
                 {
                     if (i > 0)
                     {
                         writer.Write(",");
                     }
 
-                    writer.Write(Csv(grid.Columns[i].HeaderText));
+                    writer.Write(Csv(orderedColumns[i].HeaderText));
                 }
 
                 writer.WriteLine();
@@ -12185,14 +12238,14 @@ namespace OVIA.Desktop
                         continue;
                     }
 
-                    for (i = 0; i < grid.Columns.Count; i++)
+                    for (i = 0; i < orderedColumns.Count; i++)
                     {
                         if (i > 0)
                         {
                             writer.Write(",");
                         }
 
-                        object value = grid.Rows[r].Cells[i].Value;
+                        object value = grid.Rows[r].Cells[orderedColumns[i].Index].Value;
 
                         if (value == null)
                         {
@@ -13497,8 +13550,8 @@ namespace OVIA.Desktop
 
             string[] order = new string[]
             {
-                "no",
                 "part",
+                "no",
                 "dia",
                 "shape",
                 "length_mm",
@@ -14071,13 +14124,13 @@ namespace OVIA.Desktop
         public static OviaBarListMappingStore CreateBuiltInDefault()
         {
             OviaBarListMappingStore store = new OviaBarListMappingStore();
-            store.Version = "built-in-2026.07.14.012";
-            store.UpdatedAt = "2026-07-14";
+            store.Version = "built-in-2026.08.12.013";
+            store.UpdatedAt = "2026-08-12";
 
             // OVIA BarList 고정 헤더 순서입니다.
             // 이 순서는 CAD 도면마다 헤더명이 달라도 화면/저장 기준으로 유지합니다.
-            store.AddColumn("no", "번호", "number_or_text", 100, "NO", "NO.", "No", "No.", "순번", "번호", "번", "부호", "부호번호", "기호", "ITEM");
             store.AddColumn("part", "부위", "text", 100, "부위", "위치", "층", "구간", "시공부위", "ZONE", "AREA", "LOCATION");
+            store.AddColumn("no", "번호", "number_or_text", 100, "NO", "NO.", "No", "No.", "순번", "번호", "번", "부호", "부호번호", "기호", "ITEM");
             store.AddColumn("dia", "철근규격", "rebar_diameter", 100, "규격", "철근규격", "DIA", "D", "직경", "BAR DIA", "SIZE", "강종");
             store.AddColumn("shape", "철근형상", "text_or_image", 100, "형상", "형태", "철근형상", "SHAPE", "BENT", "BAR SHAPE", "절곡형상");
             store.AddColumn("length_mm", "길이(mm)", "number", 100, "길이", "L", "LENGTH", "절단길이", "산출길이", "MM", "길이MM", "길이(MM)");
