@@ -62,6 +62,7 @@
     <Reference Include="System.Data" />
     <Reference Include="System.Deployment" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Web.Extensions" />
@@ -75,6 +76,7 @@
     <Compile Include="Models\RebarShapeInfo.cs" />
     <Compile Include="Models\CadShapeEditDocument.cs" />
     <Compile Include="Services\RebarShapeRepository.cs" />
+    <Compile Include="Services\BarListExcelExporter.cs" />
     <Compile Include="Services\RebarShapeRenderer.cs" />
     <Compile Include="Services\CadShapeRenderer.cs" />
     <Compile Include="Services\CadShapeDisplayNormalizer.cs" />
