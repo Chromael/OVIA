@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Windows.Forms;
 using OVIA.Desktop.Controls;
@@ -99,11 +99,12 @@ namespace OVIA.Desktop
             webViewHost.BorderStyle = BorderStyle.None;
             webViewHost.Margin = Padding.Empty;
             webViewHost.Padding = Padding.Empty;
-            webViewHost.Location = new Point(0, 98);
-            webViewHost.Size = new Size(Math.Max(1, parent.ClientSize.Width), Math.Max(1, parent.ClientSize.Height - 98));
+            webViewHost.Location = new Point(0, 48);
+            webViewHost.Size = new Size(Math.Max(1, parent.ClientSize.Width), Math.Max(1, parent.ClientSize.Height - 48));
             webViewHost.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             webViewHost.AutoResizeToDocumentHeight = false;
             webViewHost.ForwardMouseWheelToParentScroll = false;
+            webViewHost.EnableErpAutomaticLogin = true;
             webViewHost.InitialUrl = ResolveWebErpUrl();
             webViewHost.NavigationStateChanged += WebViewHost_NavigationStateChanged;
             parent.Controls.Add(webViewHost);
@@ -127,17 +128,16 @@ namespace OVIA.Desktop
 
         private string ResolveWebErpUrl()
         {
-            OviaSystemSettings settings = OviaSystemSettingsStore.Load();
+            string connectionUrl = OviaCompanyConnectionStore.GetErpConnectionUrl(companyId);
+
+            if (string.IsNullOrWhiteSpace(connectionUrl))
+            {
+                return "about:blank";
+            }
 
             if (string.Equals(workspaceMenuKey, "ERP", StringComparison.OrdinalIgnoreCase))
             {
-                return OviaSystemSettingsStore.BuildErpConnectionUrl(settings);
-            }
-
-            string moduleName = OviaMenuSettingsStore.GetErpModuleName(workspaceMenuKey);
-            if (OviaMenuSettingsStore.IsErpLoadEnabled(workspaceMenuKey) && moduleName != "")
-            {
-                return OviaSystemSettingsStore.BuildErpModuleUrl(settings, moduleName);
+                return connectionUrl;
             }
 
             if (!string.IsNullOrWhiteSpace(routePath))
@@ -151,7 +151,6 @@ namespace OVIA.Desktop
 
                 try
                 {
-                    string connectionUrl = OviaSystemSettingsStore.BuildErpConnectionUrl(settings);
                     if (!connectionUrl.EndsWith("/", StringComparison.Ordinal))
                     {
                         connectionUrl += "/";
@@ -166,7 +165,7 @@ namespace OVIA.Desktop
                 }
             }
 
-            return OviaSystemSettingsStore.BuildErpConnectionUrl(settings);
+            return connectionUrl;
         }
 
         private void WebViewHost_NavigationStateChanged(object sender, EventArgs e)
@@ -229,13 +228,13 @@ namespace OVIA.Desktop
 
             if (normalized == "SETTINGS")
             {
-                workspace.NavigateToWorkspaceInfoPage("SETTINGS", OviaMenuSettingsStore.GetWorkspacePath("SETTINGS", "메인  ›  환경설정"), OviaMenuSettingsStore.GetMenuName("SETTINGS", "환경설정"), "SETTINGS", "OVIA 시스템 동작과 양식/출력 환경 설정을 관리합니다.", "환경설정의 세부 설정은 드롭다운 메뉴에서 선택합니다.");
+                workspace.NavigateToWorkspaceInfoPage("SETTINGS", "메인  ›  환경설정", "환경설정", "SETTINGS", "OVIA 시스템 동작과 공통 환경 설정을 관리합니다.", "환경설정 아이콘에서 필요한 설정 화면을 선택합니다.");
                 return;
             }
 
             if (normalized == "ERP")
             {
-                workspace.NavigateToWorkspaceInfoPage("ERP", "메인  ›  ERP", "ERP", "ERP", "시스템 설정에 저장된 ERP 연결 주소를 기본 웹 브라우저로 엽니다.", "ERP는 2차 드롭다운 없이 1차 메뉴 클릭으로 바로 이동하는 단일 메뉴입니다.");
+                workspace.NavigateToErpModulePage("ERP");
             }
         }
 

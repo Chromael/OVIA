@@ -207,8 +207,13 @@ namespace OVIA.Desktop
 
         private static string BuildLogoUrl(string companyId, string extension)
         {
-            string baseDomain = OviaSystemSettingsStore.GetErpBaseDomain();
-            return baseDomain.TrimEnd('/') + "/erp/uploads/" + Uri.EscapeDataString(companyId) + "/company/logo" + extension;
+            string connectionUrl = OviaCompanyConnectionStore.GetErpConnectionUrl(companyId);
+            if (string.IsNullOrWhiteSpace(connectionUrl))
+            {
+                return "";
+            }
+
+            return connectionUrl.TrimEnd('/') + "/uploads/" + Uri.EscapeDataString(companyId) + "/company/logo" + extension;
         }
 
         private static string GetCompanyFolder(string companyId)

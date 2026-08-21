@@ -1882,7 +1882,11 @@ namespace OVIA.Desktop
         private static bool IsObsoleteMenuKey(string key)
         {
             return string.Equals(key, "ERP_SHORTCUT", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(key, "ERP_SYNC_STATUS", StringComparison.OrdinalIgnoreCase);
+                || string.Equals(key, "ERP_SYNC_STATUS", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(key, "IMPORT_TEMPLATE", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(key, "PRINT_TEMPLATE", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(key, "QR_BARCODE_TEMPLATE", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(key, "PRINTER_SETTINGS", StringComparison.OrdinalIgnoreCase);
         }
 
         public static void Save(List<OviaMenuSetting> settings)
@@ -1907,7 +1911,7 @@ namespace OVIA.Desktop
             for (i = 0; i < settings.Count; i++)
             {
                 OviaMenuSetting row = settings[i];
-                if (row == null)
+                if (row == null || IsObsoleteMenuKey(row.Key))
                 {
                     continue;
                 }
@@ -2153,10 +2157,6 @@ namespace OVIA.Desktop
                 case "SYSTEM_SETTINGS":
                 case "BARLIST_MAPPING":
                 case "REBAR_UNIT_WEIGHT":
-                case "IMPORT_TEMPLATE":
-                case "PRINT_TEMPLATE":
-                case "QR_BARCODE_TEMPLATE":
-                case "PRINTER_SETTINGS":
                 case "BACKUP_RESTORE":
                 case "MENU_MANAGER":
                 case "VERSION_INFO":
@@ -2396,10 +2396,6 @@ namespace OVIA.Desktop
             Add(list, "SYSTEM_SETTINGS", "시스템 설정", 2, true);
             Add(list, "BARLIST_MAPPING", "BarList 항목 매핑", 2, true);
             Add(list, "REBAR_UNIT_WEIGHT", "이형철근 단위중량표", 2, true);
-            Add(list, "IMPORT_TEMPLATE", "가져오기 양식 설정", 2, true);
-            Add(list, "PRINT_TEMPLATE", "출력 양식 설정", 2, true);
-            Add(list, "QR_BARCODE_TEMPLATE", "QR/바코드 양식 설정", 2, true);
-            Add(list, "PRINTER_SETTINGS", "프린터 설정", 2, true);
             Add(list, "BACKUP_RESTORE", "백업/복원", 2, true);
             Add(list, "MENU_MANAGER", "메뉴관리", 2, true);
             Add(list, "VERSION_INFO", "버전정보", 2, true);
@@ -2448,10 +2444,6 @@ namespace OVIA.Desktop
                 case "SYSTEM_SETTINGS": return "E713";
                 case "BARLIST_MAPPING": return "E8A5";
                 case "REBAR_UNIT_WEIGHT": return "E9D9";
-                case "IMPORT_TEMPLATE": return "E8B7";
-                case "PRINT_TEMPLATE": return "E749";
-                case "QR_BARCODE_TEMPLATE": return "E8B3";
-                case "PRINTER_SETTINGS": return "E749";
                 case "BACKUP_RESTORE": return "E74E";
                 case "MENU_MANAGER": return "E8A4";
                 case "VERSION_INFO": return "E946";

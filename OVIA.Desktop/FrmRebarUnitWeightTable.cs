@@ -121,7 +121,7 @@ namespace OVIA.Desktop
         {
             OviaWorkspaceHeader.AddTo(
                 parent,
-                OviaMenuSettingsStore.GetWorkspacePath("REBAR_UNIT_WEIGHT", "메인  ›  환경설정  ›  이형철근 단위중량표"),
+                "메인  ›  환경설정  ›  이형철근 단위중량표",
                 delegate { this.Close(); },
                 delegate { this.Close(); },
                 delegate { LoadRowsToGrid(OviaRebarUnitWeightStore.LoadRows()); },
@@ -225,7 +225,7 @@ namespace OVIA.Desktop
         private void BuildGrid(Control parent)
         {
             contentScrollPanel = new Panel();
-            contentScrollPanel.Location = new Point(0, 98);
+            contentScrollPanel.Location = new Point(0, 48);
             contentScrollPanel.Size = new Size(1280, 492);
             contentScrollPanel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             contentScrollPanel.BackColor = SurfaceColor;
@@ -1119,7 +1119,7 @@ namespace OVIA.Desktop
             selectedSpecStartRow = -1;
             MarkDirtyIfChanged();
             UpdateStatus("선택한 규격이 삭제되었습니다. 저장하기를 눌러 반영하세요.");
-            OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량 규격 삭제", OviaMenuSettingsStore.GetWorkspacePath("REBAR_UNIT_WEIGHT", "메인  ›  환경설정  ›  이형철근 단위중량표"));
+            OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량 규격 삭제", "메인  ›  환경설정  ›  이형철근 단위중량표");
         }
 
         private void Reset_Click(object sender, EventArgs e)
@@ -1189,7 +1189,7 @@ namespace OVIA.Desktop
                 cleanSignature = BuildGridSignature();
                 isDirty = false;
                 UpdateStatus("이형철근 단위중량표 저장 완료. 이후 BarList 계산 기준에 반영됩니다.");
-                OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량표 저장", OviaMenuSettingsStore.GetWorkspacePath("REBAR_UNIT_WEIGHT", "메인  ›  환경설정  ›  이형철근 단위중량표"));
+                OviaNotificationStore.AddWorkLog(companyId, userId, "이형철근 단위중량표 저장", "메인  ›  환경설정  ›  이형철근 단위중량표");
             }
             catch (Exception ex)
             {
@@ -1448,7 +1448,7 @@ namespace OVIA.Desktop
 
         public void ApplyWorkspaceLayout()
         {
-            const int menuBottom = 98;
+            const int headerBottom = 48;
             const int fixedAreaGap = 12;
             const int contentHorizontalInset = 25;
             const int fixedAreaMaxHeight = 50;
@@ -1459,13 +1459,13 @@ namespace OVIA.Desktop
             int width = Math.Max(1, layoutSize.Width);
             int height = Math.Max(1, layoutSize.Height);
             int buttonVisualHeight = btnAdd == null ? OviaFluentTheme.ButtonHeight : btnAdd.Height;
-            int fixedAreaTop = menuBottom + fixedAreaGap;
+            int fixedAreaTop = headerBottom + fixedAreaGap;
             int fixedAreaHeight = Math.Max(1, Math.Min(fixedAreaMaxHeight, buttonVisualHeight));
             int scrollTop = fixedAreaTop + fixedAreaHeight + fixedAreaGap;
 
             if (scrollTop >= height)
             {
-                scrollTop = Math.Max(menuBottom, height - 1);
+                scrollTop = Math.Max(headerBottom, height - 1);
             }
 
             int contentHeight = Math.Max(1, height - scrollTop);
@@ -1966,23 +1966,9 @@ namespace OVIA.Desktop
     {
         public static bool IsSuperAdminUser(string userId)
         {
-            string value = userId == null ? "" : userId.Trim().ToLowerInvariant();
-
-            if (value == "")
-            {
-                return false;
-            }
-
-            return value == "admin"
-                || value == "administrator"
-                || value == "root"
-                || value == "celmon"
-                || value == "oviaadmin"
-                || value == "system"
-                || value == "superadmin"
-                || value == "systemadmin"
-                || value == "최고관리자"
-                || value == "시스템관리자";
+            // 사용자 아이디 문자열만으로 최고관리자 권한을 부여하지 않습니다.
+            // 현재 ERP 인증 세션에서 member_level=99로 확정된 사용자만 시스템관리자입니다.
+            return OviaSessionSecurity.IsCurrentSystemAdministrator(string.Empty, userId);
         }
 
         public static Dictionary<string, double> LoadEnabledUnitWeights()

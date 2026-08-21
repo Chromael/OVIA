@@ -81,7 +81,7 @@ namespace OVIA.Desktop
         {
             OviaWorkspaceHeader.AddTo(
                 parent,
-                OviaMenuSettingsStore.GetWorkspacePath("VERSION_INFO", "메인  ›  환경설정  ›  버전정보"),
+                "메인  ›  환경설정  ›  버전정보",
                 delegate { NavigateBack(); },
                 delegate { NavigateUp(); },
                 delegate { if (ConfirmDiscardUnsavedChanges()) LoadRowsToGrid(); },
@@ -150,11 +150,11 @@ namespace OVIA.Desktop
             {
                 workspace.NavigateToWorkspaceInfoPage(
                     "SETTINGS",
-                    OviaMenuSettingsStore.GetWorkspacePath("SETTINGS", "메인  ›  환경설정"),
-                    OviaMenuSettingsStore.GetMenuName("SETTINGS", "환경설정"),
+                    "메인  ›  환경설정",
+                    "환경설정",
                     "SETTINGS",
-                    "환경설정 메뉴입니다.",
-                    "시스템 설정, 메뉴관리, 버전정보 등 OVIA 설치·운영 기준을 관리합니다."
+                    "환경설정 화면입니다.",
+                    "시스템 설정, 버전정보 등 OVIA 설치·운영 기준을 관리합니다."
                 );
             }
         }

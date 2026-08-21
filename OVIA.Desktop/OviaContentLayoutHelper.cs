@@ -6,7 +6,7 @@ namespace OVIA.Desktop
 {
     internal static class OviaContentLayoutHelper
     {
-        public const int WorkspaceMenuBottom = 98;
+        public const int WorkspaceMenuBottom = 48;
         public const int FixedAreaGap = 12;
         public const int FixedAreaMaxHeight = 50;
         public const int LeftMargin = 25;

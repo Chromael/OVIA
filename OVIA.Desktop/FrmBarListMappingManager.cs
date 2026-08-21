@@ -90,11 +90,11 @@ namespace OVIA.Desktop
             windowToolTip.ReshowDelay = 100;
             windowToolTip.ShowAlways = true;
 
-            BuildExplorerHeader(this, OviaMenuSettingsStore.GetWorkspacePath("BARLIST_MAPPING", "메인  ›  환경설정  ›  BarList 항목 매핑"));
+            BuildExplorerHeader(this, "메인  ›  환경설정  ›  BarList 항목 매핑");
             BuildCommandBar(this);
 
             contentScrollPanel = new Panel();
-            contentScrollPanel.Location = new Point(0, 98);
+            contentScrollPanel.Location = new Point(0, 48);
             contentScrollPanel.Size = new Size(1180, 430);
             contentScrollPanel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             contentScrollPanel.BackColor = SurfaceColor;
@@ -256,7 +256,7 @@ namespace OVIA.Desktop
 
         public void ApplyWorkspaceLayout()
         {
-            const int menuBottom = 98;
+            const int headerBottom = 48;
             const int fixedAreaGap = 12;
             const int contentHorizontalInset = 25;
             const int fixedAreaMaxHeight = 50;
@@ -267,13 +267,13 @@ namespace OVIA.Desktop
             int width = Math.Max(1, layoutSize.Width);
             int height = Math.Max(1, layoutSize.Height);
             int buttonVisualHeight = btnAddColumn == null ? OviaFluentTheme.ButtonHeight : btnAddColumn.Height;
-            int fixedAreaTop = menuBottom + fixedAreaGap;
+            int fixedAreaTop = headerBottom + fixedAreaGap;
             int fixedAreaHeight = Math.Max(1, Math.Min(fixedAreaMaxHeight, buttonVisualHeight));
             int scrollTop = fixedAreaTop + fixedAreaHeight + fixedAreaGap;
 
             if (scrollTop >= height)
             {
-                scrollTop = Math.Max(menuBottom, height - 1);
+                scrollTop = Math.Max(headerBottom, height - 1);
             }
 
             int contentHeight = Math.Max(1, height - scrollTop);
@@ -1193,7 +1193,7 @@ namespace OVIA.Desktop
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information
                 );
-                OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 항목 매핑 저장", OviaMenuSettingsStore.GetWorkspacePath("BARLIST_MAPPING", "메인  ›  환경설정  ›  BarList 항목 매핑"));
+                OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 항목 매핑 저장", "메인  ›  환경설정  ›  BarList 항목 매핑");
             }
             catch (Exception ex)
             {
@@ -1589,7 +1589,7 @@ namespace OVIA.Desktop
             UpdateSaveButtonVisibility();
             lblStatus.Text = "선택한 매핑 열 전체를 삭제했습니다. 저장하기 전까지 실제 설정에는 반영되지 않습니다.";
             lblStatus.ForeColor = TextSub;
-            OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 매핑 열 삭제", OviaMenuSettingsStore.GetWorkspacePath("BARLIST_MAPPING", "메인  ›  환경설정  ›  BarList 항목 매핑"));
+            OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 매핑 열 삭제", "메인  ›  환경설정  ›  BarList 항목 매핑");
         }
 
         private bool IsAliasColumn(int columnIndex)
@@ -1641,7 +1641,7 @@ namespace OVIA.Desktop
 
             lblStatus.Text = "선택한 매핑 셀의 내용을 삭제했습니다.";
             lblStatus.ForeColor = TextSub;
-            OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 매핑 셀 삭제", OviaMenuSettingsStore.GetWorkspacePath("BARLIST_MAPPING", "메인  ›  환경설정  ›  BarList 항목 매핑"));
+            OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 매핑 셀 삭제", "메인  ›  환경설정  ›  BarList 항목 매핑");
         }
 
         private void ShiftAliasCellsLeft(int rowIndex, int columnIndex)

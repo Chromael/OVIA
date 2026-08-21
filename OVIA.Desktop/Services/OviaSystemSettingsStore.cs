@@ -13,7 +13,6 @@ namespace OVIA.Desktop
         public string ErpBaseDomain = OviaSystemSettingsStore.DefaultErpBaseDomain;
         public string ErpConnectionPath = OviaSystemSettingsStore.DefaultErpConnectionPath;
         public string ErpAuthPath = OviaSystemSettingsStore.DefaultErpAuthPath;
-        public string ErpModuleBasePath = OviaSystemSettingsStore.DefaultErpModuleBasePath;
         public string CompanyLogoFilePath = "";
         public string CompanyLogoMode = "DEFAULT";
         public string VersionText = "";
@@ -28,9 +27,8 @@ namespace OVIA.Desktop
     {
         private const string SettingsFileName = "system_settings.dat";
         public const string DefaultErpBaseDomain = "https://dev03.celmon.com";
-        public const string DefaultErpConnectionPath = "/erp";
-        public const string DefaultErpAuthPath = "/auth";
-        public const string DefaultErpModuleBasePath = "/erpo/?mid=";
+        public const string DefaultErpConnectionPath = "erp";
+        public const string DefaultErpAuthPath = "auth";
         public const string DefaultBrandPrimaryHex = "#2563EB";
         public const string DefaultBrandHoverHex = "#1D4ED8";
         public const int DefaultLoadingDelayUnit = 35;
@@ -112,10 +110,6 @@ namespace OVIA.Desktop
                     {
                         settings.ErpAuthPath = value;
                     }
-                    else if (key.Equals("ErpModuleBasePath", StringComparison.OrdinalIgnoreCase))
-                    {
-                        settings.ErpModuleBasePath = value;
-                    }
                     else if (key.Equals("CompanyLogoFilePath", StringComparison.OrdinalIgnoreCase))
                     {
                         settings.CompanyLogoFilePath = value;
@@ -172,11 +166,8 @@ namespace OVIA.Desktop
 
             string[] lines = new string[]
             {
-                "ErpLoginUrl=" + Encode(settings.ErpLoginUrl),
-                "ErpBaseDomain=" + Encode(settings.ErpBaseDomain),
-                "ErpConnectionPath=" + Encode(settings.ErpConnectionPath),
-                "ErpAuthPath=" + Encode(settings.ErpAuthPath),
-                "ErpModuleBasePath=" + Encode(settings.ErpModuleBasePath),
+                // ERP 연결정보는 기업별 OviaCompanyConnectionStore(.ini)가 단일 기준입니다.
+                // 과거 system_settings.dat의 ERP 키는 읽기 호환만 유지하고 새 저장에서는 제거합니다.
                 "CompanyLogoFilePath=" + Encode(settings.CompanyLogoFilePath),
                 "CompanyLogoMode=" + Encode(settings.CompanyLogoMode),
                 "VersionText=" + Encode(NormalizeVersionText(settings.VersionText)),
@@ -232,11 +223,6 @@ namespace OVIA.Desktop
                 settings.ErpAuthPath = "";
             }
 
-            if (settings.ErpModuleBasePath == null)
-            {
-                settings.ErpModuleBasePath = "";
-            }
-
             if (settings.CompanyLogoFilePath == null)
             {
                 settings.CompanyLogoFilePath = "";
@@ -256,7 +242,6 @@ namespace OVIA.Desktop
             settings.ErpBaseDomain = NormalizeErpBaseDomain(settings.ErpBaseDomain);
             settings.ErpConnectionPath = NormalizeErpPath(settings.ErpConnectionPath, DefaultErpConnectionPath);
             settings.ErpAuthPath = NormalizeErpPath(settings.ErpAuthPath, DefaultErpAuthPath);
-            settings.ErpModuleBasePath = NormalizeErpPath(settings.ErpModuleBasePath, DefaultErpModuleBasePath);
             settings.ErpLoginUrl = BuildErpConnectionUrl(settings);
             settings.VersionText = NormalizeVersionText(settings.VersionText);
             settings.ListPageSize = NormalizeListPageSize(settings.ListPageSize.ToString());
@@ -278,7 +263,6 @@ namespace OVIA.Desktop
             clone.ErpBaseDomain = NormalizeErpBaseDomain(source.ErpBaseDomain);
             clone.ErpConnectionPath = NormalizeErpPath(source.ErpConnectionPath, DefaultErpConnectionPath);
             clone.ErpAuthPath = NormalizeErpPath(source.ErpAuthPath, DefaultErpAuthPath);
-            clone.ErpModuleBasePath = NormalizeErpPath(source.ErpModuleBasePath, DefaultErpModuleBasePath);
             clone.ErpLoginUrl = BuildErpConnectionUrl(clone);
             clone.CompanyLogoFilePath = source.CompanyLogoFilePath == null ? "" : source.CompanyLogoFilePath;
             clone.CompanyLogoMode = NormalizeCompanyLogoMode(source.CompanyLogoMode);
@@ -308,11 +292,6 @@ namespace OVIA.Desktop
             return BuildErpAuthUrl(Load());
         }
 
-        public static string GetErpModuleBaseUrl()
-        {
-            return BuildErpModuleBaseUrl(Load());
-        }
-
         public static string BuildErpConnectionUrl(OviaSystemSettings settings)
         {
             if (settings == null)
@@ -322,43 +301,14 @@ namespace OVIA.Desktop
 
             string domain = NormalizeErpBaseDomain(settings.ErpBaseDomain);
             string path = NormalizeErpPath(settings.ErpConnectionPath, DefaultErpConnectionPath);
-            return CombineErpUrl(domain, path);
+            return EnsureTrailingSlash(CombineErpUrl(domain, path));
         }
 
         public static string BuildErpAuthUrl(OviaSystemSettings settings)
         {
             string connectionUrl = BuildErpConnectionUrl(settings);
             string authPath = NormalizeErpPath(settings == null ? DefaultErpAuthPath : settings.ErpAuthPath, DefaultErpAuthPath);
-            return CombineErpUrl(connectionUrl, authPath);
-        }
-
-        public static string BuildErpModuleBaseUrl(OviaSystemSettings settings)
-        {
-            if (settings == null)
-            {
-                settings = new OviaSystemSettings();
-            }
-
-            string domain = NormalizeErpBaseDomain(settings.ErpBaseDomain);
-            string moduleBasePath = NormalizeErpPath(settings.ErpModuleBasePath, DefaultErpModuleBasePath);
-            return CombineErpUrl(domain, moduleBasePath);
-        }
-
-        public static string BuildErpModuleUrl(string moduleName)
-        {
-            return BuildErpModuleUrl(Load(), moduleName);
-        }
-
-        public static string BuildErpModuleUrl(OviaSystemSettings settings, string moduleName)
-        {
-            string baseUrl = BuildErpModuleBaseUrl(settings);
-            string module = NormalizeErpModuleName(moduleName);
-            if (module == "")
-            {
-                return baseUrl;
-            }
-
-            return baseUrl + Uri.EscapeDataString(module);
+            return EnsureTrailingSlash(CombineErpUrl(connectionUrl, authPath));
         }
 
         public static string NormalizeErpBaseDomain(string value)
@@ -402,53 +352,45 @@ namespace OVIA.Desktop
                 try
                 {
                     Uri uri = new Uri(text, UriKind.Absolute);
-                    text = uri.PathAndQuery;
+                    text = uri.AbsolutePath;
                 }
                 catch
                 {
                 }
             }
 
-            if (!text.StartsWith("/", StringComparison.Ordinal))
-            {
-                text = "/" + text;
-            }
-
+            text = text.Replace("\\", "/").Trim();
+            text = text.Trim('/');
             return text;
-        }
-
-        public static string NormalizeErpModuleName(string value)
-        {
-            string text = value == null ? "" : value.Trim();
-            if (text.StartsWith("/", StringComparison.Ordinal))
-            {
-                text = text.TrimStart('/');
-            }
-
-            return text.Replace("\r", " ").Replace("\n", " ").Trim();
         }
 
         public static string CombineErpUrl(string baseUrl, string path)
         {
             string left = NormalizeErpBaseDomain(baseUrl);
-            string right = path == null ? "" : path.Trim();
+            string right = NormalizeErpPath(path, "");
             if (right == "")
             {
                 return OviaWebViewHost.NormalizeUrl(left);
             }
 
-            if (right.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
-                || right.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            return OviaWebViewHost.NormalizeUrl(left + "/" + right);
+        }
+
+        private static string EnsureTrailingSlash(string value)
+        {
+            string url = OviaWebViewHost.NormalizeUrl(value);
+            Uri uri;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out uri))
             {
-                return OviaWebViewHost.NormalizeUrl(right);
+                return url;
             }
 
-            if (!right.StartsWith("/", StringComparison.Ordinal))
+            if (!string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
             {
-                right = "/" + right;
+                return url;
             }
 
-            return OviaWebViewHost.NormalizeUrl(left + right);
+            return url.EndsWith("/", StringComparison.Ordinal) ? url : url + "/";
         }
 
         public static string CopyLoadingAnimationImageToStore(string sourcePath)

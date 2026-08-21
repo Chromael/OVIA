@@ -6,7 +6,7 @@ using OVIA.Desktop.Controls;
 namespace OVIA.Desktop
 {
     /// <summary>
-    /// OVIA 새 메뉴 구조에서 아직 전용 화면이 구현되지 않은 메뉴를 안전하게 표시하는 공통 안내 화면입니다.
+    /// OVIA에서 아직 전용 화면이 구현되지 않은 설정 항목을 안전하게 표시하는 공통 안내 화면입니다.
     /// 기존 BarList/CAD 추출/공사관리 핵심 화면은 건드리지 않고, 신규 메뉴의 진입점만 먼저 구성합니다.
     /// </summary>
     public class FrmOviaMenuPage : Form, IOviaWorkspaceScreen, IOviaWorkspaceLayout
@@ -204,38 +204,16 @@ namespace OVIA.Desktop
 
             if (normalized == "SETTINGS")
             {
-                workspace.NavigateToWorkspaceInfoPage("SETTINGS", OviaMenuSettingsStore.GetWorkspacePath("SETTINGS", "메인  ›  환경설정"), OviaMenuSettingsStore.GetMenuName("SETTINGS", "환경설정"), "SETTINGS", "OVIA 시스템 동작과 양식/출력 환경 설정을 관리합니다.", "환경설정의 세부 설정은 드롭다운 메뉴에서 선택합니다.");
-                return;
-            }
-
-            if (normalized == "OPERATIONS")
-            {
-                workspace.NavigateToWorkspaceInfoPage("OPERATIONS", "메인  ›  운영현황", "운영현황", "OPERATIONS", "전체 업무 흐름을 통합 조회하고 모니터링합니다.", "운영현황의 세부 조회 화면은 드롭다운 메뉴에서 선택합니다.");
-                return;
-            }
-
-            if (normalized == "MATERIAL_STOCK")
-            {
-                workspace.NavigateToWorkspaceInfoPage("MATERIAL_STOCK", "메인  ›  자재/재고", "자재/재고", "MATERIAL", "입고와 재고 흐름을 관리합니다.", "자재/재고의 세부 화면은 드롭다운 메뉴에서 선택합니다.");
-                return;
-            }
-
-            if (normalized == "SHIPPING_INVOICE")
-            {
-                workspace.NavigateToWorkspaceInfoPage("SHIPPING_INVOICE", "메인  ›  출하/송장", "출하/송장", "SHIPPING", "송장, 납품, 출하 실적을 처리합니다.", "출하/송장의 세부 화면은 드롭다운 메뉴에서 선택합니다.");
+                workspace.NavigateToWorkspaceInfoPage("SETTINGS", "메인  ›  환경설정", "환경설정", "SETTINGS", "OVIA 시스템 동작과 공통 환경 설정을 관리합니다.", "환경설정 아이콘에서 필요한 설정 화면을 선택합니다.");
                 return;
             }
 
             if (normalized == "ERP")
             {
-                workspace.NavigateToWorkspaceInfoPage("ERP", "메인  ›  ERP", "ERP", "ERP", "시스템 설정에 저장된 ERP 연결 주소를 기본 웹 브라우저로 엽니다.", "ERP는 2차 드롭다운 없이 1차 메뉴 클릭으로 바로 이동하는 단일 메뉴입니다.");
+                workspace.NavigateToWorkspaceInfoPage("ERP", "메인  ›  ERP", "ERP", "ERP", "시스템 설정에 저장된 ERP 연결 주소를 OVIA 내부 WebView2로 엽니다.", "ERP 아이콘을 클릭하면 OVIA 내부 ERP WebView2 화면으로 바로 이동합니다.");
                 return;
             }
 
-            if (normalized == "MASTER_DATA")
-            {
-                workspace.NavigateToWorkspaceInfoPage("MASTER_DATA", "메인  ›  기준정보", "기준정보", "MASTER", "업무 기준 데이터를 관리합니다.", "기준정보의 세부 관리 화면은 드롭다운 메뉴에서 선택합니다.");
-            }
         }
 
         private void RefreshContent()

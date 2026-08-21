@@ -185,35 +185,11 @@ namespace OVIA.Desktop
             workspacePanel.Resize += WorkspacePanel_Resize;
             mainLayout.Controls.Add(workspacePanel, 0, 0);
 
-            ShowDashboard();
+            NavigateToProjectManager();
 
             this.ResumeLayout(false);
 
             StartAutoCadStatusTimer();
-        }
-
-        private void BuildTopMenu(TableLayoutPanel parent)
-        {
-            Panel top = new Panel();
-            top.Dock = DockStyle.Fill;
-            top.Margin = Padding.Empty;
-            top.Padding = Padding.Empty;
-            top.BackColor = Color.White;
-            top.Paint += CommandBar_Paint;
-            OviaWorkspaceCommandBar.Populate(top, "MAIN", companyId, userId);
-            parent.Controls.Add(top, 0, 0);
-        }
-
-        private OviaMenuButton AddMenu(Control parent, string text, int left, bool selected)
-        {
-            OviaMenuButton menu = new OviaMenuButton();
-            menu.Text = text;
-            menu.Location = new Point(left, 8);
-            menu.Size = new Size(text.Length > 7 ? 142 : 100, 34);
-            menu.Selected = selected;
-            parent.Controls.Add(menu);
-
-            return menu;
         }
 
         private void BuildDashboardMainContent(Control parent)
@@ -225,7 +201,7 @@ namespace OVIA.Desktop
 
             parent.Resize += delegate
             {
-                content.Size = new Size(Math.Max(1, parent.ClientSize.Width), Math.Max(1, parent.ClientSize.Height - 98));
+                content.Size = new Size(Math.Max(1, parent.ClientSize.Width), Math.Max(1, parent.ClientSize.Height - 48));
             };
         }
 
@@ -244,15 +220,15 @@ namespace OVIA.Desktop
 
             parent.Resize += delegate
             {
-                content.Size = new Size(Math.Max(1, parent.ClientSize.Width), Math.Max(1, parent.ClientSize.Height - 98));
+                content.Size = new Size(Math.Max(1, parent.ClientSize.Width), Math.Max(1, parent.ClientSize.Height - 48));
             };
         }
 
         private Panel CreateDashboardScrollContent(Control parent)
         {
             Panel content = new Panel();
-            content.Location = new Point(0, 98);
-            content.Size = new Size(Math.Max(1, parent.ClientSize.Width), Math.Max(1, parent.ClientSize.Height - 98));
+            content.Location = new Point(0, 48);
+            content.Size = new Size(Math.Max(1, parent.ClientSize.Width), Math.Max(1, parent.ClientSize.Height - 48));
             content.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             content.AutoScroll = true;
             content.BackColor = SurfaceColor;
@@ -263,8 +239,8 @@ namespace OVIA.Desktop
         private Panel CreateDashboardWebViewContent(Control parent)
         {
             Panel content = new Panel();
-            content.Location = new Point(0, 98);
-            content.Size = new Size(Math.Max(1, parent.ClientSize.Width), Math.Max(1, parent.ClientSize.Height - 98));
+            content.Location = new Point(0, 48);
+            content.Size = new Size(Math.Max(1, parent.ClientSize.Width), Math.Max(1, parent.ClientSize.Height - 48));
             content.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             content.AutoScroll = false;
             content.Margin = Padding.Empty;
@@ -1309,7 +1285,7 @@ namespace OVIA.Desktop
 
             OviaWorkspaceHeader.AddTo(
                 dashboard,
-                OviaMenuSettingsStore.GetWorkspacePath("LEGACY_MAIN_DASHBOARD", "메인  ›  환경설정  ›  기존 메인대시보드"),
+                "메인  ›  환경설정  ›  기존 메인대시보드",
                 delegate { ShowDashboard(); },
                 null,
                 delegate { ShowDashboard(); },
@@ -1524,7 +1500,7 @@ namespace OVIA.Desktop
 
         public void NavigateToMain()
         {
-            ShowDashboard();
+            NavigateToProjectManager();
         }
 
         public bool CanNavigateBackInWorkspace
@@ -1546,7 +1522,7 @@ namespace OVIA.Desktop
         {
             if (backHistory.Count == 0)
             {
-                ShowDashboard();
+                NavigateToProjectManager();
                 return true;
             }
 
@@ -1605,7 +1581,7 @@ namespace OVIA.Desktop
 
             if (parentEntry == null)
             {
-                ShowDashboard();
+                NavigateToProjectManager();
                 return true;
             }
 
@@ -1820,12 +1796,7 @@ namespace OVIA.Desktop
 
         private void OpenBarListMapping_Click(object sender, EventArgs e)
         {
-            if (!CanNavigateToMenu("BARLIST_MAPPING", "BarList 항목 매핑"))
-            {
-                return;
-            }
-
-            NavigateToBarListMapping();
+NavigateToBarListMapping();
         }
 
         private void OpenRebarUnitWeightTable_Click(object sender, EventArgs e)
@@ -1835,12 +1806,7 @@ namespace OVIA.Desktop
 
         public void NavigateToLegacyMainDashboard()
         {
-            if (!CanNavigateToMenu("LEGACY_MAIN_DASHBOARD", "기존 메인대시보드"))
-            {
-                return;
-            }
-
-            ShowLegacyDashboardWithHistory(new OviaMainWorkspaceNavigationEntry("LEGACY_MAIN_DASHBOARD"));
+ShowLegacyDashboardWithHistory(new OviaMainWorkspaceNavigationEntry("LEGACY_MAIN_DASHBOARD"));
         }
 
         public void NavigateToProjectManager()
@@ -1869,17 +1835,11 @@ namespace OVIA.Desktop
         public void NavigateToErpModulePage(string menuKey)
         {
             string key = string.IsNullOrWhiteSpace(menuKey) ? "ERP" : menuKey.Trim();
-            if (OviaMenuSettingsStore.IsBrowserOnlyErpShortcut(key))
-            {
-                OpenErpInDefaultBrowser(this);
-                return;
-            }
-
-            string title = OviaMenuSettingsStore.GetMenuName(key, key == "ERP" ? "ERP" : "ERP 모듈");
-            string selected = OviaMenuSettingsStore.GetSelectedMenuKey(key);
+            string title = key == "ERP" ? "ERP" : "ERP 모듈";
+            string selected = key == "ERP" ? "ERP" : string.Empty;
             string path = key == "ERP"
-                ? OviaMenuSettingsStore.GetWorkspacePath("ERP", "메인  ›  ERP")
-                : OviaMenuSettingsStore.GetWorkspacePath(key, "메인  ›  " + title);
+                ? "메인  ›  ERP"
+                : "메인  ›  " + title;
 
             ShowWorkspaceScreenWithHistory(new FrmOviaWebErpPage(
                 companyId,
@@ -1888,102 +1848,9 @@ namespace OVIA.Desktop
                 title,
                 path,
                 selected,
-                OviaMenuSettingsStore.GetErpModuleName(key),
+                string.Empty,
                 title + " ERP 모듈 페이지를 WebView2로 불러옵니다."
             ), "OVIA " + title, new OviaMainWorkspaceNavigationEntry("ERP_MODULE_PAGE", key));
-        }
-
-        private static void OpenErpInDefaultBrowser(Control source)
-        {
-            string erpUrl = OviaSystemSettingsStore.GetErpConnectionUrl();
-
-            if (string.IsNullOrWhiteSpace(erpUrl))
-            {
-                MessageBox.Show(
-                    "ERP 연결 주소가 아직 설정되지 않았습니다.\r\n\r\n환경설정 > 시스템 설정에서 ERP 연결 주소를 먼저 저장해주세요.",
-                    "OVIA ERP",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information
-                );
-
-                return;
-            }
-
-            string browserUrl = NormalizeErpBrowserUrl(erpUrl);
-
-            if (browserUrl == "")
-            {
-                MessageBox.Show(
-                    "ERP 연결 주소 형식이 올바르지 않습니다.\r\n\r\n환경설정 > 시스템 설정에서 ERP 연결 URL을 다시 확인해주세요.\r\n\r\n입력값: " + erpUrl,
-                    "OVIA ERP",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning
-                );
-
-                return;
-            }
-
-            try
-            {
-                ProcessStartInfo psi = new ProcessStartInfo();
-                psi.FileName = browserUrl;
-                psi.UseShellExecute = true;
-                Process.Start(psi);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    "ERP 연결 주소를 기본 웹 브라우저로 여는 중 오류가 발생했습니다.\r\n\r\n주소: " + browserUrl + "\r\n\r\n" + ex.Message,
-                    "OVIA ERP",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning
-                );
-            }
-        }
-
-        private static string NormalizeErpBrowserUrl(string value)
-        {
-            string url = value == null ? "" : value.Trim();
-
-            if (url == "")
-            {
-                return "";
-            }
-
-            Uri uri;
-            if (Uri.TryCreate(url, UriKind.Absolute, out uri))
-            {
-                if (uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
-                    uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-                {
-                    return uri.AbsoluteUri;
-                }
-
-                return "";
-            }
-
-            string lower = url.ToLowerInvariant();
-            string prefix = "https://";
-
-            if (lower.StartsWith("localhost") ||
-                lower.StartsWith("127.") ||
-                lower.StartsWith("10.") ||
-                lower.StartsWith("192.168.") ||
-                lower.Contains(":"))
-            {
-                prefix = "http://";
-            }
-
-            string candidate = prefix + url;
-
-            if (Uri.TryCreate(candidate, UriKind.Absolute, out uri) &&
-                (uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
-                 uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
-            {
-                return uri.AbsoluteUri;
-            }
-
-            return "";
         }
 
         public void NavigateToProjectBarListList(string projectNo, string projectName, string clientName, string projectStatus)
@@ -2026,40 +1893,16 @@ namespace OVIA.Desktop
 
         public void NavigateToSystemSettings()
         {
-            if (!CanNavigateToMenu("SYSTEM_SETTINGS", "시스템 설정"))
-            {
-                return;
-            }
-
-            ShowWorkspaceScreenWithHistory(
+ShowWorkspaceScreenWithHistory(
                 new FrmSystemSettings(companyId, userId),
                 "OVIA 시스템 설정",
                 new OviaMainWorkspaceNavigationEntry("SYSTEM_SETTINGS")
             );
         }
 
-        public void NavigateToMenuManager()
-        {
-            if (!CanNavigateToMenu("MENU_MANAGER", "메뉴관리"))
-            {
-                return;
-            }
-
-            ShowWorkspaceScreenWithHistory(
-                new FrmMenuManager(companyId, userId),
-                "OVIA 메뉴관리",
-                new OviaMainWorkspaceNavigationEntry("MENU_MANAGER")
-            );
-        }
-
         public void NavigateToVersionInfo()
         {
-            if (!CanNavigateToMenu("VERSION_INFO", "버전정보"))
-            {
-                return;
-            }
-
-            ShowWorkspaceScreenWithHistory(
+ShowWorkspaceScreenWithHistory(
                 new FrmVersionInfo(companyId, userId),
                 "OVIA 버전정보",
                 new OviaMainWorkspaceNavigationEntry("VERSION_INFO")
@@ -2077,7 +1920,7 @@ namespace OVIA.Desktop
 
         public void NavigateToWorkspaceInfoPage(string menuKey, string pathText, string title, string selectedMenu, string descriptionText, string bodyText)
         {
-            string displayTitle = string.IsNullOrWhiteSpace(title) ? "메뉴" : title.Trim();
+            string displayTitle = string.IsNullOrWhiteSpace(title) ? "화면" : title.Trim();
             ShowWorkspaceScreenWithHistory(
                 new FrmOviaMenuPage(companyId, userId, menuKey, displayTitle, pathText, selectedMenu, descriptionText, bodyText),
                 "OVIA " + displayTitle,
@@ -2121,9 +1964,6 @@ namespace OVIA.Desktop
                 case "SYSTEM_SETTINGS":
                     NavigateToSystemSettings();
                     return true;
-                case "MENU_MANAGER":
-                    NavigateToMenuManager();
-                    return true;
                 case "VERSION_INFO":
                     NavigateToVersionInfo();
                     return true;
@@ -2158,7 +1998,6 @@ namespace OVIA.Desktop
                 case "LEGACY_MAIN_DASHBOARD":
                 case "BARLIST_MAPPING":
                 case "REBAR_UNIT_WEIGHT":
-                case "MENU_MANAGER":
                 case "VERSION_INFO":
                     return CreateEnvironmentSettingsParentEntry();
                 case "SYSTEM_SETTINGS":
@@ -2174,19 +2013,7 @@ namespace OVIA.Desktop
 
         private OviaMainWorkspaceNavigationEntry ResolveErpModuleParentEntry(string menuKey)
         {
-            string key = menuKey == null ? string.Empty : menuKey.Trim().ToUpperInvariant();
-            if (key == "" || key == "ERP")
-            {
-                return null;
-            }
-
-            string selectedMenu = OviaMenuSettingsStore.GetSelectedMenuKey(key).Trim().ToUpperInvariant();
-            if (selectedMenu == "PROJECT") return new OviaMainWorkspaceNavigationEntry("PROJECT_MANAGER");
-            if (selectedMenu == "SETTINGS") return CreateEnvironmentSettingsParentEntry();
-            if (selectedMenu == "OPERATIONS") return new OviaMainWorkspaceNavigationEntry("WORKSPACE_INFO", "OPERATIONS", OviaMenuSettingsStore.GetWorkspacePath("OPERATIONS", "메인  ›  운영현황"), OviaMenuSettingsStore.GetMenuName("OPERATIONS", "운영현황"), "OPERATIONS", "운영현황 메뉴입니다.", "운영현황 하위 메뉴에서 업무 데이터를 조회합니다.");
-            if (selectedMenu == "MATERIAL") return new OviaMainWorkspaceNavigationEntry("WORKSPACE_INFO", "MATERIAL_STOCK", OviaMenuSettingsStore.GetWorkspacePath("MATERIAL_STOCK", "메인  ›  자재/재고"), OviaMenuSettingsStore.GetMenuName("MATERIAL_STOCK", "자재/재고"), "MATERIAL", "자재/재고 메뉴입니다.", "자재/재고 하위 메뉴에서 데이터를 조회합니다.");
-            if (selectedMenu == "SHIPPING") return new OviaMainWorkspaceNavigationEntry("WORKSPACE_INFO", "SHIPPING_INVOICE", OviaMenuSettingsStore.GetWorkspacePath("SHIPPING_INVOICE", "메인  ›  출하/송장"), OviaMenuSettingsStore.GetMenuName("SHIPPING_INVOICE", "출하/송장"), "SHIPPING", "출하/송장 메뉴입니다.", "출하/송장 하위 메뉴에서 데이터를 조회합니다.");
-            if (selectedMenu == "MASTER") return new OviaMainWorkspaceNavigationEntry("WORKSPACE_INFO", "MASTER_DATA", OviaMenuSettingsStore.GetWorkspacePath("MASTER_DATA", "메인  ›  기준정보"), OviaMenuSettingsStore.GetMenuName("MASTER_DATA", "기준정보"), "MASTER", "기준정보 메뉴입니다.", "기준정보 하위 메뉴에서 데이터를 관리합니다.");
+            // ERP는 공통 경로 아이콘에서 여는 독립 WebView 화면으로 동작합니다.
             return null;
         }
 
@@ -2209,8 +2036,8 @@ namespace OVIA.Desktop
 
             string parentTitle = segments[segments.Length - 2];
             string parentPath = JoinWorkspacePath(segments, segments.Length - 1);
-            string parentKey = GetTopMenuKeyBySelectedMenu(selectedMenu);
-            string parentDescription = parentTitle + " 메뉴의 하위 업무를 선택할 수 있는 안내 화면입니다.";
+            string parentKey = GetWorkspaceKeyBySelectedArea(selectedMenu);
+            string parentDescription = parentTitle + " 화면의 상위 경로입니다.";
             return new OviaMainWorkspaceNavigationEntry("WORKSPACE_INFO", parentKey, parentPath, parentTitle, selectedMenu, parentDescription, parentDescription);
         }
 
@@ -2219,11 +2046,11 @@ namespace OVIA.Desktop
             return new OviaMainWorkspaceNavigationEntry(
                 "WORKSPACE_INFO",
                 "SETTINGS",
-                OviaMenuSettingsStore.GetWorkspacePath("SETTINGS", "메인  ›  환경설정"),
-                OviaMenuSettingsStore.GetMenuName("SETTINGS", "환경설정"),
+                "메인  ›  환경설정",
+                "환경설정",
                 "SETTINGS",
-                "OVIA 전체 환경값, 메뉴, 권한, 출력 기준을 관리하는 상위 메뉴입니다.",
-                "환경설정 하위 메뉴에서 필요한 설정 화면을 선택해 작업합니다."
+                "OVIA 전체 환경값과 시스템 동작 기준을 관리하는 설정 화면입니다.",
+                "환경설정 아이콘에서 필요한 설정 화면을 선택해 작업합니다."
             );
         }
 
@@ -2235,20 +2062,16 @@ namespace OVIA.Desktop
                 "메인  ›  환경설정",
                 "환경설정",
                 "SETTINGS",
-                "OVIA 전체 환경값을 관리하는 상위 설정 메뉴입니다.",
-                "환경설정 하위 메뉴에서 ERP 연결, 회사 로고, 페이지 로딩 설정 같은 전체 적용값을 관리합니다."
+                "OVIA 전체 환경값을 관리하는 환경설정 화면입니다.",
+                "환경설정 아이콘에서 ERP 연결, 회사 로고, 페이지 로딩 설정 같은 전체 적용값을 관리합니다."
             );
         }
 
-        private string GetTopMenuKeyBySelectedMenu(string selectedMenu)
+        private string GetWorkspaceKeyBySelectedArea(string selectedMenu)
         {
             switch (selectedMenu)
             {
                 case "PROJECT": return "PROJECT_MANAGER";
-                case "OPERATIONS": return "OPERATIONS";
-                case "MATERIAL": return "MATERIAL_STOCK";
-                case "SHIPPING": return "SHIPPING_INVOICE";
-                case "MASTER": return "MASTER_DATA";
                 case "SETTINGS": return "SETTINGS";
                 case "ERP": return "ERP";
                 default: return "MAIN";
@@ -2364,7 +2187,7 @@ namespace OVIA.Desktop
                     if (currentScreen == nextScreen)
                     {
                         currentScreen = null;
-                        ShowDashboard();
+                        NavigateToProjectManager();
                     }
                 };
 
@@ -2474,22 +2297,6 @@ namespace OVIA.Desktop
             catch
             {
             }
-        }
-
-        private bool CanNavigateToMenu(string menuKey, string menuName)
-        {
-            if (OviaMenuSettingsStore.CanAccess(menuKey, companyId, userId))
-            {
-                return true;
-            }
-
-            MessageBox.Show(
-                menuName + " 메뉴에 접근할 수 없습니다.\r\n\r\n메뉴관리의 사용 여부와 사용자 권한 레벨을 확인해주세요.",
-                "OVIA 권한 확인",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning
-            );
-            return false;
         }
 
         private bool IsSystemAdminUser()
@@ -2705,6 +2512,11 @@ namespace OVIA.Desktop
                 autoCadStatusTimer.Stop();
                 autoCadStatusTimer.Dispose();
                 autoCadStatusTimer = null;
+            }
+
+            if (IsLogoutRequested)
+            {
+                OviaErpAuthenticationService.ClearSession();
             }
 
             base.OnFormClosed(e);

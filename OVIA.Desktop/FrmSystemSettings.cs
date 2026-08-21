@@ -28,16 +28,14 @@ namespace OVIA.Desktop
         private Label titleLabel;
         private Label descLabel;
         private Label lblStatus;
+        private OviaSystemInputBox txtErpCompanyId;
         private OviaSystemInputBox txtErpBaseDomain;
         private OviaSystemInputBox txtErpConnectionPath;
         private OviaSystemInputBox txtErpAuthPath;
-        private OviaSystemInputBox txtErpModuleBasePath;
         private Label lblErpConnectionPreview;
         private Label lblErpAuthPreview;
-        private Label lblErpModuleBasePreview;
         private Button btnDefaultErpConnectionPath;
         private Button btnDefaultErpAuthPath;
-        private Button btnDefaultErpModuleBasePath;
         private OviaSystemInputBox txtLogoPath;
         private OviaSystemInputBox txtLoadingImagePath;
         private OviaSystemInputBox txtLoadingDelayUnit;
@@ -122,7 +120,7 @@ namespace OVIA.Desktop
         {
             OviaWorkspaceHeader.AddTo(
                 parent,
-                OviaMenuSettingsStore.GetWorkspacePath("SYSTEM_SETTINGS", "메인  ›  환경설정  ›  시스템 설정"),
+                "메인  ›  환경설정  ›  시스템 설정",
                 delegate { this.Close(); },
                 delegate { this.Close(); },
                 delegate { LoadSettingsToUi(); },
@@ -216,7 +214,7 @@ namespace OVIA.Desktop
         private void BuildContent(Control parent)
         {
             contentPanel = new Panel();
-            contentPanel.Location = new Point(0, 98);
+            contentPanel.Location = new Point(0, 48);
             contentPanel.Size = new Size(1180, 472);
             contentPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             contentPanel.BackColor = SurfaceColor;
@@ -233,7 +231,7 @@ namespace OVIA.Desktop
             BuildLoadingSection(contentPanel);
             BuildListSection(contentPanel);
             BuildColorSection(contentPanel);
-            contentPanel.AutoScrollMinSize = new Size(0, 1160);
+            contentPanel.AutoScrollMinSize = new Size(0, 1104);
         }
 
         private void BuildErpSection(Control parent)
@@ -247,68 +245,59 @@ namespace OVIA.Desktop
 
             AddRequiredTitle(erpSection, "ERP 연결", 0, 0);
 
-            Label domainLabel = CreateErpLabel("ERP 기본 도메인", 0, 40);
+            Label companyLabel = CreateErpLabel("기업 아이디", 0, 40);
+            erpSection.Controls.Add(companyLabel);
+
+            txtErpCompanyId = new OviaSystemInputBox();
+            txtErpCompanyId.Location = new Point(150, 40);
+            txtErpCompanyId.Size = new Size(420, OviaFluentTheme.ButtonHeight);
+            txtErpCompanyId.Placeholder = "현재 로그인 기업 아이디";
+            txtErpCompanyId.ReadOnly = true;
+            erpSection.Controls.Add(txtErpCompanyId);
+
+            Label domainLabel = CreateErpLabel("기본 도메인", 0, 96);
             erpSection.Controls.Add(domainLabel);
 
             txtErpBaseDomain = new OviaSystemInputBox();
-            txtErpBaseDomain.Location = new Point(150, 40);
+            txtErpBaseDomain.Location = new Point(150, 96);
             txtErpBaseDomain.Size = new Size(420, OviaFluentTheme.ButtonHeight);
             txtErpBaseDomain.Placeholder = OviaSystemSettingsStore.DefaultErpBaseDomain;
             txtErpBaseDomain.ValueChanged += ErpInput_ValueChanged;
             erpSection.Controls.Add(txtErpBaseDomain);
 
-            Label connectionLabel = CreateErpLabel("ERP 연결 URL", 0, 96);
+            Label connectionLabel = CreateErpLabel("ERP 연결 경로", 0, 152);
             erpSection.Controls.Add(connectionLabel);
 
-            lblErpConnectionPreview = CreateErpPreviewLabel(150, 96);
+            lblErpConnectionPreview = CreateErpPreviewLabel(150, 152);
             erpSection.Controls.Add(lblErpConnectionPreview);
 
             txtErpConnectionPath = new OviaSystemInputBox();
-            txtErpConnectionPath.Location = new Point(420, 96);
+            txtErpConnectionPath.Location = new Point(420, 152);
             txtErpConnectionPath.Size = new Size(220, OviaFluentTheme.ButtonHeight);
             txtErpConnectionPath.Placeholder = OviaSystemSettingsStore.DefaultErpConnectionPath;
             txtErpConnectionPath.ValueChanged += ErpInput_ValueChanged;
             erpSection.Controls.Add(txtErpConnectionPath);
 
-            btnDefaultErpConnectionPath = CreateNormalButton("기본값", 660, 96, 96, OviaFluentTheme.ButtonHeight);
+            btnDefaultErpConnectionPath = CreateNormalButton("기본값", 660, 152, 96, OviaFluentTheme.ButtonHeight);
             btnDefaultErpConnectionPath.Click += DefaultErpConnectionPath_Click;
             erpSection.Controls.Add(btnDefaultErpConnectionPath);
 
-            Label authLabel = CreateErpLabel("ERP 사용자 인증", 0, 152);
+            Label authLabel = CreateErpLabel("ERP 사용자 인증 경로", 0, 208);
             erpSection.Controls.Add(authLabel);
 
-            lblErpAuthPreview = CreateErpPreviewLabel(150, 152);
+            lblErpAuthPreview = CreateErpPreviewLabel(150, 208);
             erpSection.Controls.Add(lblErpAuthPreview);
 
             txtErpAuthPath = new OviaSystemInputBox();
-            txtErpAuthPath.Location = new Point(520, 152);
+            txtErpAuthPath.Location = new Point(520, 208);
             txtErpAuthPath.Size = new Size(180, OviaFluentTheme.ButtonHeight);
             txtErpAuthPath.Placeholder = OviaSystemSettingsStore.DefaultErpAuthPath;
             txtErpAuthPath.ValueChanged += ErpInput_ValueChanged;
             erpSection.Controls.Add(txtErpAuthPath);
 
-            btnDefaultErpAuthPath = CreateNormalButton("기본값", 740, 152, 96, OviaFluentTheme.ButtonHeight);
+            btnDefaultErpAuthPath = CreateNormalButton("기본값", 740, 208, 96, OviaFluentTheme.ButtonHeight);
             btnDefaultErpAuthPath.Click += DefaultErpAuthPath_Click;
             erpSection.Controls.Add(btnDefaultErpAuthPath);
-
-            Label moduleLabel = CreateErpLabel("ERP 모듈 기본 URL", 0, 208);
-            erpSection.Controls.Add(moduleLabel);
-
-            lblErpModuleBasePreview = CreateErpPreviewLabel(150, 208);
-            erpSection.Controls.Add(lblErpModuleBasePreview);
-
-            txtErpModuleBasePath = new OviaSystemInputBox();
-            txtErpModuleBasePath.Location = new Point(420, 208);
-            txtErpModuleBasePath.Size = new Size(260, OviaFluentTheme.ButtonHeight);
-            txtErpModuleBasePath.Placeholder = OviaSystemSettingsStore.DefaultErpModuleBasePath;
-            txtErpModuleBasePath.ValueChanged += ErpInput_ValueChanged;
-            erpSection.Controls.Add(txtErpModuleBasePath);
-
-            btnDefaultErpModuleBasePath = CreateNormalButton("기본값", 700, 208, 96, OviaFluentTheme.ButtonHeight);
-            btnDefaultErpModuleBasePath.Click += DefaultErpModuleBasePath_Click;
-            erpSection.Controls.Add(btnDefaultErpModuleBasePath);
-
-
 
             FinalizeSystemSection(erpSection);
         }
@@ -977,7 +966,7 @@ namespace OVIA.Desktop
 
         public void ApplyWorkspaceLayout()
         {
-            const int menuBottom = 98;
+            const int headerBottom = 48;
             const int fixedAreaGap = 12;
             const int innerLeft = 25;
             const int innerRight = 25;
@@ -989,13 +978,13 @@ namespace OVIA.Desktop
             int contentWidth = Math.Max(1, layoutSize.Width);
             int contentHeight = Math.Max(1, layoutSize.Height);
             int buttonVisualHeight = btnSave == null ? OviaFluentTheme.ButtonHeight : btnSave.Height;
-            int fixedAreaTop = menuBottom + fixedAreaGap;
+            int fixedAreaTop = headerBottom + fixedAreaGap;
             int fixedAreaHeight = Math.Max(1, Math.Min(fixedAreaMaxHeight, buttonVisualHeight));
             int scrollTop = fixedAreaTop + fixedAreaHeight + fixedAreaGap;
 
             if (scrollTop >= contentHeight)
             {
-                scrollTop = Math.Max(menuBottom, contentHeight - 1);
+                scrollTop = Math.Max(headerBottom, contentHeight - 1);
             }
 
             int scrollHeight = Math.Max(1, contentHeight - scrollTop);
@@ -1078,7 +1067,7 @@ namespace OVIA.Desktop
 
             if (contentPanel != null)
             {
-                int requiredHeight = 1160;
+                int requiredHeight = 1104;
                 if (colorSection != null)
                 {
                     requiredHeight = Math.Max(requiredHeight, colorSection.Bottom + 12);
@@ -1090,6 +1079,10 @@ namespace OVIA.Desktop
                 contentPanel.ResumeLayout(false);
             }
 
+            if (txtErpCompanyId != null)
+            {
+                txtErpCompanyId.Width = Math.Max(260, Math.Min(520, sectionInnerWidth - 168));
+            }
             if (txtErpBaseDomain != null)
             {
                 txtErpBaseDomain.Width = Math.Max(260, Math.Min(520, sectionInnerWidth - 168));
@@ -1118,15 +1111,6 @@ namespace OVIA.Desktop
             {
                 btnDefaultErpAuthPath.Left = txtErpAuthPath.Right + erpDefaultButtonGap;
             }
-            if (txtErpModuleBasePath != null)
-            {
-                txtErpModuleBasePath.Left = erpInputLeft;
-                txtErpModuleBasePath.Width = Math.Max(220, sectionWidth - erpInputLeft - erpDefaultButtonWidth - erpDefaultButtonGap - SectionCardPadding);
-            }
-            if (btnDefaultErpModuleBasePath != null && txtErpModuleBasePath != null)
-            {
-                btnDefaultErpModuleBasePath.Left = txtErpModuleBasePath.Right + erpDefaultButtonGap;
-            }
             if (lblErpConnectionPreview != null)
             {
                 lblErpConnectionPreview.Width = Math.Max(180, erpInputLeft - lblErpConnectionPreview.Left - 8);
@@ -1134,10 +1118,6 @@ namespace OVIA.Desktop
             if (lblErpAuthPreview != null)
             {
                 lblErpAuthPreview.Width = Math.Max(180, erpInputLeft - lblErpAuthPreview.Left - 8);
-            }
-            if (lblErpModuleBasePreview != null)
-            {
-                lblErpModuleBasePreview.Width = Math.Max(180, erpInputLeft - lblErpModuleBasePreview.Left - 8);
             }
             UpdateErpPreviewLabels();
 
@@ -1205,21 +1185,24 @@ namespace OVIA.Desktop
             try
             {
                 OviaSystemSettings settings = OviaSystemSettingsStore.Load();
+                OviaCompanyConnectionProfile connectionProfile;
+                bool hasConnectionProfile = OviaCompanyConnectionStore.TryLoad(companyId, out connectionProfile);
+
+                if (txtErpCompanyId != null)
+                {
+                    txtErpCompanyId.Value = companyId;
+                }
                 if (txtErpBaseDomain != null)
                 {
-                    txtErpBaseDomain.Value = OviaSystemSettingsStore.NormalizeErpBaseDomain(settings.ErpBaseDomain);
+                    txtErpBaseDomain.Value = hasConnectionProfile ? connectionProfile.ErpBaseDomain : "";
                 }
                 if (txtErpConnectionPath != null)
                 {
-                    txtErpConnectionPath.Value = OviaSystemSettingsStore.NormalizeErpPath(settings.ErpConnectionPath, OviaSystemSettingsStore.DefaultErpConnectionPath);
+                    txtErpConnectionPath.Value = hasConnectionProfile ? connectionProfile.ErpConnectionPath : "";
                 }
                 if (txtErpAuthPath != null)
                 {
-                    txtErpAuthPath.Value = OviaSystemSettingsStore.NormalizeErpPath(settings.ErpAuthPath, OviaSystemSettingsStore.DefaultErpAuthPath);
-                }
-                if (txtErpModuleBasePath != null)
-                {
-                    txtErpModuleBasePath.Value = OviaSystemSettingsStore.NormalizeErpPath(settings.ErpModuleBasePath, OviaSystemSettingsStore.DefaultErpModuleBasePath);
+                    txtErpAuthPath.Value = hasConnectionProfile ? connectionProfile.ErpAuthPath : "";
                 }
                 UpdateErpPreviewLabels();
                 if (txtListPageSize != null)
@@ -1302,6 +1285,10 @@ namespace OVIA.Desktop
 
         private void SetReadOnlyMode()
         {
+            if (txtErpCompanyId != null)
+            {
+                txtErpCompanyId.ReadOnly = true;
+            }
             if (txtErpBaseDomain != null)
             {
                 txtErpBaseDomain.ReadOnly = true;
@@ -1314,10 +1301,6 @@ namespace OVIA.Desktop
             {
                 txtErpAuthPath.ReadOnly = true;
             }
-            if (txtErpModuleBasePath != null)
-            {
-                txtErpModuleBasePath.ReadOnly = true;
-            }
 
             if (btnDefaultErpConnectionPath != null)
             {
@@ -1326,10 +1309,6 @@ namespace OVIA.Desktop
             if (btnDefaultErpAuthPath != null)
             {
                 btnDefaultErpAuthPath.Enabled = false;
-            }
-            if (btnDefaultErpModuleBasePath != null)
-            {
-                btnDefaultErpModuleBasePath.Enabled = false;
             }
 
             if (txtLogoPath != null)
@@ -1558,7 +1537,6 @@ namespace OVIA.Desktop
             string erpBaseDomain = txtErpBaseDomain == null ? OviaSystemSettingsStore.DefaultErpBaseDomain : txtErpBaseDomain.Value.Trim();
             string erpConnectionPath = txtErpConnectionPath == null ? OviaSystemSettingsStore.DefaultErpConnectionPath : txtErpConnectionPath.Value.Trim();
             string erpAuthPath = txtErpAuthPath == null ? OviaSystemSettingsStore.DefaultErpAuthPath : txtErpAuthPath.Value.Trim();
-            string erpModuleBasePath = txtErpModuleBasePath == null ? OviaSystemSettingsStore.DefaultErpModuleBasePath : txtErpModuleBasePath.Value.Trim();
             string listPageSizeText = txtListPageSize == null ? "100" : txtListPageSize.Value.Trim();
             string brandPrimaryHex;
             string brandHoverHex;
@@ -1634,15 +1612,25 @@ namespace OVIA.Desktop
                 return;
             }
 
+            if (erpBaseDomain == "" || erpConnectionPath == "" || erpAuthPath == "")
+            {
+                MessageBox.Show(
+                    "현재 기업의 기본 도메인, ERP 연결 경로, ERP 사용자 인증 경로를 모두 입력해 주세요.",
+                    "OVIA 시스템 설정",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                return;
+            }
+
             erpBaseDomain = OviaSystemSettingsStore.NormalizeErpBaseDomain(erpBaseDomain);
-            erpConnectionPath = OviaSystemSettingsStore.NormalizeErpPath(erpConnectionPath, OviaSystemSettingsStore.DefaultErpConnectionPath);
-            erpAuthPath = OviaSystemSettingsStore.NormalizeErpPath(erpAuthPath, OviaSystemSettingsStore.DefaultErpAuthPath);
-            erpModuleBasePath = OviaSystemSettingsStore.NormalizeErpPath(erpModuleBasePath, OviaSystemSettingsStore.DefaultErpModuleBasePath);
+            erpConnectionPath = OviaSystemSettingsStore.NormalizeErpPath(erpConnectionPath, "");
+            erpAuthPath = OviaSystemSettingsStore.NormalizeErpPath(erpAuthPath, "");
 
             if (!IsValidWebUrl(erpBaseDomain))
             {
                 MessageBox.Show(
-                    "ERP 기본 도메인은 http:// 또는 https:// 로 시작하는 웹 주소로 입력해 주세요.",
+                    "기본 도메인은 http:// 또는 https:// 로 시작하는 웹 주소로 입력해 주세요.",
                     "OVIA 시스템 설정",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning
@@ -1654,12 +1642,20 @@ namespace OVIA.Desktop
 
             try
             {
+                OviaCompanyConnectionProfile connectionProfile = new OviaCompanyConnectionProfile();
+                connectionProfile.CompanyId = companyId;
+                connectionProfile.ErpBaseDomain = erpBaseDomain;
+                connectionProfile.ErpConnectionPath = erpConnectionPath;
+                connectionProfile.ErpAuthPath = erpAuthPath;
+                OviaCompanyConnectionStore.Save(connectionProfile);
+
+                OviaCompanyConnectionProfile savedConnectionProfile;
+                if (!OviaCompanyConnectionStore.TryLoad(companyId, out savedConnectionProfile))
+                {
+                    throw new InvalidOperationException("기업별 ERP 연결정보를 저장한 뒤 다시 읽을 수 없습니다.");
+                }
+
                 OviaSystemSettings settings = OviaSystemSettingsStore.Load();
-                settings.ErpBaseDomain = erpBaseDomain;
-                settings.ErpConnectionPath = erpConnectionPath;
-                settings.ErpAuthPath = erpAuthPath;
-                settings.ErpModuleBasePath = erpModuleBasePath;
-                settings.ErpLoginUrl = OviaSystemSettingsStore.BuildErpConnectionUrl(settings);
                 settings.ListPageSize = listPageSize;
                 settings.BrandPrimaryHex = brandPrimaryHex;
                 settings.BrandHoverHex = brandHoverHex;
@@ -1699,21 +1695,21 @@ namespace OVIA.Desktop
 
                 OviaSystemSettingsStore.Save(settings);
 
+                if (txtErpCompanyId != null)
+                {
+                    txtErpCompanyId.Value = savedConnectionProfile.CompanyId;
+                }
                 if (txtErpBaseDomain != null)
                 {
-                    txtErpBaseDomain.Value = settings.ErpBaseDomain;
+                    txtErpBaseDomain.Value = savedConnectionProfile.ErpBaseDomain;
                 }
                 if (txtErpConnectionPath != null)
                 {
-                    txtErpConnectionPath.Value = settings.ErpConnectionPath;
+                    txtErpConnectionPath.Value = savedConnectionProfile.ErpConnectionPath;
                 }
                 if (txtErpAuthPath != null)
                 {
-                    txtErpAuthPath.Value = settings.ErpAuthPath;
-                }
-                if (txtErpModuleBasePath != null)
-                {
-                    txtErpModuleBasePath.Value = settings.ErpModuleBasePath;
+                    txtErpAuthPath.Value = savedConnectionProfile.ErpAuthPath;
                 }
                 UpdateErpPreviewLabels();
 
@@ -1791,7 +1787,7 @@ namespace OVIA.Desktop
                 );
 
                 UpdateStatus("시스템 설정을 저장했습니다. 저장 위치: " + OviaSystemSettingsStore.GetSettingsFilePath());
-                OviaNotificationStore.AddWorkLog(companyId, userId, "시스템 설정 저장", OviaMenuSettingsStore.GetWorkspacePath("SYSTEM_SETTINGS", "메인  ›  환경설정  ›  시스템 설정"));
+                OviaNotificationStore.AddWorkLog(companyId, userId, "시스템 설정 저장", "메인  ›  환경설정  ›  시스템 설정");
             }
             catch (Exception ex)
             {
@@ -1992,22 +1988,6 @@ namespace OVIA.Desktop
             MarkDirty();
         }
 
-        private void DefaultErpModuleBasePath_Click(object sender, EventArgs e)
-        {
-            if (!EnsureCanEdit())
-            {
-                return;
-            }
-
-            if (txtErpModuleBasePath != null)
-            {
-                txtErpModuleBasePath.Value = OviaSystemSettingsStore.DefaultErpModuleBasePath;
-            }
-
-            UpdateErpPreviewLabels();
-            MarkDirty();
-        }
-
         private void ErpInput_ValueChanged(object sender, EventArgs e)
         {
             UpdateErpPreviewLabels();
@@ -2019,29 +1999,22 @@ namespace OVIA.Desktop
             string domain = txtErpBaseDomain == null ? OviaSystemSettingsStore.DefaultErpBaseDomain : txtErpBaseDomain.Value.Trim();
             string connectionPath = txtErpConnectionPath == null ? OviaSystemSettingsStore.DefaultErpConnectionPath : txtErpConnectionPath.Value.Trim();
             string authPath = txtErpAuthPath == null ? OviaSystemSettingsStore.DefaultErpAuthPath : txtErpAuthPath.Value.Trim();
-            string moduleBasePath = txtErpModuleBasePath == null ? OviaSystemSettingsStore.DefaultErpModuleBasePath : txtErpModuleBasePath.Value.Trim();
 
             OviaSystemSettings preview = new OviaSystemSettings();
             preview.ErpBaseDomain = domain;
             preview.ErpConnectionPath = connectionPath;
             preview.ErpAuthPath = authPath;
-            preview.ErpModuleBasePath = moduleBasePath;
 
             string normalizedDomain = OviaSystemSettingsStore.NormalizeErpBaseDomain(domain);
             string connectionUrl = OviaSystemSettingsStore.BuildErpConnectionUrl(preview);
-            string moduleBaseUrl = OviaSystemSettingsStore.BuildErpModuleBaseUrl(preview);
 
             if (lblErpConnectionPreview != null)
             {
-                lblErpConnectionPreview.Text = normalizedDomain;
+                lblErpConnectionPreview.Text = normalizedDomain + "/";
             }
             if (lblErpAuthPreview != null)
             {
                 lblErpAuthPreview.Text = connectionUrl;
-            }
-            if (lblErpModuleBasePreview != null)
-            {
-                lblErpModuleBasePreview.Text = normalizedDomain;
             }
         }
 
@@ -2088,11 +2061,11 @@ namespace OVIA.Desktop
 
         private string GetCurrentSignature()
         {
-            string erpDomain = txtErpBaseDomain == null ? OviaSystemSettingsStore.DefaultErpBaseDomain : OviaSystemSettingsStore.NormalizeErpBaseDomain(txtErpBaseDomain.Value);
-            string erpConnection = txtErpConnectionPath == null ? OviaSystemSettingsStore.DefaultErpConnectionPath : OviaSystemSettingsStore.NormalizeErpPath(txtErpConnectionPath.Value, OviaSystemSettingsStore.DefaultErpConnectionPath);
-            string erpAuth = txtErpAuthPath == null ? OviaSystemSettingsStore.DefaultErpAuthPath : OviaSystemSettingsStore.NormalizeErpPath(txtErpAuthPath.Value, OviaSystemSettingsStore.DefaultErpAuthPath);
-            string erpModuleBase = txtErpModuleBasePath == null ? OviaSystemSettingsStore.DefaultErpModuleBasePath : OviaSystemSettingsStore.NormalizeErpPath(txtErpModuleBasePath.Value, OviaSystemSettingsStore.DefaultErpModuleBasePath);
-            string erp = erpDomain + "|" + erpConnection + "|" + erpAuth + "|" + erpModuleBase;
+            string erpCompany = txtErpCompanyId == null ? companyId : txtErpCompanyId.Value.Trim();
+            string erpDomain = txtErpBaseDomain == null ? "" : txtErpBaseDomain.Value.Trim();
+            string erpConnection = txtErpConnectionPath == null ? "" : OviaSystemSettingsStore.NormalizeErpPath(txtErpConnectionPath.Value, "");
+            string erpAuth = txtErpAuthPath == null ? "" : OviaSystemSettingsStore.NormalizeErpPath(txtErpAuthPath.Value, "");
+            string erp = erpCompany + "|" + erpDomain + "|" + erpConnection + "|" + erpAuth;
             string pending = pendingLogoSourcePath == null ? "" : pendingLogoSourcePath.Trim();
             string current = currentLogoPath == null ? "" : currentLogoPath.Trim();
             string logo = pendingLogoMode + ":" + (defaultLogoRequested || (pending == "" && current == "") ? "DEFAULT" : (pending != "" ? pending : current));

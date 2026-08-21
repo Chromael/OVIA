@@ -15,6 +15,15 @@ namespace OVIA.Desktop
         private OviaTextInput	txtCompanyId;
         private OviaTextInput	txtUserId;
         private OviaTextInput	txtPassword;
+        private Panel loginPanel;
+        private Panel connectionPanel;
+        private OviaTextInput txtConnectionCompanyId;
+        private OviaTextInput txtConnectionErpBaseDomain;
+        private OviaTextInput txtConnectionErpPath;
+        private OviaTextInput txtConnectionAuthPath;
+        private OviaButton btnConnectionCancel;
+        private Label connectionStatusLabel;
+        private bool showingConnectionSetup;
         private OVIA.Desktop.Controls.OviaCheckBox		chkSaveId;
         private Timer		loginFadeTimer;
         private bool		hasPlayedStartupFadeIn;
@@ -45,6 +54,7 @@ namespace OVIA.Desktop
         {
             BuildOviaLoginUI();
             LoadSavedLoginInfo();
+            InitializeConnectionScreen();
             ReloadLoginLogoForCurrentCompany();
         }
 
@@ -187,84 +197,323 @@ namespace OVIA.Desktop
 
         private void BuildLoginCard(Control parent)
         {
-            OviaCard card			= new OviaCard();
-            card.Location			= new Point(520, 48);
-            card.Size				= new Size(500, 589);
-            card.Radius				= 8;
-            card.SurfaceColor		= SurfaceColor;
-            card.FillColor			= Color.White;
-            card.BorderColor		= OviaFluentTheme.CardBorder;
+            OviaCard card = new OviaCard();
+            card.Location = new Point(520, 48);
+            card.Size = new Size(500, 589);
+            card.Radius = 8;
+            card.SurfaceColor = SurfaceColor;
+            card.FillColor = Color.White;
+            card.BorderColor = OviaFluentTheme.CardBorder;
             parent.Controls.Add(card);
 
-            Label title			= new Label();
-            title.Text				= "LOGIN";
-            title.AutoSize			= true;
-            title.Font				= OviaFluentTheme.FontTitle(19F, FontStyle.Bold);
-            title.ForeColor			= TextDark;
-            title.BackColor			= Color.White;
-            title.Location			= new Point(53, 42);
-            card.Controls.Add(title);
+            BuildLoginPanel(card);
+            BuildConnectionPanel(card);
+        }
 
-            txtCompanyId			= AddInput(card, "회사 아이디", "회사 아이디를 입력하세요", 55, 108, false);
+        private void BuildLoginPanel(Control parent)
+        {
+            loginPanel = new Panel();
+            loginPanel.Location = Point.Empty;
+            loginPanel.Size = parent.ClientSize;
+            loginPanel.BackColor = Color.White;
+            loginPanel.Visible = true;
+            parent.Controls.Add(loginPanel);
+
+            Label title = new Label();
+            title.Text = "LOGIN";
+            title.AutoSize = true;
+            title.Font = OviaFluentTheme.FontTitle(19F, FontStyle.Bold);
+            title.ForeColor = TextDark;
+            title.BackColor = Color.White;
+            title.Location = new Point(53, 42);
+            loginPanel.Controls.Add(title);
+
+            txtCompanyId = AddInput(loginPanel, "기업 아이디", "기업 아이디를 입력하세요", 55, 108, false);
             txtCompanyId.ValueChanged += CompanyId_ValueChanged;
-            txtUserId				= AddInput(card, "사용자 아이디", "사용자 아이디를 입력하세요", 55, 198, false);
-            txtPassword				= AddInput(card, "암호", "암호를 입력하세요", 55, 288, true);
+            txtUserId = AddInput(loginPanel, "사용자 아이디", "사용자 아이디를 입력하세요", 55, 198, false);
+            txtPassword = AddInput(loginPanel, "암호", "암호를 입력하세요", 55, 288, true);
 
-            chkSaveId				= new OVIA.Desktop.Controls.OviaCheckBox();
-            chkSaveId.Text			= "아이디 저장";
-            chkSaveId.Size			= new Size(130, 24);
-            chkSaveId.Font			= OviaFluentTheme.FontInput(9.6F, FontStyle.Regular);
-            chkSaveId.ForeColor		= TextDark;
-            chkSaveId.BackColor		= Color.White;
-            chkSaveId.Location		= new Point(55, 372);
-            card.Controls.Add(chkSaveId);
+            chkSaveId = new OVIA.Desktop.Controls.OviaCheckBox();
+            chkSaveId.Text = "아이디 저장";
+            chkSaveId.Size = new Size(130, 24);
+            chkSaveId.Font = OviaFluentTheme.FontInput(9.6F, FontStyle.Regular);
+            chkSaveId.ForeColor = TextDark;
+            chkSaveId.BackColor = Color.White;
+            chkSaveId.Location = new Point(55, 372);
+            loginPanel.Controls.Add(chkSaveId);
 
-            OviaButton btnClose		= new OviaButton();
-            btnClose.Text			= "종료";
-            btnClose.Location		= new Point(55, 412);
-            btnClose.Size			= new Size(185, 46);
-            btnClose.IsPrimary		= false;
-            btnClose.StartColor		= OviaFluentTheme.ControlBorder;
-            btnClose.EndColor		= OviaFluentTheme.ControlBorder;
-            btnClose.TextColor		= OviaFluentTheme.TextPrimary;
-            btnClose.SurfaceColor	= Color.White;
-            btnClose.Radius			= OviaFluentTheme.ButtonRadius;
-            btnClose.Font			= OviaFluentTheme.FontButton(11F, FontStyle.Bold);
-            btnClose.Click			+= delegate { this.Close(); };
-            card.Controls.Add(btnClose);
+            OviaButton btnClose = new OviaButton();
+            btnClose.Text = "종료";
+            btnClose.Location = new Point(55, 412);
+            btnClose.Size = new Size(185, 46);
+            btnClose.IsPrimary = false;
+            btnClose.StartColor = OviaFluentTheme.ControlBorder;
+            btnClose.EndColor = OviaFluentTheme.ControlBorder;
+            btnClose.TextColor = OviaFluentTheme.TextPrimary;
+            btnClose.SurfaceColor = Color.White;
+            btnClose.Radius = OviaFluentTheme.ButtonRadius;
+            btnClose.Font = OviaFluentTheme.FontButton(11F, FontStyle.Bold);
+            btnClose.Click += delegate { this.Close(); };
+            loginPanel.Controls.Add(btnClose);
 
-            OviaButton btnLogin		= new OviaButton();
-            btnLogin.Text			= "로그인";
-            btnLogin.Location		= new Point(260, 412);
-            btnLogin.Size			= new Size(185, 46);
-            btnLogin.IsPrimary		= true;
-            btnLogin.StartColor		= OviaFluentTheme.Accent;
-            btnLogin.EndColor		= OviaFluentTheme.Accent;
-            btnLogin.TextColor		= Color.White;
-            btnLogin.SurfaceColor	= Color.White;
-            btnLogin.Radius			= OviaFluentTheme.ButtonRadius;
-            btnLogin.Font			= OviaFluentTheme.FontButton(12F, FontStyle.Bold);
-            btnLogin.Click			+= BtnLogin_Click;
-            card.Controls.Add(btnLogin);
+            OviaButton btnLogin = new OviaButton();
+            btnLogin.Text = "로그인";
+            btnLogin.Location = new Point(260, 412);
+            btnLogin.Size = new Size(185, 46);
+            btnLogin.IsPrimary = true;
+            btnLogin.StartColor = OviaFluentTheme.Accent;
+            btnLogin.EndColor = OviaFluentTheme.Accent;
+            btnLogin.TextColor = Color.White;
+            btnLogin.SurfaceColor = Color.White;
+            btnLogin.Radius = OviaFluentTheme.ButtonRadius;
+            btnLogin.Font = OviaFluentTheme.FontButton(12F, FontStyle.Bold);
+            btnLogin.Click += BtnLogin_Click;
+            loginPanel.Controls.Add(btnLogin);
 
-            // 로그인 입력창에서 Enter 키를 누르면 로그인 버튼 클릭과 동일하게 처리한다.
-            // OviaButton은 WinForms 기본 Button이 아니므로 AcceptButton 대신 ProcessCmdKey에서 처리한다.
+            Panel line = new Panel();
+            line.Location = new Point(55, 487);
+            line.Size = new Size(390, 1);
+            line.BackColor = OviaFluentTheme.CardBorder;
+            loginPanel.Controls.Add(line);
 
-            Panel line				= new Panel();
-            line.Location			= new Point(55, 487);
-            line.Size				= new Size(390, 1);
-            line.BackColor			= OviaFluentTheme.CardBorder;
-            card.Controls.Add(line);
+            Label info = new Label();
+            info.Text = "본 시스템은 승인된 사용자만 로그인할 수 있습니다.\r\n비인가자가 불법 접근을 시도할 경우, 접속 IP 및 PC 고유 정보가\r\n실시간으로 추적·기록되며 법적 책임을 물을 수 있습니다.";
+            info.AutoSize = false;
+            info.Size = new Size(390, 60);
+            info.Font = OviaFluentTheme.FontSystem(8.5F, FontStyle.Regular);
+            info.ForeColor = Color.FromArgb(150, 158, 168);
+            info.BackColor = Color.White;
+            info.Location = new Point(55, 508);
+            loginPanel.Controls.Add(info);
+        }
 
-            Label info				= new Label();
-            info.Text				= "본 시스템은 승인된 사용자만 로그인할 수 있습니다.\r\n비인가자가 불법 접근을 시도할 경우, 접속 IP 및 PC 고유 정보가\r\n실시간으로 추적·기록되며 법적 책임을 물을 수 있습니다.";
-            info.AutoSize			= false;
-            info.Size				= new Size(390, 60);
-            info.Font				= OviaFluentTheme.FontSystem(8.5F, FontStyle.Regular);
-            info.ForeColor			= Color.FromArgb(150, 158, 168);
-            info.BackColor			= Color.White;
-            info.Location			= new Point(55, 508);
-            card.Controls.Add(info);
+        private void BuildConnectionPanel(Control parent)
+        {
+            connectionPanel = new Panel();
+            connectionPanel.Location = Point.Empty;
+            connectionPanel.Size = parent.ClientSize;
+            connectionPanel.BackColor = Color.White;
+            connectionPanel.Visible = false;
+            parent.Controls.Add(connectionPanel);
+
+            Label title = new Label();
+            title.Text = "OVIA Connection";
+            title.AutoSize = true;
+            title.Font = OviaFluentTheme.FontTitle(19F, FontStyle.Bold);
+            title.ForeColor = TextDark;
+            title.BackColor = Color.White;
+            title.Location = new Point(53, 34);
+            connectionPanel.Controls.Add(title);
+
+            txtConnectionCompanyId = AddInput(connectionPanel, "기업 아이디", "기업 아이디를 입력하세요", 55, 104, false);
+            txtConnectionErpBaseDomain = AddInput(connectionPanel, "기본 도메인", "https://를 포함하여 입력", 55, 189, false);
+            txtConnectionErpPath = AddInput(connectionPanel, "ERP", "ERP Path", 55, 274, false);
+            txtConnectionAuthPath = AddInput(connectionPanel, "ERP Authentication", "Authentication Path", 55, 359, false);
+
+            btnConnectionCancel = new OviaButton();
+            btnConnectionCancel.Text = "종료";
+            btnConnectionCancel.Location = new Point(55, 458);
+            btnConnectionCancel.Size = new Size(185, 46);
+            btnConnectionCancel.IsPrimary = false;
+            btnConnectionCancel.StartColor = OviaFluentTheme.ControlBorder;
+            btnConnectionCancel.EndColor = OviaFluentTheme.ControlBorder;
+            btnConnectionCancel.TextColor = OviaFluentTheme.TextPrimary;
+            btnConnectionCancel.SurfaceColor = Color.White;
+            btnConnectionCancel.Radius = OviaFluentTheme.ButtonRadius;
+            btnConnectionCancel.Font = OviaFluentTheme.FontButton(11F, FontStyle.Bold);
+            btnConnectionCancel.Click += ConnectionCancel_Click;
+            connectionPanel.Controls.Add(btnConnectionCancel);
+
+            OviaButton btnSaveConnection = new OviaButton();
+            btnSaveConnection.Text = "저장";
+            btnSaveConnection.Location = new Point(260, 458);
+            btnSaveConnection.Size = new Size(185, 46);
+            btnSaveConnection.IsPrimary = true;
+            btnSaveConnection.StartColor = OviaFluentTheme.Accent;
+            btnSaveConnection.EndColor = OviaFluentTheme.Accent;
+            btnSaveConnection.TextColor = Color.White;
+            btnSaveConnection.SurfaceColor = Color.White;
+            btnSaveConnection.Radius = OviaFluentTheme.ButtonRadius;
+            btnSaveConnection.Font = OviaFluentTheme.FontButton(12F, FontStyle.Bold);
+            btnSaveConnection.Click += SaveConnection_Click;
+            connectionPanel.Controls.Add(btnSaveConnection);
+
+            connectionStatusLabel = new Label();
+            connectionStatusLabel.Text = "부여받은 연결정보를 저장하면 LOGIN 화면으로 이동합니다";
+            connectionStatusLabel.AutoSize = false;
+            connectionStatusLabel.Size = new Size(390, 44);
+            connectionStatusLabel.Font = OviaFluentTheme.FontSystem(8.4F, FontStyle.Regular);
+            connectionStatusLabel.ForeColor = TextSub;
+            connectionStatusLabel.BackColor = Color.White;
+            connectionStatusLabel.Location = new Point(55, 530);
+            connectionPanel.Controls.Add(connectionStatusLabel);
+        }
+
+        private void InitializeConnectionScreen()
+        {
+            string savedCompanyId = txtCompanyId == null ? "" : txtCompanyId.Value.Trim();
+
+            if (!OviaCompanyConnectionStore.HasAnyProfile())
+            {
+                ShowConnectionSetup(savedCompanyId);
+                return;
+            }
+
+            if (savedCompanyId != "" && !OviaCompanyConnectionStore.Exists(savedCompanyId))
+            {
+                ShowConnectionSetup(savedCompanyId);
+                return;
+            }
+
+            ShowLoginPanel(savedCompanyId);
+        }
+
+        private void ConnectionCancel_Click(object sender, EventArgs e)
+        {
+            if (OviaCompanyConnectionStore.HasAnyProfile())
+            {
+                string companyId = txtConnectionCompanyId == null ? "" : txtConnectionCompanyId.Value.Trim();
+                if (!OviaCompanyConnectionStore.Exists(companyId))
+                {
+                    companyId = txtCompanyId == null ? "" : txtCompanyId.Value.Trim();
+                }
+                ShowLoginPanel(companyId);
+                return;
+            }
+
+            this.Close();
+        }
+
+        private void SaveConnection_Click(object sender, EventArgs e)
+        {
+            SaveConnectionAndShowLogin();
+        }
+
+        private bool SaveConnectionAndShowLogin()
+        {
+            string companyId = txtConnectionCompanyId == null ? "" : txtConnectionCompanyId.Value.Trim();
+            string erpBaseDomain = txtConnectionErpBaseDomain == null ? "" : txtConnectionErpBaseDomain.Value.Trim();
+            string erpConnectionPath = txtConnectionErpPath == null ? "" : txtConnectionErpPath.Value.Trim();
+            string erpAuthPath = txtConnectionAuthPath == null ? "" : txtConnectionAuthPath.Value.Trim();
+
+            if (!OviaCompanyConnectionStore.IsValidCompanyId(companyId))
+            {
+                MessageBox.Show(
+                    "기업 아이디는 영문, 숫자, 하이픈(-), 밑줄(_)만 입력할 수 있습니다.",
+                    "OVIA Connection",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                if (txtConnectionCompanyId != null) txtConnectionCompanyId.FocusInput();
+                return false;
+            }
+
+            if (erpBaseDomain == "" || erpConnectionPath == "" || erpAuthPath == "")
+            {
+                MessageBox.Show(
+                    "기업 아이디, 기본 도메인, ERP, ERP Authentication을 모두 입력해주세요.",
+                    "OVIA Connection",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+                return false;
+            }
+
+            try
+            {
+                OviaCompanyConnectionProfile profile = new OviaCompanyConnectionProfile();
+                profile.CompanyId = companyId;
+                profile.ErpBaseDomain = erpBaseDomain;
+                profile.ErpConnectionPath = erpConnectionPath;
+                profile.ErpAuthPath = erpAuthPath;
+                OviaCompanyConnectionStore.Save(profile);
+
+                OviaCompanyConnectionProfile savedProfile;
+                if (!OviaCompanyConnectionStore.TryLoad(companyId, out savedProfile))
+                {
+                    throw new InvalidOperationException("저장된 OVIA Connection 정보를 다시 읽을 수 없습니다.");
+                }
+
+                if (txtCompanyId != null)
+                {
+                    txtCompanyId.Value = savedProfile.CompanyId;
+                }
+
+                ShowLoginPanel(savedProfile.CompanyId);
+                ReloadLoginLogoForCurrentCompany();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    ex.Message,
+                    "OVIA Connection 저장 실패",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                return false;
+            }
+        }
+
+        private void ShowConnectionSetup(string companyId)
+        {
+            showingConnectionSetup = true;
+
+            if (loginPanel != null) loginPanel.Visible = false;
+            if (connectionPanel != null)
+            {
+                connectionPanel.Visible = true;
+                connectionPanel.BringToFront();
+            }
+
+            string normalizedCompanyId = companyId == null ? "" : companyId.Trim();
+
+            if (txtConnectionCompanyId != null) txtConnectionCompanyId.Value = normalizedCompanyId;
+            if (txtConnectionErpBaseDomain != null) txtConnectionErpBaseDomain.Value = "";
+            if (txtConnectionErpPath != null) txtConnectionErpPath.Value = "";
+            if (txtConnectionAuthPath != null) txtConnectionAuthPath.Value = "";
+
+            if (btnConnectionCancel != null)
+            {
+                btnConnectionCancel.Text = OviaCompanyConnectionStore.HasAnyProfile() ? "로그인으로" : "종료";
+            }
+
+            if (connectionStatusLabel != null)
+            {
+                connectionStatusLabel.Text = "부여받은 연결정보를 저장하면 LOGIN 화면으로 이동합니다";
+            }
+
+            if (txtConnectionCompanyId != null && normalizedCompanyId == "")
+            {
+                txtConnectionCompanyId.FocusInput();
+            }
+            else if (txtConnectionErpBaseDomain != null)
+            {
+                txtConnectionErpBaseDomain.FocusInput();
+            }
+        }
+
+        private void ShowLoginPanel(string companyId)
+        {
+            showingConnectionSetup = false;
+
+            if (connectionPanel != null) connectionPanel.Visible = false;
+            if (loginPanel != null)
+            {
+                loginPanel.Visible = true;
+                loginPanel.BringToFront();
+            }
+
+            string normalizedCompanyId = companyId == null ? "" : companyId.Trim();
+            if (normalizedCompanyId != "" && txtCompanyId != null)
+            {
+                txtCompanyId.Value = normalizedCompanyId;
+            }
+
+            if (txtUserId != null)
+            {
+                txtUserId.FocusInput();
+            }
         }
 
         private OviaTextInput AddInput(Control parent, string labelText, string placeholder, int x, int y, bool isPassword)
@@ -298,7 +547,14 @@ namespace OVIA.Desktop
         {
             if (keyData == Keys.Enter)
             {
-                _ = ExecuteLoginAsync();
+                if (showingConnectionSetup)
+                {
+                    SaveConnectionAndShowLogin();
+                }
+                else
+                {
+                    _ = ExecuteLoginAsync();
+                }
                 return true;
             }
 
@@ -350,10 +606,46 @@ namespace OVIA.Desktop
             string userId			= txtUserId.Value.Trim();
             string password			= txtPassword.Value.Trim();
 
-            if (companyId == "" || userId == "" || password == "")
+            if (companyId == "")
             {
                 MessageBox.Show(
-                    "회사 아이디, 사용자 아이디, 암호를 모두 입력해주세요.",
+                    "기업 아이디를 입력해주세요.",
+                    "OVIA",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+                txtCompanyId.FocusInput();
+                return;
+            }
+
+            if (!OviaCompanyConnectionStore.IsValidCompanyId(companyId))
+            {
+                MessageBox.Show(
+                    "기업 아이디 형식이 올바르지 않습니다.",
+                    "OVIA",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                txtCompanyId.FocusInput();
+                return;
+            }
+
+            if (!OviaCompanyConnectionStore.Exists(companyId))
+            {
+                ShowConnectionSetup(companyId);
+                MessageBox.Show(
+                    "해당 기업의 OVIA Connection 정보가 없습니다.\r\n부여받은 ERP 연결정보를 먼저 저장해주세요.",
+                    "OVIA Connection",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+                return;
+            }
+
+            if (userId == "" || password == "")
+            {
+                MessageBox.Show(
+                    "사용자 아이디와 암호를 모두 입력해주세요.",
                     "OVIA",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information
@@ -368,6 +660,8 @@ namespace OVIA.Desktop
             OviaErpAuthenticationResult authentication;
             try
             {
+                // 모든 OVIA 로그인은 ERP 인증 결과를 기준으로 처리합니다.
+                // 클라이언트 내부의 고정/로컬 최고관리자 우회 계정은 사용하지 않습니다.
                 authentication = await OviaErpAuthenticationService.AuthenticateAsync(companyId, userId, password);
             }
             finally
@@ -392,7 +686,7 @@ namespace OVIA.Desktop
                 return;
             }
 
-            // ERP 로고 사용으로 저장된 경우에만 회사별 ERP 로고를 동기화합니다.
+            // 모든 로그인은 ERP 인증을 통과하므로 ERP 로고 모드에서는 회사별 ERP 로고를 동기화합니다.
             if (OviaSystemSettingsStore.GetCompanyLogoMode() == "ERP")
             {
                 OviaErpCompanyLogoService.Synchronize(companyId);

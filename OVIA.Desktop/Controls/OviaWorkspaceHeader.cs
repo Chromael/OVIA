@@ -356,7 +356,7 @@ namespace OVIA.Desktop.Controls
             };
             Controls.Add(btnHome);
 
-            btnErp = CreateExplorerButton(OVIA.Desktop.OviaWorkspaceCommandBar.GetErpMenuIcon(), "ERP");
+            btnErp = CreateExplorerButton("\uE774", "ERP");
             btnErp.Click += Erp_Click;
             Controls.Add(btnErp);
             RefreshErpMenuState();
@@ -434,7 +434,7 @@ namespace OVIA.Desktop.Controls
             btnNotification.Click += Notification_Click;
             Controls.Add(btnNotification);
 
-            btnSettings = CreateExplorerButton(OVIA.Desktop.OviaWorkspaceCommandBar.GetSettingsMenuIcon(), "환경설정");
+            btnSettings = CreateExplorerButton("\uE713", "환경설정");
             btnSettings.Font = OVIA.Desktop.OviaIconFont.Create(15F, FontStyle.Regular);
             btnSettings.Click += Settings_Click;
             Controls.Add(btnSettings);
@@ -448,11 +448,11 @@ namespace OVIA.Desktop.Controls
                 return;
             }
 
-            btnBack.Location = new Point(0, 0);
-            btnForward.Location = new Point(36, 0);
-            btnUp.Location = new Point(72, 0);
-            btnRefresh.Location = new Point(108, 0);
-            btnHome.Location = new Point(144, 0);
+            btnHome.Location = new Point(0, 0);
+            btnBack.Location = new Point(36, 0);
+            btnForward.Location = new Point(72, 0);
+            btnUp.Location = new Point(108, 0);
+            btnRefresh.Location = new Point(144, 0);
             btnErp.Location = new Point(180, 0);
 
             int navigationWidth = btnErp.Visible ? ErpNavigationWidth : BaseNavigationWidth;
@@ -731,11 +731,10 @@ namespace OVIA.Desktop.Controls
                 return;
             }
 
-            bool canAccess = OVIA.Desktop.OviaWorkspaceCommandBar.CanAccessErpMenu(this);
-            btnErp.Text = OVIA.Desktop.OviaWorkspaceCommandBar.GetErpMenuIcon();
-            btnErp.Visible = canAccess;
-            btnErp.Enabled = canAccess;
-            btnErp.Cursor = canAccess ? Cursors.Hand : Cursors.Default;
+            btnErp.Text = "\uE774";
+            btnErp.Visible = true;
+            btnErp.Enabled = true;
+            btnErp.Cursor = Cursors.Hand;
             btnErp.ResetInteractionState();
             btnErp.Invalidate();
             LayoutControls();
@@ -758,11 +757,10 @@ namespace OVIA.Desktop.Controls
                 return;
             }
 
-            bool canAccess = OVIA.Desktop.OviaWorkspaceCommandBar.CanAccessSettingsMenu(this);
-            btnSettings.Text = OVIA.Desktop.OviaWorkspaceCommandBar.GetSettingsMenuIcon();
-            btnSettings.Visible = canAccess;
-            btnSettings.Enabled = canAccess;
-            btnSettings.Cursor = canAccess ? Cursors.Hand : Cursors.Default;
+            btnSettings.Text = "\uE713";
+            btnSettings.Visible = true;
+            btnSettings.Enabled = true;
+            btnSettings.Cursor = Cursors.Hand;
             btnSettings.ResetInteractionState();
             btnSettings.Invalidate();
             LayoutControls();
@@ -775,7 +773,7 @@ namespace OVIA.Desktop.Controls
                 return;
             }
 
-            OVIA.Desktop.OviaWorkspaceCommandBar.ToggleSettingsMenu(btnSettings);
+            OVIA.Desktop.OviaWorkspaceCommandBar.ToggleSettingsOptions(btnSettings);
         }
 
         private void Notification_Click(object sender, EventArgs e)
@@ -1317,17 +1315,12 @@ namespace OVIA.Desktop.Controls
             if (segment == "메인") return "MAIN";
             if (segment == "공사관리") return "PROJECT_MANAGER";
             if (segment == "공사별 BarList") return "PROJECT_BARLIST_LIST";
-            if (segment == "운영현황") return "OPERATIONS";
-            if (segment == "자재/재고") return "MATERIAL_STOCK";
-            if (segment == "출하/송장") return "SHIPPING_INVOICE";
             if (segment == "ERP") return "ERP";
-            if (segment == "기준정보") return "MASTER_DATA";
             if (segment == "시스템관리") return "SETTINGS";
             if (segment == "환경설정") return "SETTINGS";
             if (segment == "BarList 항목 매핑") return "BARLIST_MAPPING";
             if (segment == "이형철근 단위중량표") return "REBAR_UNIT_WEIGHT";
             if (segment == "시스템 설정") return "SYSTEM_SETTINGS";
-            if (segment == "메뉴관리") return "MENU_MANAGER";
             return string.Empty;
         }
 

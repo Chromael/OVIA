@@ -11,7 +11,7 @@ namespace OVIA.Desktop.Controls
     /// </summary>
     internal static class OviaContentLayoutPolicy
     {
-        public const int WorkspaceMenuBottom = 98;
+        public const int WorkspaceMenuBottom = 48;
         public const int FixedAreaGap = 12;
         public const int FixedAreaMaxHeight = 50;
         public const int ContentHorizontalInset = 25;

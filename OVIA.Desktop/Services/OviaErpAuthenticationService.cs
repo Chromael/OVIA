@@ -19,6 +19,7 @@ namespace OVIA.Desktop
         public int HttpStatusCode { get; set; }
         public string RawResponse { get; set; }
         public int UserLevel { get; set; }
+        public string OviaYn { get; set; }
     }
 
     public sealed class OviaErpSessionCookie
@@ -42,6 +43,15 @@ namespace OVIA.Desktop
     {
         private static readonly object SyncRoot = new object();
         private static List<OviaErpSessionCookie> sessionCookies = new List<OviaErpSessionCookie>();
+        private static string currentErpCompanyId = "";
+        private static string currentErpUserId = "";
+        private static string currentErpPassword = "";
+        private static bool hasCurrentErpWebLogin = false;
+
+        public static void ClearSession()
+        {
+            ClearSessionCookies();
+        }
 
         public static IList<OviaErpSessionCookie> GetSessionCookies()
         {
@@ -51,26 +61,51 @@ namespace OVIA.Desktop
             }
         }
 
+        /// <summary>
+        /// OVIA 로그인에서 ERP가 이미 인증한 현재 계정 정보를 WebView2의 ERP 세션 생성에만 사용합니다.
+        /// 파일/설정/로그에는 저장하지 않고 실행 중 메모리에서만 유지합니다.
+        /// </summary>
+        public static bool TryGetCurrentErpWebLogin(
+            out string companyId,
+            out string userId,
+            out string password,
+            out string authenticationUrl)
+        {
+            lock (SyncRoot)
+            {
+                companyId = currentErpCompanyId;
+                userId = currentErpUserId;
+                password = currentErpPassword;
+                authenticationUrl = OviaCompanyConnectionStore.GetErpAuthUrl(companyId);
+
+                return hasCurrentErpWebLogin
+                    && companyId != ""
+                    && userId != ""
+                    && password != ""
+                    && authenticationUrl != "";
+            }
+        }
+
         public static async Task<OviaErpAuthenticationResult> AuthenticateAsync(string companyId, string userId, string password)
         {
-            string authUrl = OviaSystemSettingsStore.GetErpAuthUrl();
+            companyId = (companyId ?? "").Trim();
+            userId = (userId ?? "").Trim();
+            password = password ?? "";
+
+            string authUrl = OviaCompanyConnectionStore.GetErpAuthUrl(companyId);
             Uri authUri;
 
             if (!Uri.TryCreate(authUrl, UriKind.Absolute, out authUri) ||
                 (authUri.Scheme != Uri.UriSchemeHttp && authUri.Scheme != Uri.UriSchemeHttps))
             {
                 return Failure(
-                    "ERP 사용자 인증주소가 올바르지 않습니다.\r\n시스템 설정의 ERP 연결 정보를 확인해주세요.",
+                    "해당 기업의 OVIA Connection 정보를 확인할 수 없습니다.\r\n기업별 ERP 연결정보를 다시 설정해주세요.",
                     authUrl,
                     "",
                     0,
                     "",
                     false);
             }
-
-            companyId = (companyId ?? "").Trim();
-            userId = (userId ?? "").Trim();
-            password = password ?? "";
 
             CookieContainer cookieContainer = new CookieContainer();
 
@@ -97,7 +132,16 @@ namespace OVIA.Desktop
 
                         if (postResult.HasAuthenticationResponse)
                         {
-                            return CompleteResult(postResult, cookieContainer, authUri);
+                            OviaErpAuthenticationResult completed = CompleteResult(postResult, cookieContainer, authUri, companyId);
+                            if (completed != null && completed.IsSuccess)
+                            {
+                                StoreCurrentErpWebLogin(companyId, userId, password);
+                            }
+                            else
+                            {
+                                ClearSessionCookies();
+                            }
+                            return completed;
                         }
 
                         ClearSessionCookies();
@@ -240,7 +284,8 @@ namespace OVIA.Desktop
         private static OviaErpAuthenticationResult CompleteResult(
             OviaErpAuthenticationResult result,
             CookieContainer cookieContainer,
-            Uri authUri)
+            Uri authUri,
+            string companyId)
         {
             if (!result.IsSuccess)
             {
@@ -248,7 +293,13 @@ namespace OVIA.Desktop
                 return result;
             }
 
-            StoreCookies(cookieContainer, authUri);
+            Uri finalAuthUri = null;
+            if (!string.IsNullOrWhiteSpace(result.AuthenticationUrl))
+            {
+                Uri.TryCreate(result.AuthenticationUrl, UriKind.Absolute, out finalAuthUri);
+            }
+
+            StoreCookies(cookieContainer, authUri, finalAuthUri, companyId);
             return result;
         }
 
@@ -308,6 +359,32 @@ namespace OVIA.Desktop
 
                 if (success)
                 {
+                    object oviaValue;
+                    if (!TryGetValueIgnoreCase(data, "ovia_yn", out oviaValue) || oviaValue == null)
+                    {
+                        return Failure(
+                            "OVIA 사용 권한 정보를 확인할 수 없습니다.",
+                            authUrl,
+                            requestMethod,
+                            httpStatusCode,
+                            rawResponse,
+                            true);
+                    }
+
+                    string oviaYn = Convert.ToString(oviaValue).Trim().ToUpperInvariant();
+                    if (!string.Equals(oviaYn, "Y", StringComparison.Ordinal))
+                    {
+                        return Failure(
+                            string.Equals(oviaYn, "N", StringComparison.Ordinal)
+                                ? "사용권한이 없습니다."
+                                : "OVIA 사용 권한 정보를 확인할 수 없습니다.",
+                            authUrl,
+                            requestMethod,
+                            httpStatusCode,
+                            rawResponse,
+                            true);
+                    }
+
                     int userLevel = ReadUserLevel(data);
                     return new OviaErpAuthenticationResult
                     {
@@ -318,7 +395,8 @@ namespace OVIA.Desktop
                         RequestMethod = requestMethod,
                         HttpStatusCode = httpStatusCode,
                         RawResponse = rawResponse,
-                        UserLevel = userLevel
+                        UserLevel = userLevel,
+                        OviaYn = oviaYn
                     };
                 }
 
@@ -441,22 +519,23 @@ namespace OVIA.Desktop
             return text.Equals("true", StringComparison.OrdinalIgnoreCase) || text == "1";
         }
 
-        private static void StoreCookies(CookieContainer container, Uri uri)
+        private static void StoreCookies(CookieContainer container, Uri initialAuthUri, Uri finalAuthUri, string companyId)
         {
             List<OviaErpSessionCookie> cookies = new List<OviaErpSessionCookie>();
+            Dictionary<string, bool> seen = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (Cookie cookie in container.GetCookies(uri))
+            AddCookiesFromUri(container, initialAuthUri, cookies, seen);
+            if (finalAuthUri != null
+                && (initialAuthUri == null || !string.Equals(finalAuthUri.AbsoluteUri, initialAuthUri.AbsoluteUri, StringComparison.OrdinalIgnoreCase)))
             {
-                cookies.Add(new OviaErpSessionCookie
-                {
-                    Name = cookie.Name,
-                    Value = cookie.Value,
-                    Domain = string.IsNullOrWhiteSpace(cookie.Domain) ? uri.Host : cookie.Domain.TrimStart('.'),
-                    Path = string.IsNullOrWhiteSpace(cookie.Path) ? "/" : cookie.Path,
-                    IsSecure = cookie.Secure,
-                    IsHttpOnly = cookie.HttpOnly,
-                    ExpiresUtc = cookie.Expires == DateTime.MinValue ? (DateTime?)null : cookie.Expires.ToUniversalTime()
-                });
+                AddCookiesFromUri(container, finalAuthUri, cookies, seen);
+            }
+
+            Uri connectionUri;
+            if (Uri.TryCreate(OviaCompanyConnectionStore.GetErpConnectionUrl(companyId), UriKind.Absolute, out connectionUri))
+            {
+                AddCookiesFromUri(container, connectionUri, cookies, seen);
+                EnsureErpSessionCookiePath(cookies, connectionUri);
             }
 
             lock (SyncRoot)
@@ -465,11 +544,115 @@ namespace OVIA.Desktop
             }
         }
 
+        private static void AddCookiesFromUri(
+            CookieContainer container,
+            Uri uri,
+            List<OviaErpSessionCookie> target,
+            Dictionary<string, bool> seen)
+        {
+            if (container == null || uri == null)
+            {
+                return;
+            }
+
+            foreach (Cookie cookie in container.GetCookies(uri))
+            {
+                string domain = string.IsNullOrWhiteSpace(cookie.Domain) ? uri.Host : cookie.Domain.TrimStart('.');
+                string path = string.IsNullOrWhiteSpace(cookie.Path) ? "/" : cookie.Path;
+                string key = cookie.Name + "|" + domain + "|" + path;
+                if (seen.ContainsKey(key))
+                {
+                    continue;
+                }
+
+                seen[key] = true;
+                target.Add(new OviaErpSessionCookie
+                {
+                    Name = cookie.Name,
+                    Value = cookie.Value,
+                    Domain = domain,
+                    Path = path,
+                    IsSecure = cookie.Secure,
+                    IsHttpOnly = cookie.HttpOnly,
+                    ExpiresUtc = cookie.Expires == DateTime.MinValue ? (DateTime?)null : cookie.Expires.ToUniversalTime()
+                });
+            }
+        }
+
+        private static void EnsureErpSessionCookiePath(List<OviaErpSessionCookie> cookies, Uri connectionUri)
+        {
+            if (cookies == null || connectionUri == null)
+            {
+                return;
+            }
+
+            string connectionPath = string.IsNullOrWhiteSpace(connectionUri.AbsolutePath) ? "/" : connectionUri.AbsolutePath;
+            if (!connectionPath.EndsWith("/", StringComparison.Ordinal))
+            {
+                connectionPath += "/";
+            }
+
+            OviaErpSessionCookie source = null;
+            bool alreadyApplicable = false;
+            foreach (OviaErpSessionCookie cookie in cookies)
+            {
+                if (cookie == null || !string.Equals(cookie.Name, "PHPSESSID", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (source == null)
+                {
+                    source = cookie;
+                }
+
+                string cookiePath = string.IsNullOrWhiteSpace(cookie.Path) ? "/" : cookie.Path;
+                if (connectionPath.StartsWith(cookiePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    alreadyApplicable = true;
+                    break;
+                }
+            }
+
+            if (source == null || alreadyApplicable)
+            {
+                return;
+            }
+
+            cookies.Add(new OviaErpSessionCookie
+            {
+                Name = source.Name,
+                Value = source.Value,
+                Domain = source.Domain,
+                Path = connectionPath,
+                IsSecure = source.IsSecure,
+                IsHttpOnly = source.IsHttpOnly,
+                ExpiresUtc = source.ExpiresUtc
+            });
+        }
+
+        private static void StoreCurrentErpWebLogin(string companyId, string userId, string password)
+        {
+            lock (SyncRoot)
+            {
+                currentErpCompanyId = companyId == null ? "" : companyId.Trim();
+                currentErpUserId = userId == null ? "" : userId.Trim();
+                currentErpPassword = password == null ? "" : password;
+                hasCurrentErpWebLogin = currentErpCompanyId != ""
+                    && currentErpUserId != ""
+                    && currentErpPassword != "";
+            }
+        }
+
         private static void ClearSessionCookies()
         {
             lock (SyncRoot)
             {
                 sessionCookies = new List<OviaErpSessionCookie>();
+                currentErpCompanyId = "";
+                currentErpUserId = "";
+                currentErpPassword = "";
+                hasCurrentErpWebLogin = false;
             }
         }
 

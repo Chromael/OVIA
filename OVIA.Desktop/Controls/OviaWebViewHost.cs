@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Text;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.WinForms;
 using Microsoft.Web.WebView2.Core;
@@ -34,8 +35,17 @@ namespace OVIA.Desktop.Controls
         private int lastDocumentHeight;
         private Timer documentHeightTimer;
         private string initialUrl = "https://celmon.com";
+        private CoreWebView2Environment webViewEnvironment;
+        private bool erpAutoLoginRequestInProgress;
+        private bool erpAutoLoginTargetPending;
+        private bool erpAutoLoginFormAttempted;
+        private bool erpAutoLoginFormScriptInProgress;
+        private int erpAutoLoginFormAttemptCount;
+        private Timer erpAutoLoginFormTimer;
+        private string erpAutoLoginTargetUrl = "";
 
         public bool AutoResizeToDocumentHeight { get; set; }
+        public bool EnableErpAutomaticLogin { get; set; }
         // WebView2 안에서는 웹페이지 자체 스크롤을 우선 사용한다.
         // 이전 외부 AutoScroll 전달 방식은 Web ERP 스크롤 충돌 때문에 기본 비활성화한다.
         public bool ForwardMouseWheelToParentScroll { get; set; }
@@ -241,6 +251,10 @@ namespace OVIA.Desktop.Controls
             documentHeightTimer.Interval = 300;
             documentHeightTimer.Tick += DocumentHeightTimer_Tick;
 
+            erpAutoLoginFormTimer = new Timer();
+            erpAutoLoginFormTimer.Interval = 350;
+            erpAutoLoginFormTimer.Tick += ErpAutoLoginFormTimer_Tick;
+
             showLoadingTimer = new Timer();
             showLoadingTimer.Interval = Math.Max(1, OVIA.Desktop.OviaSystemSettingsStore.GetLoadingDelayMilliseconds());
             showLoadingTimer.Tick += delegate
@@ -281,6 +295,13 @@ namespace OVIA.Desktop.Controls
                     documentHeightTimer = null;
                 }
 
+                if (erpAutoLoginFormTimer != null)
+                {
+                    erpAutoLoginFormTimer.Stop();
+                    erpAutoLoginFormTimer.Dispose();
+                    erpAutoLoginFormTimer = null;
+                }
+
                 if (showLoadingTimer != null)
                 {
                     showLoadingTimer.Stop();
@@ -311,10 +332,14 @@ namespace OVIA.Desktop.Controls
         {
             InitialUrl = url;
             celmonWwwRetryAttempted = false;
+            ResetErpLoginFormAutomation();
 
             if (webView != null && webView.CoreWebView2 != null)
             {
-                NavigateCore(InitialUrl);
+                if (!TryStartErpAutomaticLogin(InitialUrl))
+                {
+                    NavigateCore(InitialUrl);
+                }
             }
         }
 
@@ -352,6 +377,7 @@ namespace OVIA.Desktop.Controls
                     browserExecutableFolder: null,
                     userDataFolder: userDataFolder
                 );
+                webViewEnvironment = environment;
 
                 await webView.EnsureCoreWebView2Async(environment);
 
@@ -364,7 +390,11 @@ namespace OVIA.Desktop.Controls
                     AttachWebViewBridgeEvents();
                     InjectWebViewPointerScript();
                     ApplyErpSessionCookies();
-                    NavigateCore(InitialUrl);
+                    ResetErpLoginFormAutomation();
+                    if (!TryStartErpAutomaticLogin(InitialUrl))
+                    {
+                        NavigateCore(InitialUrl);
+                    }
                 }
             }
             catch (Exception ex)
@@ -385,6 +415,10 @@ namespace OVIA.Desktop.Controls
 
             try
             {
+                // WebView2 사용자 데이터 폴더는 실행 간 쿠키가 남을 수 있으므로
+                // 이전 사용자 ERP 세션을 제거한 뒤 현재 로그인에서 받은 세션만 다시 주입합니다.
+                webView.CoreWebView2.CookieManager.DeleteAllCookies();
+
                 foreach (OviaErpSessionCookie sessionCookie in OviaErpAuthenticationService.GetSessionCookies())
                 {
                     if (sessionCookie == null || string.IsNullOrWhiteSpace(sessionCookie.Name) || string.IsNullOrWhiteSpace(sessionCookie.Domain))
@@ -411,6 +445,258 @@ namespace OVIA.Desktop.Controls
             {
                 // 쿠키 전달 실패가 WebView2 화면 자체를 중단시키지는 않는다.
             }
+        }
+
+        private bool TryStartErpAutomaticLogin(string targetUrl)
+        {
+            if (!EnableErpAutomaticLogin
+                || webView == null
+                || webView.CoreWebView2 == null
+                || webViewEnvironment == null)
+            {
+                return false;
+            }
+
+            string companyId;
+            string userId;
+            string password;
+            string authenticationUrl;
+            if (!OviaErpAuthenticationService.TryGetCurrentErpWebLogin(
+                out companyId,
+                out userId,
+                out password,
+                out authenticationUrl))
+            {
+                return false;
+            }
+
+            Uri authUri;
+            Uri targetUri;
+            if (!Uri.TryCreate(authenticationUrl, UriKind.Absolute, out authUri)
+                || !Uri.TryCreate(NormalizeUrl(targetUrl), UriKind.Absolute, out targetUri))
+            {
+                return false;
+            }
+
+            if (!string.Equals(authUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(authUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (!string.Equals(targetUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(targetUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            // 시스템 설정의 ERP 인증 주소와 ERP 연결 주소가 같은 서버 계열일 때만
+            // 현재 OVIA 계정으로 브라우저 세션을 생성한다.
+            if (!string.Equals(authUri.Host, targetUri.Host, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            try
+            {
+                string postBody =
+                    "site_id=" + Uri.EscapeDataString(companyId ?? "") +
+                    "&erp_id=" + Uri.EscapeDataString(userId ?? "") +
+                    "&erp_pwd=" + Uri.EscapeDataString(password ?? "");
+
+                byte[] postBytes = Encoding.UTF8.GetBytes(postBody);
+                MemoryStream postData = new MemoryStream(postBytes, false);
+                CoreWebView2WebResourceRequest request = webViewEnvironment.CreateWebResourceRequest(
+                    authUri.AbsoluteUri,
+                    "POST",
+                    postData,
+                    "Content-Type: application/x-www-form-urlencoded\r\nAccept: application/json\r\n"
+                );
+
+                erpAutoLoginTargetUrl = targetUri.AbsoluteUri;
+                erpAutoLoginRequestInProgress = true;
+                erpAutoLoginTargetPending = false;
+                ShowLoadingOverlay();
+                webView.CoreWebView2.NavigateWithWebResourceRequest(request);
+                ShowWebView();
+                RaiseNavigationStateChanged();
+                return true;
+            }
+            catch
+            {
+                erpAutoLoginRequestInProgress = false;
+                erpAutoLoginTargetPending = false;
+                erpAutoLoginTargetUrl = "";
+                return false;
+            }
+        }
+
+        private void ResetErpLoginFormAutomation()
+        {
+            erpAutoLoginFormAttempted = false;
+            erpAutoLoginFormScriptInProgress = false;
+            erpAutoLoginFormAttemptCount = 0;
+            if (erpAutoLoginFormTimer != null)
+            {
+                erpAutoLoginFormTimer.Stop();
+            }
+        }
+
+        private void StartErpLoginFormAutomation()
+        {
+            if (!EnableErpAutomaticLogin || erpAutoLoginFormTimer == null)
+            {
+                return;
+            }
+
+            erpAutoLoginFormAttempted = false;
+            erpAutoLoginFormScriptInProgress = false;
+            erpAutoLoginFormAttemptCount = 0;
+            erpAutoLoginFormTimer.Stop();
+            erpAutoLoginFormTimer.Start();
+            TrySubmitErpLoginForm();
+        }
+
+        private void ErpAutoLoginFormTimer_Tick(object sender, EventArgs e)
+        {
+            if (!EnableErpAutomaticLogin || erpAutoLoginFormAttempted)
+            {
+                if (erpAutoLoginFormTimer != null)
+                {
+                    erpAutoLoginFormTimer.Stop();
+                }
+                return;
+            }
+
+            if (erpAutoLoginFormAttemptCount >= 30)
+            {
+                erpAutoLoginFormTimer.Stop();
+                return;
+            }
+
+            TrySubmitErpLoginForm();
+        }
+
+        private async void TrySubmitErpLoginForm()
+        {
+            if (!EnableErpAutomaticLogin
+                || erpAutoLoginFormAttempted
+                || erpAutoLoginFormScriptInProgress
+                || webView == null
+                || webView.CoreWebView2 == null)
+            {
+                return;
+            }
+
+            string companyId;
+            string userId;
+            string password;
+            string authenticationUrl;
+            if (!OviaErpAuthenticationService.TryGetCurrentErpWebLogin(
+                out companyId,
+                out userId,
+                out password,
+                out authenticationUrl))
+            {
+                if (erpAutoLoginFormTimer != null)
+                {
+                    erpAutoLoginFormTimer.Stop();
+                }
+                return;
+            }
+
+            erpAutoLoginFormScriptInProgress = true;
+            erpAutoLoginFormAttemptCount++;
+
+            try
+            {
+                // ERP 로그인 페이지는 사이트/버전에 따라 input name/id가 달라질 수 있고
+                // JavaScript 프레임워크가 값을 관리할 수 있으므로 표준 value setter와
+                // input/change/keyup 이벤트를 함께 발생시킨다. 로그인 DOM이 지연 생성되는
+                // 경우를 위해 이 메서드는 최대 약 10초간 재시도된다.
+                string script =
+                    "(() => {" +
+                    "const visible=(e)=>{if(!e)return false;const r=e.getBoundingClientRect();const s=getComputedStyle(e);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'&&!e.disabled;};" +
+                    "const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument);}catch(e){}}" +
+                    "const first=(sels)=>{for(const d of docs){for(const s of sels){for(const e of d.querySelectorAll(s)){if(visible(e))return e;}}}return null;};" +
+                    "const all=(sel)=>{const a=[];for(const d of docs){for(const e of d.querySelectorAll(sel)){if(visible(e))a.push(e);}}return a;};" +
+                    "const p=first([\"input[type='password']\",\"input[name='erp_pwd']\",\"#erp_pwd\",\"input[name='password']\",\"#password\",\"input[name='passwd']\",\"#passwd\",\"input[name='pwd']\",\"#pwd\",\"input[name='mb_password']\",\"#mb_password\"]);" +
+                    "if(!p)return 'NO_LOGIN_FORM';" +
+                    "const c=first([\"input[name='site_id']\",\"#site_id\",\"input[name='company_id']\",\"#company_id\",\"input[name='corp_id']\",\"#corp_id\",\"input[name='site']\",\"#site\"]);" +
+                    "let u=first([\"input[name='erp_id']\",\"#erp_id\",\"input[name='user_id']\",\"#user_id\",\"input[name='mb_id']\",\"#mb_id\",\"input[name='login_id']\",\"#login_id\",\"input[name='userid']\",\"#userid\",\"input[name='username']\",\"#username\",\"input[name='id']\",\"#id\"]);" +
+                    "if(!u){const root=p.form||p.closest('div')||document;const cand=[];for(const e of root.querySelectorAll(\"input:not([type='password']):not([type='hidden']):not([type='checkbox']):not([type='radio']):not([type='submit']):not([type='button'])\")){if(visible(e))cand.push(e);}if(cand.length)u=cand[cand.length-1];}" +
+                    "if(!u){const cand=all(\"input:not([type='password']):not([type='hidden']):not([type='checkbox']):not([type='radio']):not([type='submit']):not([type='button'])\");if(cand.length)u=cand[cand.length-1];}" +
+                    "if(!u)return 'NO_USER_INPUT';" +
+                    "const setv=(e,v)=>{if(!e)return;try{const proto=e instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;const d=Object.getOwnPropertyDescriptor(proto,'value');if(d&&d.set)d.set.call(e,v);else e.value=v;}catch(x){e.value=v;}e.focus();for(const t of ['input','change','keyup','blur'])e.dispatchEvent(new Event(t,{bubbles:true}));};" +
+                    "setv(c," + ToJavaScriptString(companyId) + ");" +
+                    "setv(u," + ToJavaScriptString(userId) + ");" +
+                    "setv(p," + ToJavaScriptString(password) + ");" +
+                    "const f=p.form||u.form;" +
+                    "let b=null;const scope=f||p.ownerDocument||document;for(const e of scope.querySelectorAll(\"button,input[type='submit'],input[type='button'],a,[role='button']\")){if(!visible(e))continue;const t=((e.innerText||e.value||e.getAttribute('aria-label')||'')+'').trim().toLowerCase();if(t==='로그인'||t.includes('로그인')||t==='login'||t.includes('sign in')){b=e;break;}}" +
+                    "if(!b&&f)b=f.querySelector(\"button[type='submit'],input[type='submit']\");" +
+                    "if(b){b.click();return 'SUBMITTED';}" +
+                    "if(f){if(f.requestSubmit){f.requestSubmit();return 'SUBMITTED';}if(f.submit){f.submit();return 'SUBMITTED';}}" +
+                    "p.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true}));" +
+                    "p.dispatchEvent(new KeyboardEvent('keyup',{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true}));" +
+                    "return 'ENTER_SENT';" +
+                    "})()";
+
+                string result = await webView.CoreWebView2.ExecuteScriptAsync(script);
+                if (!string.IsNullOrWhiteSpace(result)
+                    && (result.IndexOf("SUBMITTED", StringComparison.OrdinalIgnoreCase) >= 0
+                        || result.IndexOf("ENTER_SENT", StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    erpAutoLoginFormAttempted = true;
+                    if (erpAutoLoginFormTimer != null)
+                    {
+                        erpAutoLoginFormTimer.Stop();
+                    }
+                    ShowLoadingOverlay();
+                }
+            }
+            catch
+            {
+                // DOM이 아직 준비되지 않았거나 로그인 페이지 구현이 지연된 경우
+                // 타이머가 제한 횟수 안에서 다시 시도한다.
+            }
+            finally
+            {
+                erpAutoLoginFormScriptInProgress = false;
+            }
+        }
+
+        private static string ToJavaScriptString(string value)
+        {
+            string text = value ?? "";
+            StringBuilder builder = new StringBuilder(text.Length + 2);
+            builder.Append('"');
+            foreach (char ch in text)
+            {
+                switch (ch)
+                {
+                    case '\\': builder.Append("\\\\"); break;
+                    case '"': builder.Append("\\\""); break;
+                    case '\r': builder.Append("\\r"); break;
+                    case '\n': builder.Append("\\n"); break;
+                    case '\t': builder.Append("\\t"); break;
+                    case '<': builder.Append("\\u003C"); break;
+                    case '>': builder.Append("\\u003E"); break;
+                    case '&': builder.Append("\\u0026"); break;
+                    default:
+                        if (ch < 32)
+                        {
+                            builder.Append("\\u");
+                            builder.Append(((int)ch).ToString("x4"));
+                        }
+                        else
+                        {
+                            builder.Append(ch);
+                        }
+                        break;
+                }
+            }
+            builder.Append('"');
+            return builder.ToString();
         }
 
         private void AttachWebViewBridgeEvents()
@@ -552,6 +838,29 @@ namespace OVIA.Desktop.Controls
             catch
             {
                 statusCode = 0;
+            }
+
+            if (erpAutoLoginRequestInProgress)
+            {
+                erpAutoLoginRequestInProgress = false;
+
+                string target = erpAutoLoginTargetUrl;
+                erpAutoLoginTargetUrl = "";
+                if (!string.IsNullOrWhiteSpace(target))
+                {
+                    erpAutoLoginTargetPending = true;
+                    NavigateCore(target);
+                    return;
+                }
+            }
+
+            if (erpAutoLoginTargetPending)
+            {
+                erpAutoLoginTargetPending = false;
+                if (e.IsSuccess && statusCode < 400)
+                {
+                    StartErpLoginFormAutomation();
+                }
             }
 
             if (e.IsSuccess && statusCode < 400)

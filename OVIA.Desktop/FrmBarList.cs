@@ -1508,6 +1508,10 @@ namespace OVIA.Desktop
                 RefreshSummaryDrawerData();
                 summaryDrawer.BringToFront();
             }
+            else if (hasActiveSummaryFilter)
+            {
+                ClearSummaryFilter();
+            }
 
             LayoutBarListFloatingPanels();
         }
@@ -1526,6 +1530,11 @@ namespace OVIA.Desktop
             {
                 summaryButton.DropDownChevronUp = false;
                 summaryButton.Invalidate();
+            }
+
+            if (hasActiveSummaryFilter)
+            {
+                ClearSummaryFilter();
             }
 
             RefreshSummaryPinAppearance();
