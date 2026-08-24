@@ -230,7 +230,8 @@ namespace OVIA.Desktop
             this.MaximizeBox = true;
             this.MinimizeBox = true;
             this.ClientSize = new Size(BaseClientWidth, BaseClientHeight);
-            this.MinimumSize = new Size(820, 540);
+            // 공통 Idle 감시 없이도 기존 업무화면 최소 크기 계약(1100x750)을 직접 유지합니다.
+            this.MinimumSize = new Size(1100, 750);
             this.BackColor = SurfaceColor;
             this.FormClosing += FrmBarList_FormClosing;
 

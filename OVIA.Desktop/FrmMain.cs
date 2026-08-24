@@ -56,7 +56,6 @@ namespace OVIA.Desktop
         private OviaDashboardBarChart chartProjectStatus;
         private OviaDashboardDonutChart chartBarListSave;
         private OviaDashboardLineChart chartProjectTrend;
-        private Timer autoCadStatusTimer;
         private ToolTip windowToolTip;
         private TableLayoutPanel mainLayout;
         private Panel workspacePanel;
@@ -189,7 +188,6 @@ namespace OVIA.Desktop
 
             this.ResumeLayout(false);
 
-            StartAutoCadStatusTimer();
         }
 
         private void BuildDashboardMainContent(Control parent)
@@ -1539,6 +1537,11 @@ namespace OVIA.Desktop
                     forwardHistory.Push(forwardEntry);
                 }
 
+                if (navigated)
+                {
+                    RefreshCurrentWorkspaceNavigationState();
+                }
+
                 return navigated;
             }
             finally
@@ -1565,6 +1568,11 @@ namespace OVIA.Desktop
                 if (navigated && backEntry != null)
                 {
                     backHistory.Push(backEntry);
+                }
+
+                if (navigated)
+                {
+                    RefreshCurrentWorkspaceNavigationState();
                 }
 
                 return navigated;
@@ -2137,6 +2145,7 @@ ShowWorkspaceScreenWithHistory(
             }
 
             currentNavigationEntry = entry;
+            RefreshCurrentWorkspaceNavigationState();
         }
 
         private void ShowLegacyDashboardWithHistory(OviaMainWorkspaceNavigationEntry entry)
@@ -2155,6 +2164,36 @@ ShowWorkspaceScreenWithHistory(
             }
 
             currentNavigationEntry = entry;
+        }
+
+        private void RefreshCurrentWorkspaceNavigationState()
+        {
+            if (currentScreen == null || currentScreen.IsDisposed)
+            {
+                return;
+            }
+
+            RefreshWorkspaceNavigationHeaders(currentScreen);
+        }
+
+        private void RefreshWorkspaceNavigationHeaders(Control root)
+        {
+            if (root == null || root.IsDisposed)
+            {
+                return;
+            }
+
+            OviaWorkspaceHeader header = root as OviaWorkspaceHeader;
+            if (header != null)
+            {
+                header.RefreshNavigationButtonStates();
+            }
+
+            int i;
+            for (i = 0; i < root.Controls.Count; i++)
+            {
+                RefreshWorkspaceNavigationHeaders(root.Controls[i]);
+            }
         }
 
         private bool ShowWorkspaceScreenInternal(Form nextScreen, string title)
@@ -2334,28 +2373,6 @@ ShowWorkspaceScreenWithHistory(
             );
         }
 
-        private void StartAutoCadStatusTimer()
-        {
-            if (autoCadStatusTimer != null)
-            {
-                autoCadStatusTimer.Stop();
-                autoCadStatusTimer.Dispose();
-                autoCadStatusTimer = null;
-            }
-
-            autoCadStatusTimer = new Timer();
-            autoCadStatusTimer.Interval = 5000;
-            autoCadStatusTimer.Tick += AutoCadStatusTimer_Tick;
-            autoCadStatusTimer.Start();
-
-            UpdateAutoCadRunStatus();
-        }
-
-        private void AutoCadStatusTimer_Tick(object sender, EventArgs e)
-        {
-            UpdateAutoCadRunStatus();
-        }
-
         private void UpdateAutoCadRunStatus()
         {
             OviaEnvironmentReport report = OviaEnvironmentChecker.CheckForUi();
@@ -2507,12 +2524,6 @@ ShowWorkspaceScreenWithHistory(
                 barListMappingForm = null;
             }
 
-            if (autoCadStatusTimer != null)
-            {
-                autoCadStatusTimer.Stop();
-                autoCadStatusTimer.Dispose();
-                autoCadStatusTimer = null;
-            }
 
             if (IsLogoutRequested)
             {

@@ -20,6 +20,7 @@ namespace OVIA.Desktop
         public string RawResponse { get; set; }
         public int UserLevel { get; set; }
         public string OviaYn { get; set; }
+        public string OviaToken { get; set; }
     }
 
     public sealed class OviaErpSessionCookie
@@ -47,6 +48,7 @@ namespace OVIA.Desktop
         private static string currentErpUserId = "";
         private static string currentErpPassword = "";
         private static bool hasCurrentErpWebLogin = false;
+        private static string currentErpApiToken = "";
 
         public static void ClearSession()
         {
@@ -58,6 +60,24 @@ namespace OVIA.Desktop
             lock (SyncRoot)
             {
                 return new List<OviaErpSessionCookie>(sessionCookies);
+            }
+        }
+
+        /// <summary>
+        /// ERP 로그인 성공 시 발급된 64자리 OVIA API 토큰을 현재 로그인 기업에서만 사용합니다.
+        /// 토큰은 파일/설정/로그에 저장하지 않고 OVIA 프로세스 메모리에만 유지합니다.
+        /// </summary>
+        public static bool TryGetCurrentErpApiToken(string companyId, out string token)
+        {
+            companyId = companyId == null ? "" : companyId.Trim();
+
+            lock (SyncRoot)
+            {
+                token = currentErpApiToken;
+                return companyId != ""
+                    && string.Equals(currentErpCompanyId, companyId, StringComparison.OrdinalIgnoreCase)
+                    && token != ""
+                    && token.Length == 64;
             }
         }
 
@@ -135,7 +155,7 @@ namespace OVIA.Desktop
                             OviaErpAuthenticationResult completed = CompleteResult(postResult, cookieContainer, authUri, companyId);
                             if (completed != null && completed.IsSuccess)
                             {
-                                StoreCurrentErpWebLogin(companyId, userId, password);
+                                StoreCurrentErpWebLogin(companyId, userId, password, completed.OviaToken);
                             }
                             else
                             {
@@ -385,6 +405,30 @@ namespace OVIA.Desktop
                             true);
                     }
 
+                    object tokenValue;
+                    if (!TryGetValueIgnoreCase(data, "ovia_token", out tokenValue) || tokenValue == null)
+                    {
+                        return Failure(
+                            "ERP 인증 응답에서 OVIA API 토큰을 확인할 수 없습니다.",
+                            authUrl,
+                            requestMethod,
+                            httpStatusCode,
+                            rawResponse,
+                            true);
+                    }
+
+                    string oviaToken = Convert.ToString(tokenValue).Trim();
+                    if (oviaToken.Length != 64)
+                    {
+                        return Failure(
+                            "ERP 인증 응답의 OVIA API 토큰 형식이 올바르지 않습니다.",
+                            authUrl,
+                            requestMethod,
+                            httpStatusCode,
+                            rawResponse,
+                            true);
+                    }
+
                     int userLevel = ReadUserLevel(data);
                     return new OviaErpAuthenticationResult
                     {
@@ -394,9 +438,10 @@ namespace OVIA.Desktop
                         AuthenticationUrl = authUrl,
                         RequestMethod = requestMethod,
                         HttpStatusCode = httpStatusCode,
-                        RawResponse = rawResponse,
+                        RawResponse = "",
                         UserLevel = userLevel,
-                        OviaYn = oviaYn
+                        OviaYn = oviaYn,
+                        OviaToken = oviaToken
                     };
                 }
 
@@ -631,16 +676,18 @@ namespace OVIA.Desktop
             });
         }
 
-        private static void StoreCurrentErpWebLogin(string companyId, string userId, string password)
+        private static void StoreCurrentErpWebLogin(string companyId, string userId, string password, string oviaToken)
         {
             lock (SyncRoot)
             {
                 currentErpCompanyId = companyId == null ? "" : companyId.Trim();
                 currentErpUserId = userId == null ? "" : userId.Trim();
                 currentErpPassword = password == null ? "" : password;
+                currentErpApiToken = oviaToken == null ? "" : oviaToken.Trim();
                 hasCurrentErpWebLogin = currentErpCompanyId != ""
                     && currentErpUserId != ""
-                    && currentErpPassword != "";
+                    && currentErpPassword != ""
+                    && currentErpApiToken.Length == 64;
             }
         }
 
@@ -652,6 +699,7 @@ namespace OVIA.Desktop
                 currentErpCompanyId = "";
                 currentErpUserId = "";
                 currentErpPassword = "";
+                currentErpApiToken = "";
                 hasCurrentErpWebLogin = false;
             }
         }

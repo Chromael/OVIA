@@ -1060,6 +1060,11 @@ namespace OVIA.Desktop
                     forwardHistory.Push(forwardEntry);
                 }
 
+                if (navigated)
+                {
+                    RefreshCurrentWorkspaceNavigationState();
+                }
+
                 return navigated;
             }
             finally
@@ -1086,6 +1091,11 @@ namespace OVIA.Desktop
                 if (navigated && backEntry != null)
                 {
                     backHistory.Push(backEntry);
+                }
+
+                if (navigated)
+                {
+                    RefreshCurrentWorkspaceNavigationState();
                 }
 
                 return navigated;
@@ -1521,6 +1531,37 @@ ShowScreenWithHistory(
             }
 
             currentNavigationEntry = entry;
+            RefreshCurrentWorkspaceNavigationState();
+        }
+
+        private void RefreshCurrentWorkspaceNavigationState()
+        {
+            if (currentScreen == null || currentScreen.IsDisposed)
+            {
+                return;
+            }
+
+            RefreshWorkspaceNavigationHeaders(currentScreen);
+        }
+
+        private void RefreshWorkspaceNavigationHeaders(Control root)
+        {
+            if (root == null || root.IsDisposed)
+            {
+                return;
+            }
+
+            OVIA.Desktop.Controls.OviaWorkspaceHeader header = root as OVIA.Desktop.Controls.OviaWorkspaceHeader;
+            if (header != null)
+            {
+                header.RefreshNavigationButtonStates();
+            }
+
+            int i;
+            for (i = 0; i < root.Controls.Count; i++)
+            {
+                RefreshWorkspaceNavigationHeaders(root.Controls[i]);
+            }
         }
 
         private bool ShowScreen(Form nextScreen)

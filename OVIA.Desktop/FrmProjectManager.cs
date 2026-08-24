@@ -42,6 +42,7 @@ namespace OVIA.Desktop
         private Panel contentPanel;
         private OviaContentLoadingOverlay contentLoadingOverlay;
         private bool isScrollResetQueued = false;
+        private bool isErpProjectListLoading = false;
 
         public FrmProjectManager(string companyId, string userId)
         {
@@ -49,8 +50,7 @@ namespace OVIA.Desktop
             this.userId = userId;
 
             BuildUI();
-            LoadSampleProjects();
-            BindProjects();
+            this.Shown += FrmProjectManager_Shown;
         }
 
         private void BuildUI()
@@ -247,12 +247,72 @@ namespace OVIA.Desktop
             );
         }
 
-        private void RefreshProjectListFromInitialSort()
+        private async void FrmProjectManager_Shown(object sender, EventArgs e)
+        {
+            this.Shown -= FrmProjectManager_Shown;
+            await LoadProjectsFromErpAsync(true);
+        }
+
+        private async void RefreshProjectListFromInitialSort()
         {
             headerSortColumn = "";
             headerSortAscending = true;
             currentPage = 1;
-            BindProjects();
+            await LoadProjectsFromErpAsync(true);
+        }
+
+        private async System.Threading.Tasks.Task LoadProjectsFromErpAsync(bool showErrorMessage)
+        {
+            if (isErpProjectListLoading)
+            {
+                return;
+            }
+
+            isErpProjectListLoading = true;
+            BeginContentLoading();
+
+            try
+            {
+                if (lblStatus != null)
+                {
+                    lblStatus.Text = "ERP 공사목록을 불러오는 중입니다.";
+                }
+
+                OviaErpProjectListResult result = await OviaErpApiService.GetProjectListAsync(companyId);
+                if (result != null && result.IsSuccess)
+                {
+                    allProjects = result.Projects ?? new List<OviaProjectRow>();
+                    currentPage = 1;
+                    BindProjects();
+                    return;
+                }
+
+                BindProjects();
+
+                string message = result == null || string.IsNullOrWhiteSpace(result.Message)
+                    ? "ERP 공사목록을 불러오지 못했습니다."
+                    : result.Message;
+
+                if (lblStatus != null)
+                {
+                    lblStatus.Text = "ERP 공사목록 조회 실패";
+                }
+
+                if (showErrorMessage)
+                {
+                    MessageBox.Show(
+                        message,
+                        "OVIA",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning
+                    );
+                }
+            }
+            finally
+            {
+                isErpProjectListLoading = false;
+                EndContentLoading();
+            }
         }
 
         private void NavigateByWorkspacePath(string target)
@@ -663,6 +723,7 @@ namespace OVIA.Desktop
 
             OviaFluentTheme.ApplyDataGrid(grid);
 
+            AddSequenceColumn();
             AddColumn("공사번호", 90);
             AddColumn("공사명", 320);
             AddColumn("거래처", 180);
@@ -675,6 +736,22 @@ namespace OVIA.Desktop
             ApplyProjectGridAlignments();
 
             parent.Controls.Add(grid);
+        }
+
+
+        private void AddSequenceColumn()
+        {
+            DataGridViewTextBoxColumn column = new DataGridViewTextBoxColumn();
+            column.Name = "No.";
+            column.HeaderText = "No.";
+            column.Width = 55;
+            column.MinimumWidth = 45;
+            column.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+            column.SortMode = DataGridViewColumnSortMode.NotSortable;
+            column.Resizable = DataGridViewTriState.False;
+            column.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            column.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            grid.Columns.Add(column);
         }
 
         private void AddColumn(string header, int width)
@@ -733,7 +810,7 @@ namespace OVIA.Desktop
 
             lblStatus = OviaWorkspaceStatusLabel.Create(
                 parent,
-                "※ 현재 공사 목록은 임시 샘플입니다. 추후 셀먼 ERP/API에서 거래처와 공사 정보를 불러옵니다.",
+                "ERP 공사목록을 불러오는 중입니다.",
                 38,
                 655
             );
@@ -767,17 +844,6 @@ namespace OVIA.Desktop
             }
         }
 
-        private void LoadSampleProjects()
-        {
-            allProjects.Clear();
-
-            allProjects.Add(new OviaProjectRow("1538", "2026_공장판매", "셀먼", "진행중", "2026-04-28", "2026-05-20", "임대표", "최근 추출 테스트"));
-            allProjects.Add(new OviaProjectRow("1606", "광양 홍숭 수성복합 신축공사", "현대건설", "진행중", "2026-04-15", "2026-05-18", "김팀장", ""));
-            allProjects.Add(new OviaProjectRow("1618", "나주 봉황 참송 이앤씨", "나주현장", "진행중", "2026-05-01", "2026-05-14", "관리자", ""));
-            allProjects.Add(new OviaProjectRow("1523", "고창 프로젝트", "거래처A", "완료", "2026-03-02", "2026-04-10", "관리자", "완료공사"));
-            allProjects.Add(new OviaProjectRow("1637", "광주 상무 오피스텔", "거래처B", "진행중", "2026-05-11", "2026-05-19", "관리자", ""));
-        }
-
         private void BindProjects()
         {
             BeginContentLoading();
@@ -805,6 +871,7 @@ namespace OVIA.Desktop
             for (i = start; i < end; i++)
             {
                 grid.Rows.Add(
+                    (currentProjects.Count - i).ToString(),
                     currentProjects[i].ProjectNo,
                     currentProjects[i].ProjectName,
                     currentProjects[i].ClientName,
@@ -1079,7 +1146,7 @@ namespace OVIA.Desktop
             }
 
             string columnName = grid.Columns[e.ColumnIndex].Name;
-            if (string.IsNullOrWhiteSpace(columnName))
+            if (string.IsNullOrWhiteSpace(columnName) || columnName == "No.")
             {
                 return;
             }
