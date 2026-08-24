@@ -170,6 +170,7 @@ namespace OVIA.Desktop
         private bool isInternalNavigation = false;
         private bool isBackNavigationQueued = false;
         private readonly string initialFilePath;
+        private readonly BarListEditResult registrationDraft;
         private string savedProjectFilePath = "";
 
         private readonly Color BrandIndigo = OviaFluentTheme.AccentHover;
@@ -205,6 +206,9 @@ namespace OVIA.Desktop
             this.projectStatus = projectStatus == null ? "" : projectStatus;
             this.initialFilePath = initialFilePath == null ? "" : initialFilePath;
             this.savedProjectFilePath = this.initialFilePath;
+            this.registrationDraft = this.initialFilePath.Trim() == ""
+                ? OviaBarListRegistrationDraftStore.Get(this.companyId, this.projectNo)
+                : null;
 
             shapeRepository = RebarShapeRepository.CreateDefault();
 
@@ -1021,7 +1025,22 @@ namespace OVIA.Desktop
             projectContextHeader.Location = new Point(34, 156);
             projectContextHeader.Size = new Size(1168, 58);
             projectContextHeader.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            projectContextHeader.SetContext(projectNo, projectName, "", "", "", clientName, projectStatus);
+            if (registrationDraft != null)
+            {
+                projectContextHeader.SetContext(
+                    projectNo,
+                    projectName,
+                    "",
+                    NormalizeProjectHeaderDate(registrationDraft.DueDate),
+                    registrationDraft.Title,
+                    clientName,
+                    projectStatus
+                );
+            }
+            else
+            {
+                projectContextHeader.SetContext(projectNo, projectName, "", "", "", clientName, projectStatus);
+            }
             parent.Controls.Add(projectContextHeader);
         }
 
@@ -3465,6 +3484,7 @@ namespace OVIA.Desktop
                 SetReferenceFilePath(filePath);
                 lastLoadedFilePath = filePath;
                 savedProjectFilePath = filePath;
+                OviaBarListRegistrationDraftStore.Clear(companyId, projectNo);
                 RefreshProjectContextHeaderFromGrid();
                 OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 저장", "메인  ›  공사관리  ›  공사별 BarList  ›  BarList");
             }
@@ -9247,6 +9267,7 @@ namespace OVIA.Desktop
                 List<List<string>> rows = ReadCsv(filePath);
                 rows = RemoveNonRebarRowsFromAutoCadCsv(rows);
                 NormalizeCadShapePathsInCsvRows(rows, filePath);
+                ApplyRegistrationDraftToCsvRows(rows);
 
                 if (rows == null || rows.Count <= 1)
                 {
@@ -9297,6 +9318,7 @@ namespace OVIA.Desktop
                 List<List<string>> rows = ReadCsv(filePath);
                 rows = RemoveNonRebarRowsFromAutoCadCsv(rows);
                 NormalizeCadShapePathsInCsvRows(rows, filePath);
+                ApplyRegistrationDraftToCsvRows(rows);
 
                 if (rows == null || rows.Count <= 1)
                 {
@@ -9340,6 +9362,72 @@ namespace OVIA.Desktop
                 lblStatus.Text = "CSV 추가 입력 오류 - " + ex.Message;
                 lblStatus.ForeColor = OviaFluentTheme.Danger;
                 return false;
+            }
+        }
+
+        private void ApplyRegistrationDraftToCsvRows(List<List<string>> rows)
+        {
+            if (registrationDraft == null || rows == null || rows.Count == 0 || rows[0] == null)
+            {
+                return;
+            }
+
+            SetRegistrationDraftCsvValue(rows, "제목", registrationDraft.Title);
+            SetRegistrationDraftCsvValue(rows, "작성", registrationDraft.WriteStatus);
+            SetRegistrationDraftCsvValue(rows, "동", registrationDraft.Building);
+            SetRegistrationDraftCsvValue(rows, "층", registrationDraft.Floor);
+            SetRegistrationDraftCsvValue(rows, "공종", registrationDraft.WorkType);
+            SetRegistrationDraftCsvValue(rows, "태그", registrationDraft.Tags);
+            SetRegistrationDraftCsvValue(rows, "색상", registrationDraft.Color);
+            SetRegistrationDraftCsvValue(rows, "발주일", registrationDraft.OrderDate);
+            SetRegistrationDraftCsvValue(rows, "등록일", registrationDraft.CreatedDate);
+            SetRegistrationDraftCsvValue(rows, "납기일", registrationDraft.DueDate);
+            SetRegistrationDraftCsvValue(rows, "OVIA_BARLIST_MEMO", registrationDraft.Memo);
+        }
+
+        private void SetRegistrationDraftCsvValue(List<List<string>> rows, string header, string value)
+        {
+            if (rows == null || rows.Count == 0 || rows[0] == null)
+            {
+                return;
+            }
+
+            int columnIndex = FindCsvColumnIndex(rows[0], header);
+
+            if (columnIndex < 0)
+            {
+                columnIndex = rows[0].Count;
+                rows[0].Add(header);
+
+                int addRowIndex;
+                for (addRowIndex = 1; addRowIndex < rows.Count; addRowIndex++)
+                {
+                    if (rows[addRowIndex] == null)
+                    {
+                        rows[addRowIndex] = new List<string>();
+                    }
+
+                    while (rows[addRowIndex].Count <= columnIndex)
+                    {
+                        rows[addRowIndex].Add("");
+                    }
+                }
+            }
+
+            int rowIndex;
+            for (rowIndex = 1; rowIndex < rows.Count; rowIndex++)
+            {
+                if (rows[rowIndex] == null)
+                {
+                    rows[rowIndex] = new List<string>();
+                }
+
+                while (rows[rowIndex].Count <= columnIndex)
+                {
+                    rows[rowIndex].Add("");
+                }
+
+                rows[rowIndex][columnIndex] = value == null ? "" : value;
             }
         }
 

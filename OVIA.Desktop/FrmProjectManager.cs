@@ -675,14 +675,6 @@ namespace OVIA.Desktop
             chkIncludeDone.CheckedChanged += Filter_Changed;
             card.Controls.Add(chkIncludeDone);
 
-            OVIA.Desktop.Controls.OviaButton newButton = new OVIA.Desktop.Controls.OviaButton();
-            newButton.Text = "새 공사";
-            newButton.Role = OVIA.Desktop.OviaButtonRole.Primary;
-            newButton.Location = new Point(981, 38);
-            newButton.Size = OviaFluentTheme.MeasureButtonSize(newButton.Text);
-            newButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            newButton.Click += NewProject_Click;
-            card.Controls.Add(newButton);
         }
 
         private void BuildProjectGrid(Control parent)
@@ -1318,16 +1310,6 @@ namespace OVIA.Desktop
             }
 
             return value.ToString();
-        }
-
-        private void NewProject_Click(object sender, EventArgs e)
-        {
-            MessageBox.Show(
-                "새 공사 등록은 다음 단계에서 셀먼 ERP/API 연동 구조와 함께 구현합니다.",
-                "OVIA",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information
-            );
         }
 
         private void Close_Click(object sender, EventArgs e)

@@ -612,28 +612,12 @@ namespace OVIA.Desktop
             newButton.Click += NewButton_Click;
             actionPanel.Controls.Add(newButton);
 
-            OVIA.Desktop.Controls.OviaButton printButton = new OVIA.Desktop.Controls.OviaButton();
-            printButton.Text = "목록출력";
-            printButton.Location = new Point(newButton.Right + 8, 2);
-            printButton.Size = OviaFluentTheme.MeasureButtonSize(printButton.Text);
-            printButton.Role = OVIA.Desktop.OviaButtonRole.Neutral;
-            printButton.Click += ListPrintButton_Click;
-            actionPanel.Controls.Add(printButton);
-
             OviaExcelActionButton excelButton = new OviaExcelActionButton();
             excelButton.Text = "엑셀저장";
-            excelButton.Location = new Point(printButton.Right + 8, 2);
+            excelButton.Location = new Point(newButton.Right + 8, 2);
             excelButton.Size = OviaFluentTheme.MeasureButtonSize(excelButton.Text);
             excelButton.Click += ExcelSaveButton_Click;
             actionPanel.Controls.Add(excelButton);
-
-            OVIA.Desktop.Controls.OviaButton mergeButton = new OVIA.Desktop.Controls.OviaButton();
-            mergeButton.Text = "전표병합";
-            mergeButton.Location = new Point(excelButton.Right + 8, 2);
-            mergeButton.Size = OviaFluentTheme.MeasureButtonSize(mergeButton.Text);
-            mergeButton.Role = OVIA.Desktop.OviaButtonRole.Neutral;
-            mergeButton.Click += MergeSlipButton_Click;
-            actionPanel.Controls.Add(mergeButton);
         }
 
 
@@ -1875,6 +1859,11 @@ namespace OVIA.Desktop
                     int statusIndex = FindHeaderIndex(headers, "상태");
                     int writeIndex = FindHeaderIndex(headers, "작성");
                     int titleIndex = FindHeaderIndex(headers, "제목");
+                    int memoIndex = FindHeaderIndex(headers, "OVIA_BARLIST_MEMO");
+                    if (memoIndex < 0)
+                    {
+                        memoIndex = FindHeaderIndex(headers, "BARLIST_MEMO");
+                    }
                     int createdDateIndex = FindHeaderIndex(headers, "등록일");
                     int qtyIndex = FindHeaderIndex(headers, "수량");
                     int totalLengthIndex = FindHeaderIndex(headers, "총길이");
@@ -1906,6 +1895,7 @@ namespace OVIA.Desktop
                         SetFirstCellValue(ref summary.Status, rows[r], statusIndex);
                         SetFirstCellValue(ref summary.WriteStatus, rows[r], writeIndex);
                         SetFirstCellValue(ref summary.Title, rows[r], titleIndex);
+                        SetFirstCellValue(ref summary.Memo, rows[r], memoIndex);
                         SetFirstCellValue(ref summary.CreatedDate, rows[r], createdDateIndex);
 
                         if (qtyIndex >= 0 && qtyIndex < rows[r].Count)
@@ -2233,22 +2223,28 @@ namespace OVIA.Desktop
 
         private void NewButton_Click(object sender, EventArgs e)
         {
-            if (!IsAutoCadRunning())
-            {
-                MessageBox.Show(
-                    "현재 AutoCAD가 실행중이지 않습니다. AutoCAD를 먼저 실행하세요",
-                    "OVIA AutoCAD 확인",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning
-                );
+            List<ProjectBarListSummary> allRows = GetBarListSummaries();
+            ProjectBarListSummary newSummary = new ProjectBarListSummary();
+            newSummary.CreatedDate = DateTime.Today.ToString("yyyy-MM-dd");
 
-                if (lblStatus != null)
+            using (OviaBarListEditDialog dialog = new OviaBarListEditDialog(
+                projectName,
+                "",
+                newSummary,
+                GetDistinctValues(allRows, "작성"),
+                GetDistinctValues(allRows, "동"),
+                GetDistinctValues(allRows, "층"),
+                GetDistinctValues(allRows, "공종"),
+                GetDistinctValues(allRows, "태그"),
+                GetDistinctValues(allRows, "색상"),
+                true))
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK)
                 {
-                    lblStatus.Text = "AutoCAD 실행 필요";
-                    lblStatus.ForeColor = OviaFluentTheme.Danger;
+                    return;
                 }
 
-                return;
+                OviaBarListRegistrationDraftStore.Set(companyId, projectNo, dialog.Result);
             }
 
             IOviaWorkspaceNavigator workspace = OviaWorkspaceNavigation.FindNavigator(this);
@@ -2261,19 +2257,6 @@ namespace OVIA.Desktop
 
             FrmBarList form = new FrmBarList(companyId, userId, projectNo, projectName, clientName, projectStatus);
             ShowReplacementWindow(form);
-        }
-
-        private bool IsAutoCadRunning()
-        {
-            try
-            {
-                Process[] processes = Process.GetProcessesByName("acad");
-                return processes != null && processes.Length > 0;
-            }
-            catch
-            {
-                return false;
-            }
         }
 
         private void OpenButton_Click(object sender, EventArgs e)
@@ -2393,13 +2376,6 @@ namespace OVIA.Desktop
             return true;
         }
 
-        private void MergeSlipButton_Click(object sender, EventArgs e)
-        {
-            lblStatus.Text = "전표병합 메뉴가 추가되었습니다. 실제 병합 기능은 ERP 전표 데이터 구조 확정 후 연결됩니다.";
-            lblStatus.ForeColor = TextSub;
-        }
-
-
         private void Grid_CellMouseDown(object sender, DataGridViewCellMouseEventArgs e)
         {
             if (grid == null || e.RowIndex < 0 || e.ColumnIndex < 0)
@@ -2420,12 +2396,6 @@ namespace OVIA.Desktop
 
                 menu.Show(grid, grid.PointToClient(Cursor.Position));
             }
-        }
-
-        private void ListPrintButton_Click(object sender, EventArgs e)
-        {
-            lblStatus.Text = "목록출력 기능은 출력 양식 확정 후 연결됩니다.";
-            lblStatus.ForeColor = TextSub;
         }
 
         private void ExcelSaveButton_Click(object sender, EventArgs e)
@@ -2631,7 +2601,7 @@ namespace OVIA.Desktop
             EnsureCsvHeader(headers, "발주일");
             EnsureCsvHeader(headers, "등록일");
             EnsureCsvHeader(headers, "납기일");
-            EnsureCsvHeader(headers, "비고");
+            EnsureCsvHeader(headers, "OVIA_BARLIST_MEMO");
 
             if (rows.Count == 1)
             {
@@ -2652,7 +2622,7 @@ namespace OVIA.Desktop
                 SetCsvCell(rows[r], headers, "발주일", result.OrderDate);
                 SetCsvCell(rows[r], headers, "등록일", result.CreatedDate);
                 SetCsvCell(rows[r], headers, "납기일", result.DueDate);
-                SetCsvCell(rows[r], headers, "비고", result.Memo);
+                SetCsvCell(rows[r], headers, "OVIA_BARLIST_MEMO", result.Memo);
             }
 
             WriteCsv(filePath, rows);
@@ -3007,6 +2977,60 @@ namespace OVIA.Desktop
         public string Memo = "";
     }
 
+    internal static class OviaBarListRegistrationDraftStore
+    {
+        private static readonly Dictionary<string, BarListEditResult> Drafts = new Dictionary<string, BarListEditResult>(StringComparer.OrdinalIgnoreCase);
+
+        private static string BuildKey(string companyId, string projectNo)
+        {
+            return (companyId == null ? "" : companyId.Trim()) + "|" + (projectNo == null ? "" : projectNo.Trim());
+        }
+
+        public static void Set(string companyId, string projectNo, BarListEditResult source)
+        {
+            if (source == null)
+            {
+                return;
+            }
+
+            Drafts[BuildKey(companyId, projectNo)] = Clone(source);
+        }
+
+        public static BarListEditResult Get(string companyId, string projectNo)
+        {
+            BarListEditResult value;
+
+            if (!Drafts.TryGetValue(BuildKey(companyId, projectNo), out value) || value == null)
+            {
+                return null;
+            }
+
+            return Clone(value);
+        }
+
+        public static void Clear(string companyId, string projectNo)
+        {
+            Drafts.Remove(BuildKey(companyId, projectNo));
+        }
+
+        private static BarListEditResult Clone(BarListEditResult source)
+        {
+            BarListEditResult copy = new BarListEditResult();
+            copy.Title = source.Title;
+            copy.WriteStatus = source.WriteStatus;
+            copy.Building = source.Building;
+            copy.Floor = source.Floor;
+            copy.WorkType = source.WorkType;
+            copy.Tags = source.Tags;
+            copy.Color = source.Color;
+            copy.OrderDate = source.OrderDate;
+            copy.CreatedDate = source.CreatedDate;
+            copy.DueDate = source.DueDate;
+            copy.Memo = source.Memo;
+            return copy;
+        }
+    }
+
     public class OviaBarListEditDialog : Form
     {
         private readonly string projectName;
@@ -3032,16 +3056,25 @@ namespace OVIA.Desktop
         private DateTime cadTitleRequestStartedAt = DateTime.MinValue;
         private bool cadTitleRequestPending = false;
         private string originalSnapshot = "";
+        private readonly bool isNewRegistration;
 
         public BarListEditResult Result = new BarListEditResult();
 
         public OviaBarListEditDialog(string projectName, string orderStep, ProjectBarListSummary summary, List<string> writes, List<string> buildings, List<string> floors, List<string> workTypes, List<string> tags, List<string> colors)
+            : this(projectName, orderStep, summary, writes, buildings, floors, workTypes, tags, colors, false)
+        {
+        }
+
+        public OviaBarListEditDialog(string projectName, string orderStep, ProjectBarListSummary summary, List<string> writes, List<string> buildings, List<string> floors, List<string> workTypes, List<string> tags, List<string> colors, bool isNewRegistration)
         {
             this.projectName = projectName == null ? "" : projectName;
             this.orderStep = orderStep == null ? "" : orderStep;
             this.summary = summary == null ? new ProjectBarListSummary() : summary;
+            this.isNewRegistration = isNewRegistration;
 
-            this.Text = "BarList 수정 - 주문차수 : " + this.orderStep + " | 발주번호 : " + this.summary.OrderNumber + " | " + this.summary.Title;
+            this.Text = this.isNewRegistration
+                ? "BarList 신규등록 - " + this.projectName
+                : "BarList 수정 - 주문차수 : " + this.orderStep + " | 발주번호 : " + this.summary.OrderNumber + " | " + this.summary.Title;
             this.StartPosition = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MinimizeBox = false;
@@ -3576,9 +3609,19 @@ namespace OVIA.Desktop
                 return;
             }
 
-            bool changed = originalSnapshot != BuildSnapshot();
-            btnOk.Enabled = changed;
-            btnOk.Cursor = changed ? Cursors.Hand : Cursors.Default;
+            bool enabled;
+
+            if (isNewRegistration)
+            {
+                enabled = txtTitle != null && txtTitle.Text.Trim() != "";
+            }
+            else
+            {
+                enabled = originalSnapshot != BuildSnapshot();
+            }
+
+            btnOk.Enabled = enabled;
+            btnOk.Cursor = enabled ? Cursors.Hand : Cursors.Default;
         }
 
         private void BtnOk_Click(object sender, EventArgs e)
@@ -4231,12 +4274,11 @@ namespace OVIA.Desktop
 
             arrowLabel = new Label();
             arrowLabel.AutoSize = false;
-            arrowLabel.Text = "⌄";
+            arrowLabel.Text = "";
             arrowLabel.TextAlign = ContentAlignment.MiddleCenter;
-            arrowLabel.Font = OviaFluentTheme.FontInput(9F, FontStyle.Regular);
             arrowLabel.BackColor = Color.White;
-            arrowLabel.ForeColor = OviaFluentTheme.CommonInputIcon;
             arrowLabel.Cursor = Cursors.Hand;
+            arrowLabel.Paint += ArrowLabel_Paint;
             arrowLabel.Click += delegate { ShowDropDown(); };
             this.Controls.Add(arrowLabel);
 
@@ -4381,6 +4423,22 @@ namespace OVIA.Desktop
             }
         }
 
+        private void ArrowLabel_Paint(object sender, PaintEventArgs e)
+        {
+            int centerX = arrowLabel.Width / 2;
+            int centerY = arrowLabel.Height / 2 + 1;
+
+            using (Pen pen = new Pen(OviaFluentTheme.CommonInputIcon, 1.25F))
+            {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                pen.LineJoin = LineJoin.Round;
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                e.Graphics.DrawLine(pen, centerX - 4, centerY - 2, centerX, centerY + 2);
+                e.Graphics.DrawLine(pen, centerX, centerY + 2, centerX + 4, centerY - 2);
+            }
+        }
+
         private void LayoutChildren()
         {
             int arrowWidth = 28;
@@ -4477,9 +4535,11 @@ namespace OVIA.Desktop
 
     public class OviaSimpleDatePicker : UserControl
     {
-        private Label label;
-        private Button button;
+        private TextBox textBox;
+        private Timer clickTimer;
         private DateTime value = DateTime.Today;
+        private bool manualEditMode = false;
+        private bool invalidMessageShowing = false;
         public event EventHandler ValueChanged;
 
         public OviaSimpleDatePicker()
@@ -4488,27 +4548,51 @@ namespace OVIA.Desktop
             this.BackColor = Color.White;
             this.Size = new Size(160, 34);
 
-            label = new Label();
-            label.AutoSize = false;
-            label.TextAlign = ContentAlignment.MiddleLeft;
-            label.Font = OviaFluentTheme.FontInput(9.5F, FontStyle.Regular);
-            label.BackColor = Color.Transparent;
-            label.ForeColor = OviaFluentTheme.TextPrimary;
-            label.Location = new Point(10, 1);
-            label.Click += delegate { ShowCalendar(); };
-            this.Controls.Add(label);
+            // 화살표 버튼 제거.
+            // 1회 클릭: OVIA 달력 열기 / 더블클릭: yyyy-MM-dd 직접 입력
+            textBox = new TextBox();
+            textBox.BorderStyle = BorderStyle.None;
+            textBox.ReadOnly = true;
+            textBox.Font = OviaFluentTheme.FontInput(9.5F, FontStyle.Regular);
+            textBox.BackColor = Color.White;
+            textBox.ForeColor = OviaFluentTheme.TextPrimary;
+            textBox.TextAlign = HorizontalAlignment.Left;
+            textBox.MouseDown += TextBox_MouseDown;
+            textBox.KeyDown += TextBox_KeyDown;
+            textBox.Leave += TextBox_Leave;
+            this.Controls.Add(textBox);
 
-            button = new Button();
-            button.FlatStyle = FlatStyle.Flat;
-            button.FlatAppearance.BorderSize = 0;
-            button.Text = "⌄";
-            button.Font = OviaFluentTheme.FontInput(9F, FontStyle.Regular);
-            button.BackColor = Color.White;
-            button.Click += delegate { ShowCalendar(); };
-            this.Controls.Add(button);
+            clickTimer = new Timer();
+            clickTimer.Interval = SystemInformation.DoubleClickTime;
+            clickTimer.Tick += delegate
+            {
+                clickTimer.Stop();
+                if (!manualEditMode)
+                {
+                    ShowCalendar();
+                }
+            };
 
             this.Resize += delegate { LayoutChildren(); };
-            this.Click += delegate { ShowCalendar(); };
+            this.MouseDown += delegate(object sender, MouseEventArgs e)
+            {
+                if (!this.Enabled)
+                {
+                    return;
+                }
+
+                if (e.Clicks >= 2)
+                {
+                    clickTimer.Stop();
+                    BeginManualEdit();
+                }
+                else
+                {
+                    clickTimer.Stop();
+                    clickTimer.Start();
+                }
+            };
+
             LayoutChildren();
             UpdateText();
         }
@@ -4518,12 +4602,18 @@ namespace OVIA.Desktop
             get { return value; }
             set
             {
-                this.value = value.Date;
+                DateTime newValue = value.Date;
+                bool changed = this.value.Date != newValue;
+                this.value = newValue;
                 UpdateText();
-                EventHandler handler = ValueChanged;
-                if (handler != null)
+
+                if (changed)
                 {
-                    handler(this, EventArgs.Empty);
+                    EventHandler handler = ValueChanged;
+                    if (handler != null)
+                    {
+                        handler(this, EventArgs.Empty);
+                    }
                 }
             }
         }
@@ -4531,21 +4621,23 @@ namespace OVIA.Desktop
         protected override void OnEnabledChanged(EventArgs e)
         {
             base.OnEnabledChanged(e);
-            label.Enabled = this.Enabled;
-            button.Enabled = this.Enabled;
+            textBox.Enabled = this.Enabled;
+            textBox.BackColor = this.Enabled ? Color.White : OviaFluentTheme.NeutralLight;
             Invalidate();
         }
 
         private void LayoutChildren()
         {
-            button.Size = new Size(28, Math.Max(1, Height - 4));
-            button.Location = new Point(Width - button.Width - 2, 2);
-            label.Size = new Size(Math.Max(1, Width - button.Width - 14), Math.Max(1, Height - 2));
+            textBox.Location = new Point(10, Math.Max(1, (Height - textBox.PreferredHeight) / 2));
+            textBox.Size = new Size(Math.Max(1, Width - 20), textBox.PreferredHeight);
         }
 
         private void UpdateText()
         {
-            label.Text = value.ToString("yyyy-MM-dd");
+            if (!manualEditMode)
+            {
+                textBox.Text = value.ToString("yyyy-MM-dd");
+            }
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -4561,6 +4653,127 @@ namespace OVIA.Desktop
             }
         }
 
+        private void TextBox_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (!this.Enabled)
+            {
+                return;
+            }
+
+            if (e.Clicks >= 2)
+            {
+                clickTimer.Stop();
+                BeginManualEdit();
+                return;
+            }
+
+            if (!manualEditMode)
+            {
+                clickTimer.Stop();
+                clickTimer.Start();
+            }
+        }
+
+        private void BeginManualEdit()
+        {
+            if (!this.Enabled)
+            {
+                return;
+            }
+
+            manualEditMode = true;
+            textBox.ReadOnly = false;
+            textBox.Text = value.ToString("yyyy-MM-dd");
+            textBox.Focus();
+            textBox.SelectAll();
+        }
+
+        private void TextBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (manualEditMode && e.KeyCode == Keys.Enter)
+            {
+                CommitManualText(true);
+                e.SuppressKeyPress = true;
+                return;
+            }
+
+            if (manualEditMode && e.KeyCode == Keys.Escape)
+            {
+                manualEditMode = false;
+                textBox.ReadOnly = true;
+                UpdateText();
+                e.SuppressKeyPress = true;
+                return;
+            }
+
+            if (!manualEditMode && (e.KeyCode == Keys.Down || e.KeyCode == Keys.F4))
+            {
+                ShowCalendar();
+                e.SuppressKeyPress = true;
+            }
+        }
+
+        private void TextBox_Leave(object sender, EventArgs e)
+        {
+            if (manualEditMode && !invalidMessageShowing)
+            {
+                CommitManualText(true);
+            }
+        }
+
+        private bool CommitManualText(bool showInvalidMessage)
+        {
+            DateTime parsed;
+            string raw = (textBox.Text ?? "").Trim();
+
+            if (DateTime.TryParseExact(
+                raw,
+                "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out parsed))
+            {
+                manualEditMode = false;
+                textBox.ReadOnly = true;
+                Value = parsed.Date;
+                return true;
+            }
+
+            if (showInvalidMessage)
+            {
+                if (!invalidMessageShowing)
+                {
+                    invalidMessageShowing = true;
+                    MessageBox.Show(
+                        "올바른 날짜를 yyyy-MM-dd 형식으로 입력해 주세요.\r\n예: 2026-09-25\r\n\r\n월은 01~12, 일은 해당 월의 실제 날짜 범위여야 합니다.",
+                        "OVIA",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    invalidMessageShowing = false;
+                }
+
+                if (!textBox.IsDisposed)
+                {
+                    this.BeginInvoke((MethodInvoker)delegate
+                    {
+                        if (manualEditMode && textBox.CanFocus)
+                        {
+                            textBox.Focus();
+                            textBox.SelectAll();
+                        }
+                    });
+                }
+            }
+            else
+            {
+                manualEditMode = false;
+                textBox.ReadOnly = true;
+                UpdateText();
+            }
+
+            return false;
+        }
+
         private void ShowCalendar()
         {
             if (!this.Enabled)
@@ -4568,19 +4781,29 @@ namespace OVIA.Desktop
                 return;
             }
 
+            manualEditMode = false;
+            textBox.ReadOnly = true;
+            UpdateText();
+
             OviaCalendarPopup popup = new OviaCalendarPopup(value);
-            if (popup.ShowCalendar(this, new Point(0, this.Height + 2)) == DialogResult.OK)
+
+            // 핵심: ShowDialog 반환값에 의존하지 않고
+            // 달력에서 날짜가 확정되는 즉시 Value에 직접 반영한다.
+            popup.DateConfirmed += delegate(object sender, DateSelectedEventArgs e)
             {
-                Value = popup.SelectedDate;
-            }
+                Value = e.Date.Date;
+            };
+
+            popup.ShowCalendar(this, new Point(0, this.Height + 2));
         }
     }
 
     public class OviaCalendarPopup : Form
     {
-        private MonthCalendar calendar;
+        private OviaCalendarSurface calendar;
         private Button btnToday;
         public DateTime SelectedDate;
+        public event EventHandler<DateSelectedEventArgs> DateConfirmed;
 
         public OviaCalendarPopup(DateTime selectedDate)
         {
@@ -4589,18 +4812,23 @@ namespace OVIA.Desktop
             this.ShowInTaskbar = false;
             this.StartPosition = FormStartPosition.Manual;
             this.BackColor = Color.White;
-            this.Size = new Size(284, 248);
+            this.Size = new Size(300, 388);
             this.Padding = new Padding(8);
-            this.Deactivate += delegate { if (this.Visible) { this.DialogResult = DialogResult.Cancel; Close(); } };
+            this.Deactivate += delegate
+            {
+                if (this.Visible)
+                {
+                    this.DialogResult = DialogResult.Cancel;
+                    Close();
+                }
+            };
 
-            calendar = new MonthCalendar();
+            // Native MonthCalendar의 선택 이벤트가 사용자 환경에서 확정되지 않는 문제가 있어
+            // OVIA 자체 달력 Surface를 사용한다. 날짜 셀 클릭은 OVIA가 직접 좌표 계산하여
+            // 실제 DateTime으로 확정하므로 월 이동/날짜 선택 동작을 안정적으로 분리할 수 있다.
+            calendar = new OviaCalendarSurface(SelectedDate);
             calendar.Location = new Point(8, 8);
-            calendar.MaxSelectionCount = 1;
-            calendar.ShowToday = true;
-            calendar.ShowTodayCircle = true;
-            calendar.TodayDate = DateTime.Today;
-            calendar.SelectionStart = selectedDate.Date;
-            calendar.SelectionEnd = selectedDate.Date;
+            calendar.Size = new Size(this.ClientSize.Width - 16, 326);
             calendar.DateSelected += Calendar_DateSelected;
             this.Controls.Add(calendar);
 
@@ -4614,11 +4842,7 @@ namespace OVIA.Desktop
             btnToday.Location = new Point(this.Width - btnToday.Width - 10, this.Height - btnToday.Height - 10);
             btnToday.Click += delegate
             {
-                SelectedDate = DateTime.Today;
-                calendar.SelectionStart = SelectedDate;
-                calendar.SelectionEnd = SelectedDate;
-                this.DialogResult = DialogResult.OK;
-                Close();
+                ConfirmDate(DateTime.Today);
             };
             this.Controls.Add(btnToday);
         }
@@ -4632,16 +4856,42 @@ namespace OVIA.Desktop
             }
         }
 
-        public DialogResult ShowCalendar(Control owner, Point point)
+        public void ShowCalendar(Control owner, Point point)
         {
             Point screenPoint = owner.PointToScreen(point);
             this.Location = screenPoint;
-            return this.ShowDialog(owner.FindForm());
+
+            // 비모달 Owned Form으로 표시한다.
+            // 따라서 사용자가 달력 바깥의 OVIA 화면을 클릭하면 Deactivate가 발생하고 즉시 닫힌다.
+            Form ownerForm = owner.FindForm();
+            if (ownerForm != null)
+            {
+                this.Show(ownerForm);
+            }
+            else
+            {
+                this.Show();
+            }
+
+            this.Activate();
         }
 
-        private void Calendar_DateSelected(object sender, DateRangeEventArgs e)
+        private void Calendar_DateSelected(object sender, DateSelectedEventArgs e)
         {
-            SelectedDate = e.Start.Date;
+            ConfirmDate(e.Date);
+        }
+
+        private void ConfirmDate(DateTime date)
+        {
+            SelectedDate = date.Date;
+
+            EventHandler<DateSelectedEventArgs> handler = DateConfirmed;
+            if (handler != null)
+            {
+                // 달력을 닫기 전에 발주일/납기일 입력 컨트롤에 먼저 반영한다.
+                handler(this, new DateSelectedEventArgs(SelectedDate));
+            }
+
             this.DialogResult = DialogResult.OK;
             Close();
         }
@@ -4658,8 +4908,18 @@ namespace OVIA.Desktop
 
     public class OviaCalendarSurface : Control
     {
+        private enum CalendarViewMode
+        {
+            Days,
+            Years,
+            Months
+        }
+
         private DateTime displayMonth;
         private DateTime selectedDate;
+        private CalendarViewMode viewMode = CalendarViewMode.Days;
+        private int yearPageStart;
+        private DateTime? hoveredDate;
         private const int RowGap = 5;
         public event EventHandler<DateSelectedEventArgs> DateSelected;
 
@@ -4667,10 +4927,56 @@ namespace OVIA.Desktop
         {
             this.selectedDate = selectedDate.Date;
             this.displayMonth = new DateTime(selectedDate.Year, selectedDate.Month, 1);
+            this.yearPageStart = GetYearPageStart(selectedDate.Year);
             this.DoubleBuffered = true;
             this.Font = OviaFluentTheme.FontInput(9.5F, FontStyle.Regular);
             this.BackColor = Color.White;
+            this.Cursor = Cursors.Default;
             this.MouseDown += OviaCalendarSurface_MouseDown;
+            this.MouseMove += OviaCalendarSurface_MouseMove;
+            this.MouseLeave += OviaCalendarSurface_MouseLeave;
+        }
+
+        private int GetYearPageStart(int year)
+        {
+            int start = year - 5;
+            if (start < 1)
+            {
+                start = 1;
+            }
+            if (start > 9988)
+            {
+                start = 9988;
+            }
+            return start;
+        }
+
+        private Rectangle PrevButtonRect
+        {
+            get { return new Rectangle(18, 22, 28, 30); }
+        }
+
+        private Rectangle NextButtonRect
+        {
+            get { return new Rectangle(Width - 46, 22, 28, 30); }
+        }
+
+        private Rectangle YearTitleRect
+        {
+            get
+            {
+                int center = Width / 2;
+                return new Rectangle(center - 76, 24, 78, 30);
+            }
+        }
+
+        private Rectangle MonthTitleRect
+        {
+            get
+            {
+                int center = Width / 2;
+                return new Rectangle(center + 2, 24, 62, 30);
+            }
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -4683,25 +4989,109 @@ namespace OVIA.Desktop
                 e.Graphics.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
             }
 
-            TextRenderer.DrawText(e.Graphics, displayMonth.ToString("yyyy년 M월"), OviaFluentTheme.FontInput(10F, FontStyle.Bold), new Rectangle(28, 24, Width - 56, 30), OviaFluentTheme.TextPrimary, TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
-            TextRenderer.DrawText(e.Graphics, "‹", OviaFluentTheme.FontTitle(14F, FontStyle.Bold), new Rectangle(18, 22, 28, 30), OviaFluentTheme.TextSecondary, TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
-            TextRenderer.DrawText(e.Graphics, "›", OviaFluentTheme.FontTitle(14F, FontStyle.Bold), new Rectangle(Width - 46, 22, 28, 30), OviaFluentTheme.TextSecondary, TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
+            DrawNavigation(e.Graphics);
 
+            if (viewMode == CalendarViewMode.Years)
+            {
+                DrawYearSelector(e.Graphics);
+                return;
+            }
+
+            if (viewMode == CalendarViewMode.Months)
+            {
+                DrawMonthSelector(e.Graphics);
+                return;
+            }
+
+            DrawDayCalendar(e.Graphics);
+        }
+
+        private void DrawNavigation(Graphics g)
+        {
+            TextRenderer.DrawText(
+                g,
+                "‹",
+                OviaFluentTheme.FontTitle(14F, FontStyle.Bold),
+                PrevButtonRect,
+                OviaFluentTheme.TextSecondary,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
+
+            TextRenderer.DrawText(
+                g,
+                "›",
+                OviaFluentTheme.FontTitle(14F, FontStyle.Bold),
+                NextButtonRect,
+                OviaFluentTheme.TextSecondary,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
+
+            if (viewMode == CalendarViewMode.Years)
+            {
+                string rangeText = yearPageStart.ToString() + " - " + Math.Min(9999, yearPageStart + 11).ToString();
+                TextRenderer.DrawText(
+                    g,
+                    rangeText,
+                    OviaFluentTheme.FontInput(10F, FontStyle.Bold),
+                    new Rectangle(46, 24, Width - 92, 30),
+                    OviaFluentTheme.TextPrimary,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
+                return;
+            }
+
+            if (viewMode == CalendarViewMode.Months)
+            {
+                TextRenderer.DrawText(
+                    g,
+                    displayMonth.Year.ToString() + "년",
+                    OviaFluentTheme.FontInput(10F, FontStyle.Bold),
+                    new Rectangle(46, 24, Width - 92, 30),
+                    OviaFluentTheme.TextPrimary,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
+                return;
+            }
+
+            // 기존 디자인을 유지하되 년도와 월을 각각 클릭할 수 있도록 제목 영역만 분리한다.
+            TextRenderer.DrawText(
+                g,
+                displayMonth.Year.ToString() + "년",
+                OviaFluentTheme.FontInput(10F, FontStyle.Bold),
+                YearTitleRect,
+                OviaFluentTheme.TextPrimary,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
+
+            TextRenderer.DrawText(
+                g,
+                displayMonth.Month.ToString() + "월",
+                OviaFluentTheme.FontInput(10F, FontStyle.Bold),
+                MonthTitleRect,
+                OviaFluentTheme.TextPrimary,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
+        }
+
+        private void DrawDayCalendar(Graphics g)
+        {
             string[] days = new string[] { "일", "월", "화", "수", "목", "금", "토" };
             int gridLeft = 24;
             int gridTop = 72;
             int cellW = (Width - (gridLeft * 2)) / 7;
             int headerH = 28;
             int cellH = 30;
+
             int i;
             for (i = 0; i < 7; i++)
             {
-                TextRenderer.DrawText(e.Graphics, days[i], OviaFluentTheme.FontInput(9F, FontStyle.Bold), new Rectangle(gridLeft + i * cellW, gridTop, cellW, headerH), OviaFluentTheme.TextPrimary, TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
+                TextRenderer.DrawText(
+                    g,
+                    days[i],
+                    OviaFluentTheme.FontInput(9F, FontStyle.Bold),
+                    new Rectangle(gridLeft + i * cellW, gridTop, cellW, headerH),
+                    OviaFluentTheme.TextPrimary,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
             }
 
             DateTime firstDay = displayMonth;
             int startOffset = (int)firstDay.DayOfWeek;
             DateTime firstCell = firstDay.AddDays(-startOffset);
+
             int row;
             for (row = 0; row < 6; row++)
             {
@@ -4711,38 +5101,208 @@ namespace OVIA.Desktop
                     int x = gridLeft + i * cellW;
                     int y = gridTop + headerH + row * (cellH + RowGap);
                     Rectangle rect = new Rectangle(x, y, cellW, cellH);
-                    bool isCurrentMonth = day.Month == displayMonth.Month;
+                    bool isCurrentMonth = day.Month == displayMonth.Month && day.Year == displayMonth.Year;
                     bool isSelected = day.Date == selectedDate.Date;
+                    bool isHovered = hoveredDate.HasValue && day.Date == hoveredDate.Value.Date;
+
+                    // Hover 날짜는 연한 노란색 원형 배경으로 표시한다.
+                    // 선택된 날짜(녹색)가 우선이며, 선택 상태는 그대로 유지한다.
+                    if (isHovered && !isSelected)
+                    {
+                        Rectangle hoverCircle = new Rectangle(rect.Left + (rect.Width - 28) / 2, rect.Top + 1, 28, 28);
+                        using (SolidBrush hoverBrush = new SolidBrush(Color.FromArgb(255, 247, 204)))
+                        {
+                            g.FillEllipse(hoverBrush, hoverCircle);
+                        }
+                    }
 
                     if (isSelected)
                     {
                         Rectangle circle = new Rectangle(rect.Left + (rect.Width - 28) / 2, rect.Top + 1, 28, 28);
                         using (SolidBrush brush = new SolidBrush(Color.FromArgb(24, 128, 42)))
                         {
-                            e.Graphics.FillEllipse(brush, circle);
+                            g.FillEllipse(brush, circle);
                         }
                     }
 
-                    Color textColor = isSelected ? Color.White : (isCurrentMonth ? OviaFluentTheme.TextPrimary : OviaFluentTheme.TextMuted);
-                    TextRenderer.DrawText(e.Graphics, day.Day.ToString(), this.Font, rect, textColor, TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
+                    Color textColor = isSelected
+                        ? Color.White
+                        : (isCurrentMonth ? OviaFluentTheme.TextPrimary : OviaFluentTheme.TextMuted);
+
+                    TextRenderer.DrawText(
+                        g,
+                        day.Day.ToString(),
+                        this.Font,
+                        rect,
+                        textColor,
+                        TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
                 }
             }
         }
 
-        private void OviaCalendarSurface_MouseDown(object sender, MouseEventArgs e)
+        private void DrawYearSelector(Graphics g)
         {
-            if (new Rectangle(18, 22, 28, 30).Contains(e.Location))
+            int left = 28;
+            int top = 82;
+            int cols = 3;
+            int rows = 4;
+            int gapX = 8;
+            int gapY = 10;
+            int cellW = (Width - (left * 2) - (gapX * (cols - 1))) / cols;
+            int cellH = 46;
+
+            int index = 0;
+            int r;
+            int c;
+            for (r = 0; r < rows; r++)
             {
-                displayMonth = displayMonth.AddMonths(-1);
-                Invalidate();
-                return;
+                for (c = 0; c < cols; c++)
+                {
+                    int year = yearPageStart + index;
+                    Rectangle rect = new Rectangle(
+                        left + c * (cellW + gapX),
+                        top + r * (cellH + gapY),
+                        cellW,
+                        cellH);
+
+                    bool selected = year == displayMonth.Year;
+                    if (selected)
+                    {
+                        using (SolidBrush brush = new SolidBrush(Color.FromArgb(234, 246, 237)))
+                        using (Pen pen = new Pen(Color.FromArgb(24, 128, 42), 1F))
+                        {
+                            g.FillRectangle(brush, rect);
+                            g.DrawRectangle(pen, rect);
+                        }
+                    }
+
+                    TextRenderer.DrawText(
+                        g,
+                        year.ToString(),
+                        OviaFluentTheme.FontInput(9.5F, selected ? FontStyle.Bold : FontStyle.Regular),
+                        rect,
+                        selected ? Color.FromArgb(24, 128, 42) : OviaFluentTheme.TextPrimary,
+                        TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
+
+                    index++;
+                }
+            }
+        }
+
+        private void DrawMonthSelector(Graphics g)
+        {
+            int left = 28;
+            int top = 82;
+            int cols = 3;
+            int rows = 4;
+            int gapX = 8;
+            int gapY = 10;
+            int cellW = (Width - (left * 2) - (gapX * (cols - 1))) / cols;
+            int cellH = 46;
+
+            int month = 1;
+            int r;
+            int c;
+            for (r = 0; r < rows; r++)
+            {
+                for (c = 0; c < cols; c++)
+                {
+                    Rectangle rect = new Rectangle(
+                        left + c * (cellW + gapX),
+                        top + r * (cellH + gapY),
+                        cellW,
+                        cellH);
+
+                    bool selected = month == displayMonth.Month;
+                    if (selected)
+                    {
+                        using (SolidBrush brush = new SolidBrush(Color.FromArgb(234, 246, 237)))
+                        using (Pen pen = new Pen(Color.FromArgb(24, 128, 42), 1F))
+                        {
+                            g.FillRectangle(brush, rect);
+                            g.DrawRectangle(pen, rect);
+                        }
+                    }
+
+                    TextRenderer.DrawText(
+                        g,
+                        month.ToString() + "월",
+                        OviaFluentTheme.FontInput(9.5F, selected ? FontStyle.Bold : FontStyle.Regular),
+                        rect,
+                        selected ? Color.FromArgb(24, 128, 42) : OviaFluentTheme.TextPrimary,
+                        TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
+
+                    month++;
+                }
+            }
+        }
+
+        private void OviaCalendarSurface_MouseMove(object sender, MouseEventArgs e)
+        {
+            DateTime? newHoveredDate = null;
+            bool handCursor = false;
+
+            if (PrevButtonRect.Contains(e.Location) || NextButtonRect.Contains(e.Location))
+            {
+                handCursor = true;
+            }
+            else if (viewMode == CalendarViewMode.Days)
+            {
+                if (YearTitleRect.Contains(e.Location) || MonthTitleRect.Contains(e.Location))
+                {
+                    handCursor = true;
+                }
+                else
+                {
+                    DateTime hitDate;
+                    if (TryGetDateAtPoint(e.Location, out hitDate))
+                    {
+                        newHoveredDate = hitDate.Date;
+                        handCursor = true;
+                    }
+                }
+            }
+            else if (viewMode == CalendarViewMode.Years)
+            {
+                handCursor = IsYearCellAtPoint(e.Location);
+            }
+            else if (viewMode == CalendarViewMode.Months)
+            {
+                handCursor = IsMonthCellAtPoint(e.Location);
             }
 
-            if (new Rectangle(Width - 46, 22, 28, 30).Contains(e.Location))
+            bool hoverChanged =
+                hoveredDate.HasValue != newHoveredDate.HasValue ||
+                (hoveredDate.HasValue && newHoveredDate.HasValue &&
+                 hoveredDate.Value.Date != newHoveredDate.Value.Date);
+
+            if (hoverChanged)
             {
-                displayMonth = displayMonth.AddMonths(1);
+                hoveredDate = newHoveredDate;
                 Invalidate();
-                return;
+            }
+
+            this.Cursor = handCursor ? Cursors.Hand : Cursors.Default;
+        }
+
+        private void OviaCalendarSurface_MouseLeave(object sender, EventArgs e)
+        {
+            if (hoveredDate.HasValue)
+            {
+                hoveredDate = null;
+                Invalidate();
+            }
+
+            this.Cursor = Cursors.Default;
+        }
+
+        private bool TryGetDateAtPoint(Point location, out DateTime date)
+        {
+            date = DateTime.MinValue;
+
+            if (viewMode != CalendarViewMode.Days)
+            {
+                return false;
             }
 
             int gridLeft = 24;
@@ -4752,26 +5312,266 @@ namespace OVIA.Desktop
             int cellH = 30;
             int startY = gridTop + headerH;
 
-            if (e.X < gridLeft || e.X > Width - gridLeft || e.Y < startY)
+            if (location.X < gridLeft || location.X >= Width - gridLeft || location.Y < startY)
             {
-                return;
+                return false;
             }
 
-            int col = (e.X - gridLeft) / cellW;
-            int row = (e.Y - startY) / (cellH + RowGap);
+            int col = (location.X - gridLeft) / cellW;
+            int row = (location.Y - startY) / (cellH + RowGap);
             int rowY = startY + row * (cellH + RowGap);
-            if (col < 0 || col > 6 || row < 0 || row > 5 || e.Y > rowY + cellH)
+
+            if (col < 0 || col > 6 || row < 0 || row > 5 || location.Y > rowY + cellH)
             {
-                return;
+                return false;
             }
 
             DateTime firstDay = displayMonth;
             DateTime firstCell = firstDay.AddDays(-(int)firstDay.DayOfWeek);
-            DateTime picked = firstCell.AddDays(row * 7 + col);
+            date = firstCell.AddDays(row * 7 + col).Date;
+            return true;
+        }
+
+        private bool IsYearCellAtPoint(Point location)
+        {
+            int left = 28;
+            int top = 82;
+            int cols = 3;
+            int rows = 4;
+            int gapX = 8;
+            int gapY = 10;
+            int cellW = (Width - (left * 2) - (gapX * (cols - 1))) / cols;
+            int cellH = 46;
+
+            int r;
+            int c;
+            for (r = 0; r < rows; r++)
+            {
+                for (c = 0; c < cols; c++)
+                {
+                    Rectangle rect = new Rectangle(
+                        left + c * (cellW + gapX),
+                        top + r * (cellH + gapY),
+                        cellW,
+                        cellH);
+
+                    if (rect.Contains(location))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsMonthCellAtPoint(Point location)
+        {
+            int left = 28;
+            int top = 82;
+            int cols = 3;
+            int rows = 4;
+            int gapX = 8;
+            int gapY = 10;
+            int cellW = (Width - (left * 2) - (gapX * (cols - 1))) / cols;
+            int cellH = 46;
+
+            int r;
+            int c;
+            for (r = 0; r < rows; r++)
+            {
+                for (c = 0; c < cols; c++)
+                {
+                    Rectangle rect = new Rectangle(
+                        left + c * (cellW + gapX),
+                        top + r * (cellH + gapY),
+                        cellW,
+                        cellH);
+
+                    if (rect.Contains(location))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private void OviaCalendarSurface_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (PrevButtonRect.Contains(e.Location))
+            {
+                if (viewMode == CalendarViewMode.Years)
+                {
+                    yearPageStart = Math.Max(1, yearPageStart - 12);
+                }
+                else if (viewMode == CalendarViewMode.Months)
+                {
+                    int year = Math.Max(1, displayMonth.Year - 1);
+                    displayMonth = new DateTime(year, displayMonth.Month, 1);
+                }
+                else
+                {
+                    if (displayMonth.Year > 1 || displayMonth.Month > 1)
+                    {
+                        displayMonth = displayMonth.AddMonths(-1);
+                    }
+                }
+
+                Invalidate();
+                return;
+            }
+
+            if (NextButtonRect.Contains(e.Location))
+            {
+                if (viewMode == CalendarViewMode.Years)
+                {
+                    yearPageStart = Math.Min(9988, yearPageStart + 12);
+                }
+                else if (viewMode == CalendarViewMode.Months)
+                {
+                    int year = Math.Min(9999, displayMonth.Year + 1);
+                    displayMonth = new DateTime(year, displayMonth.Month, 1);
+                }
+                else
+                {
+                    if (displayMonth.Year < 9999 || displayMonth.Month < 12)
+                    {
+                        displayMonth = displayMonth.AddMonths(1);
+                    }
+                }
+
+                Invalidate();
+                return;
+            }
+
+            if (viewMode == CalendarViewMode.Days)
+            {
+                if (YearTitleRect.Contains(e.Location))
+                {
+                    yearPageStart = GetYearPageStart(displayMonth.Year);
+                    viewMode = CalendarViewMode.Years;
+                    Invalidate();
+                    return;
+                }
+
+                if (MonthTitleRect.Contains(e.Location))
+                {
+                    viewMode = CalendarViewMode.Months;
+                    Invalidate();
+                    return;
+                }
+
+                HandleDayClick(e.Location);
+                return;
+            }
+
+            if (viewMode == CalendarViewMode.Years)
+            {
+                HandleYearClick(e.Location);
+                return;
+            }
+
+            if (viewMode == CalendarViewMode.Months)
+            {
+                HandleMonthClick(e.Location);
+            }
+        }
+
+        private void HandleDayClick(Point location)
+        {
+            DateTime picked;
+            if (!TryGetDateAtPoint(location, out picked))
+            {
+                return;
+            }
+
+            selectedDate = picked.Date;
+            hoveredDate = picked.Date;
+            displayMonth = new DateTime(selectedDate.Year, selectedDate.Month, 1);
+            Invalidate();
+
             EventHandler<DateSelectedEventArgs> handler = DateSelected;
             if (handler != null)
             {
                 handler(this, new DateSelectedEventArgs(picked));
+            }
+        }
+
+        private void HandleYearClick(Point location)
+        {
+            int left = 28;
+            int top = 82;
+            int cols = 3;
+            int rows = 4;
+            int gapX = 8;
+            int gapY = 10;
+            int cellW = (Width - (left * 2) - (gapX * (cols - 1))) / cols;
+            int cellH = 46;
+
+            int r;
+            int c;
+            for (r = 0; r < rows; r++)
+            {
+                for (c = 0; c < cols; c++)
+                {
+                    Rectangle rect = new Rectangle(
+                        left + c * (cellW + gapX),
+                        top + r * (cellH + gapY),
+                        cellW,
+                        cellH);
+
+                    if (rect.Contains(location))
+                    {
+                        int year = yearPageStart + r * cols + c;
+                        if (year >= 1 && year <= 9999)
+                        {
+                            displayMonth = new DateTime(year, displayMonth.Month, 1);
+                            viewMode = CalendarViewMode.Days;
+                            Invalidate();
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+
+        private void HandleMonthClick(Point location)
+        {
+            int left = 28;
+            int top = 82;
+            int cols = 3;
+            int rows = 4;
+            int gapX = 8;
+            int gapY = 10;
+            int cellW = (Width - (left * 2) - (gapX * (cols - 1))) / cols;
+            int cellH = 46;
+
+            int r;
+            int c;
+            for (r = 0; r < rows; r++)
+            {
+                for (c = 0; c < cols; c++)
+                {
+                    Rectangle rect = new Rectangle(
+                        left + c * (cellW + gapX),
+                        top + r * (cellH + gapY),
+                        cellW,
+                        cellH);
+
+                    if (rect.Contains(location))
+                    {
+                        int month = r * cols + c + 1;
+                        if (month >= 1 && month <= 12)
+                        {
+                            displayMonth = new DateTime(displayMonth.Year, month, 1);
+                            viewMode = CalendarViewMode.Days;
+                            Invalidate();
+                        }
+                        return;
+                    }
+                }
             }
         }
     }
