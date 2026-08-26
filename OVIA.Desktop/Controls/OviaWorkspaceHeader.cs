@@ -130,14 +130,37 @@ namespace OVIA.Desktop.Controls
             header.RefreshErpMenuState();
             header.RefreshSettingsMenuState();
 
-            parent.Resize += delegate
+            Action relayoutToParent = delegate
             {
-                if (!header.IsDisposed)
+                if (header.IsDisposed || parent.IsDisposed)
                 {
-                    header.Width = Math.Max(1, parent.ClientSize.Width - HeaderLeft);
-                    header.LayoutControls();
+                    return;
+                }
+
+                header.Location = new Point(HeaderLeft, HeaderTop);
+                header.Width = Math.Max(1, parent.ClientSize.Width - HeaderLeft);
+                header.LayoutControls();
+                header.BringToFront();
+            };
+
+            parent.Resize += delegate { relayoutToParent(); };
+
+            // Embedded Form은 최초 Show 직전까지 부모 ClientSize가 최종값이 아닐 수 있다.
+            // 알림 아이콘 제거 등 우측 액션 폭이 바뀐 경우에도 첫 화면에서 주소영역이
+            // 잘리지 않도록 Handle 생성 후 실제 부모 폭으로 한 번 더 확정 배치한다.
+            header.HandleCreated += delegate
+            {
+                try
+                {
+                    header.BeginInvoke(new MethodInvoker(delegate { relayoutToParent(); }));
+                }
+                catch
+                {
+                    relayoutToParent();
                 }
             };
+
+            relayoutToParent();
 
             return header;
         }

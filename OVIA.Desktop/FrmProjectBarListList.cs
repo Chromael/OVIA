@@ -2121,7 +2121,7 @@ namespace OVIA.Desktop
                 return "";
             }
 
-            return value.ToString("0.###");
+            return value.ToString("#,##0.###");
         }
 
 
