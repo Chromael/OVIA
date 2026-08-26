@@ -17,6 +17,7 @@ namespace OVIA.Desktop
         private OviaCheckBox chkIncludeDone;
         private DataGridView grid;
         private Label lblStatus;
+        private Label lblSessionInfo;
         private Panel pagerPanel;
         private ToolTip windowToolTip;
 
@@ -261,9 +262,18 @@ namespace OVIA.Desktop
             await LoadProjectsFromErpAsync(true);
         }
 
+        private bool CanUpdateProjectGrid()
+        {
+            return !this.IsDisposed
+                && !this.Disposing
+                && grid != null
+                && !grid.IsDisposed
+                && grid.ColumnCount > 0;
+        }
+
         private async System.Threading.Tasks.Task LoadProjectsFromErpAsync(bool showErrorMessage)
         {
-            if (isErpProjectListLoading)
+            if (isErpProjectListLoading || !CanUpdateProjectGrid())
             {
                 return;
             }
@@ -279,9 +289,24 @@ namespace OVIA.Desktop
                 }
 
                 OviaErpProjectListResult result = await OviaErpApiService.GetProjectListAsync(companyId);
+
+                // ERP Deep Link로 공사목록 화면을 벗어난 동안 비동기 응답이 늦게 돌아올 수 있습니다.
+                // 이미 Dispose된 화면의 DataGridView는 컬럼이 제거되므로 Rows.Add를 수행하면
+                // "열이 없는 DataGridView 컨트롤에는 행을 추가할 수 없습니다." 예외가 발생합니다.
+                if (!CanUpdateProjectGrid())
+                {
+                    return;
+                }
+
                 if (result != null && result.IsSuccess)
                 {
                     allProjects = result.Projects ?? new List<OviaProjectRow>();
+                    UpdateSessionInfo(
+                        result.SessionCompanyId,
+                        result.SessionUserId,
+                        result.SessionUserName,
+                        result.SessionIpAddress
+                    );
                     currentPage = 1;
                     BindProjects();
                     return;
@@ -311,7 +336,11 @@ namespace OVIA.Desktop
             finally
             {
                 isErpProjectListLoading = false;
-                EndContentLoading();
+
+                if (!this.IsDisposed && !this.Disposing)
+                {
+                    EndContentLoading();
+                }
             }
         }
 
@@ -681,7 +710,7 @@ namespace OVIA.Desktop
         {
             grid = new DataGridView();
             grid.Location = new Point(34, 258);
-            grid.Size = new Size(1108, 334);
+            grid.Size = new Size(1108, 390);
             grid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             grid.BackgroundColor = Color.White;
             grid.BorderStyle = BorderStyle.None;
@@ -794,7 +823,7 @@ namespace OVIA.Desktop
         private void BuildFooter(Control parent)
         {
             pagerPanel = new Panel();
-            pagerPanel.Location = new Point(38, 610);
+            pagerPanel.Location = new Point(38, 654);
             pagerPanel.Size = new Size(1040, 36);
             pagerPanel.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             pagerPanel.BackColor = SurfaceColor;
@@ -804,8 +833,54 @@ namespace OVIA.Desktop
                 parent,
                 "ERP 공사목록을 불러오는 중입니다.",
                 38,
-                655
+                692
             );
+
+            lblSessionInfo = new Label();
+            lblSessionInfo.Location = new Point(660, 692);
+            lblSessionInfo.Size = new Size(480, 24);
+            lblSessionInfo.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            lblSessionInfo.BackColor = Color.Transparent;
+            lblSessionInfo.ForeColor = OviaFluentTheme.TextSecondary;
+            lblSessionInfo.Font = OviaFluentTheme.FontKorean(9F, FontStyle.Regular);
+            lblSessionInfo.TextAlign = ContentAlignment.MiddleRight;
+            lblSessionInfo.AutoEllipsis = true;
+            lblSessionInfo.Text = BuildSessionInfoText(companyId, userId, "", "");
+            parent.Controls.Add(lblSessionInfo);
+            lblSessionInfo.BringToFront();
+        }
+
+        private void UpdateSessionInfo(string sessionCompanyId, string sessionUserId, string sessionUserName, string sessionIpAddress)
+        {
+            if (lblSessionInfo == null || lblSessionInfo.IsDisposed)
+            {
+                return;
+            }
+
+            string company = string.IsNullOrWhiteSpace(sessionCompanyId) ? companyId : sessionCompanyId.Trim();
+            string user = string.IsNullOrWhiteSpace(sessionUserId) ? userId : sessionUserId.Trim();
+            string name = sessionUserName == null ? "" : sessionUserName.Trim();
+            string ip = sessionIpAddress == null ? "" : sessionIpAddress.Trim();
+
+            lblSessionInfo.Text = BuildSessionInfoText(company, user, name, ip);
+        }
+
+        private string BuildSessionInfoText(string sessionCompanyId, string sessionUserId, string sessionUserName, string sessionIpAddress)
+        {
+            string company = string.IsNullOrWhiteSpace(sessionCompanyId) ? "-" : sessionCompanyId.Trim();
+            string user = string.IsNullOrWhiteSpace(sessionUserId) ? "-" : sessionUserId.Trim();
+            string name = sessionUserName == null ? "" : sessionUserName.Trim();
+            string ip = string.IsNullOrWhiteSpace(sessionIpAddress) ? "-" : sessionIpAddress.Trim();
+
+            string userText = user;
+            if (name != "")
+            {
+                userText += " (" + name + ")";
+            }
+
+            return "Biz ID : " + company
+                + "  |  ID : " + userText
+                + "  |  IP : " + ip;
         }
 
 
@@ -838,9 +913,19 @@ namespace OVIA.Desktop
 
         private void BindProjects()
         {
+            if (!CanUpdateProjectGrid())
+            {
+                return;
+            }
+
             BeginContentLoading();
             try
             {
+                if (!CanUpdateProjectGrid())
+                {
+                    return;
+                }
+
                 currentProjects = GetFilteredProjects();
             pageSize = GetConfiguredListPageSize();
 
@@ -854,6 +939,11 @@ namespace OVIA.Desktop
                 currentPage = 1;
             }
 
+            if (!CanUpdateProjectGrid())
+            {
+                return;
+            }
+
             grid.Rows.Clear();
 
             int start = (currentPage - 1) * pageSize;
@@ -862,6 +952,11 @@ namespace OVIA.Desktop
 
             for (i = start; i < end; i++)
             {
+                if (!CanUpdateProjectGrid())
+                {
+                    return;
+                }
+
                 grid.Rows.Add(
                     (currentProjects.Count - i).ToString(),
                     currentProjects[i].ProjectNo,

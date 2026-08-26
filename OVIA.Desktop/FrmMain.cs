@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -8,6 +8,7 @@ using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using OVIA.Desktop.Controls;
 using Microsoft.Win32;
@@ -72,6 +73,7 @@ namespace OVIA.Desktop
         private bool suppressNavigationHistory;
         private OviaWebViewHost dashboardWebViewHost;
         private OviaWorkspaceHeader dashboardWorkspaceHeader;
+        private bool erpLaunchSessionEndedHandled;
 
         private sealed class OviaMainWorkspaceNavigationEntry
         {
@@ -121,12 +123,11 @@ namespace OVIA.Desktop
             this.companyId = companyId;
             this.userId = userId;
             this.dashboardUserInfo = OviaDashboardUserInfo.CreateForSession(companyId, userId, GetLocalIPAddress());
-            string loginIpAddress = dashboardUserInfo == null ? GetLocalIPAddress() : dashboardUserInfo.CurrentIpAddress;
             OviaNotificationStore.AddWorkLog(
                 companyId,
                 userId,
                 "로그인 접속",
-                "접속 IP : " + (string.IsNullOrWhiteSpace(loginIpAddress) ? "확인 불가" : loginIpAddress),
+                "메인",
                 userId);
 
             BuildMainUI();
@@ -1258,46 +1259,6 @@ namespace OVIA.Desktop
             UpdateAutoCadRunStatus();
         }
 
-        private void ShowLegacyDashboard()
-        {
-            ShowLegacyDashboardWithHistory(new OviaMainWorkspaceNavigationEntry("LEGACY_MAIN_DASHBOARD"));
-        }
-
-        private bool ShowLegacyDashboardInternal()
-        {
-            if (!CloseCurrentScreenForNavigation())
-            {
-                return false;
-            }
-
-            this.Text = "OVIA 기존 메인대시보드";
-            dashboardWebViewHost = null;
-            dashboardWorkspaceHeader = null;
-            workspacePanel.Controls.Clear();
-            currentScreen = null;
-
-            Panel dashboard = new Panel();
-            dashboard.Dock = DockStyle.Fill;
-            dashboard.BackColor = SurfaceColor;
-            workspacePanel.Controls.Add(dashboard);
-
-            OviaWorkspaceHeader.AddTo(
-                dashboard,
-                "메인  ›  환경설정  ›  기존 메인대시보드",
-                delegate { ShowDashboard(); },
-                null,
-                delegate { ShowDashboard(); },
-                delegate { RequestLogout(); },
-                false,
-                false
-            );
-
-            BuildDashboardCommandBar(dashboard, "SETTINGS");
-            BuildLegacyDashboardMainContent(dashboard);
-            UpdateAutoCadRunStatus();
-            return true;
-        }
-
         private void BuildDashboardExplorerHeader(Control parent)
         {
             dashboardWorkspaceHeader = OviaWorkspaceHeader.AddTo(
@@ -1812,11 +1773,6 @@ NavigateToBarListMapping();
             NavigateToRebarUnitWeightTable();
         }
 
-        public void NavigateToLegacyMainDashboard()
-        {
-ShowLegacyDashboardWithHistory(new OviaMainWorkspaceNavigationEntry("LEGACY_MAIN_DASHBOARD"));
-        }
-
         public void NavigateToProjectManager()
         {
             ShowWorkspaceScreenWithHistory(
@@ -1870,6 +1826,29 @@ ShowLegacyDashboardWithHistory(new OviaMainWorkspaceNavigationEntry("LEGACY_MAIN
             );
         }
 
+        public void NavigateToNewBarListRegistration(string projectNo, string projectName, string clientName, string projectStatus)
+        {
+            FrmProjectBarListList screen = new FrmProjectBarListList(
+                companyId,
+                userId,
+                projectNo,
+                projectName,
+                clientName,
+                projectStatus
+            );
+
+            screen.Shown += delegate
+            {
+                screen.BeginNewBarListRegistration();
+            };
+
+            ShowWorkspaceScreenWithHistory(
+                screen,
+                "OVIA 공사별 BarList",
+                new OviaMainWorkspaceNavigationEntry("PROJECT_BARLIST_LIST", projectNo, projectName, clientName, projectStatus)
+            );
+        }
+
         public void NavigateToBarList(string projectNo, string projectName, string clientName, string projectStatus, string initialFilePath)
         {
             string filePath = initialFilePath == null ? "" : initialFilePath;
@@ -1908,21 +1887,21 @@ ShowWorkspaceScreenWithHistory(
             );
         }
 
+        public void NavigateToBackupRestore()
+        {
+            ShowWorkspaceScreenWithHistory(
+                new FrmBackupRestore(companyId, userId),
+                "OVIA 백업/복원",
+                new OviaMainWorkspaceNavigationEntry("BACKUP_RESTORE")
+            );
+        }
+
         public void NavigateToVersionInfo()
         {
 ShowWorkspaceScreenWithHistory(
                 new FrmVersionInfo(companyId, userId),
                 "OVIA 버전정보",
                 new OviaMainWorkspaceNavigationEntry("VERSION_INFO")
-            );
-        }
-
-        public void NavigateToNotifications()
-        {
-            ShowWorkspaceScreenWithHistory(
-                new FrmNotificationList(companyId, userId),
-                "OVIA 알림",
-                new OviaMainWorkspaceNavigationEntry("NOTIFICATIONS")
             );
         }
 
@@ -1954,9 +1933,6 @@ ShowWorkspaceScreenWithHistory(
                 case "ERP_MODULE_PAGE":
                     NavigateToErpModulePage(entry.Get(0));
                     return true;
-                case "LEGACY_MAIN_DASHBOARD":
-                    NavigateToLegacyMainDashboard();
-                    return true;
                 case "PROJECT_BARLIST_LIST":
                     NavigateToProjectBarListList(entry.Get(0), entry.Get(1), entry.Get(2), entry.Get(3));
                     return true;
@@ -1972,11 +1948,11 @@ ShowWorkspaceScreenWithHistory(
                 case "SYSTEM_SETTINGS":
                     NavigateToSystemSettings();
                     return true;
+                case "BACKUP_RESTORE":
+                    NavigateToBackupRestore();
+                    return true;
                 case "VERSION_INFO":
                     NavigateToVersionInfo();
-                    return true;
-                case "NOTIFICATIONS":
-                    NavigateToNotifications();
                     return true;
                 case "WORKSPACE_INFO":
                     NavigateToWorkspaceInfoPage(entry.Get(0), entry.Get(1), entry.Get(2), entry.Get(3), entry.Get(4), entry.Get(5));
@@ -2003,16 +1979,15 @@ ShowWorkspaceScreenWithHistory(
                     return new OviaMainWorkspaceNavigationEntry("PROJECT_MANAGER");
                 case "BARLIST":
                     return new OviaMainWorkspaceNavigationEntry("PROJECT_BARLIST_LIST", entry.Get(0), entry.Get(1), entry.Get(2), entry.Get(3));
-                case "LEGACY_MAIN_DASHBOARD":
                 case "BARLIST_MAPPING":
                 case "REBAR_UNIT_WEIGHT":
+                case "BACKUP_RESTORE":
                 case "VERSION_INFO":
                     return CreateEnvironmentSettingsParentEntry();
                 case "SYSTEM_SETTINGS":
                     return CreateEnvironmentSettingsParentEntry();
                 case "WORKSPACE_INFO":
                     return ResolveWorkspaceInfoParentEntry(entry);
-                case "NOTIFICATIONS":
                 case "PROJECT_MANAGER":
                 default:
                     return null;
@@ -2146,24 +2121,6 @@ ShowWorkspaceScreenWithHistory(
 
             currentNavigationEntry = entry;
             RefreshCurrentWorkspaceNavigationState();
-        }
-
-        private void ShowLegacyDashboardWithHistory(OviaMainWorkspaceNavigationEntry entry)
-        {
-            OviaMainWorkspaceNavigationEntry previousEntry = currentNavigationEntry;
-
-            if (!ShowLegacyDashboardInternal())
-            {
-                return;
-            }
-
-            if (!suppressNavigationHistory && previousEntry != null)
-            {
-                backHistory.Push(previousEntry);
-                forwardHistory.Clear();
-            }
-
-            currentNavigationEntry = entry;
         }
 
         private void RefreshCurrentWorkspaceNavigationState()
@@ -2496,6 +2453,52 @@ ShowWorkspaceScreenWithHistory(
             }
 
             return TextDark;
+        }
+
+        /// <summary>
+        /// ERP 브라우저에서 실제 로그아웃 버튼이 처리된 순간 전달된 ovia://logout 이벤트만 받습니다.
+        /// ERP 세션 상태를 Timer/HTTP polling으로 조회하지 않습니다.
+        /// </summary>
+        public void HandleErpLogoutSignal(string logoutCompanyId, string logoutTicket)
+        {
+            if (erpLaunchSessionEndedHandled || IsDisposed || Disposing)
+            {
+                return;
+            }
+
+            if (!OviaErpAuthenticationService.TryConsumeErpLogoutSignal(logoutCompanyId, logoutTicket))
+            {
+                return;
+            }
+
+            HandleErpLaunchSessionEnded("ERP에서 로그아웃되어 OVIA 세션이 종료되었습니다.");
+        }
+
+        private void HandleErpLaunchSessionEnded(string message)
+        {
+            if (erpLaunchSessionEndedHandled || IsDisposed || Disposing)
+            {
+                return;
+            }
+
+            erpLaunchSessionEndedHandled = true;
+            OviaErpAuthenticationService.ClearSession();
+
+            logoutConfirmed = true;
+            systemExitConfirmed = false;
+            IsLogoutRequested = true;
+
+            string displayMessage = string.IsNullOrWhiteSpace(message)
+                ? "ERP에서 로그아웃되어 OVIA 세션이 종료되었습니다."
+                : message.Trim();
+
+            MessageBox.Show(
+                displayMessage + "\r\n\r\nOVIA에서도 로그아웃 처리됩니다.",
+                "OVIA 세션 종료",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+
+            Close();
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)

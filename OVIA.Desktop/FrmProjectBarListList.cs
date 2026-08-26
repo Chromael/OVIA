@@ -70,6 +70,10 @@ namespace OVIA.Desktop
 
             BuildUI();
             BindBarListRows();
+            this.Shown += async delegate
+            {
+                await SynchronizeBarListsFromErpAsync(false);
+            };
         }
 
         private void BuildUI()
@@ -1046,9 +1050,9 @@ namespace OVIA.Desktop
 
             for (i = start; i < end; i++)
             {
-                int displayNumber = string.Equals(headerSortColumn, "No.", StringComparison.OrdinalIgnoreCase)
-                    ? currentBarListRows[i].ListNumber
-                    : i + 1;
+                // No.는 정렬/검색/페이지 위치에 따라 다시 매기지 않는다.
+                // 오래된 BarList=1, 최신 BarList=가장 큰 숫자 계약을 항상 유지한다.
+                int displayNumber = currentBarListRows[i].ListNumber;
 
                 int rowIndex = grid.Rows.Add(
                     displayNumber.ToString(),
@@ -1593,14 +1597,105 @@ namespace OVIA.Desktop
                 list.Add(BuildSummary(files[i]));
             }
 
+            // No.는 현재 화면 정렬순서가 아니라 BarList의 생성 이력 순번이다.
+            // 가장 오래된 BarList를 1로 두고 신규 BarList가 생길수록 숫자가 증가해야 하므로
+            // 먼저 오래된 순으로 고정 번호를 부여한 뒤 사용자가 선택한 화면 정렬을 적용한다.
+            AssignStableBarListNumbers(list);
             ApplyBarListDefaultSort(list);
 
-            for (i = 0; i < list.Count; i++)
+            return list;
+        }
+
+
+        private void AssignStableBarListNumbers(List<ProjectBarListSummary> list)
+        {
+            if (list == null || list.Count == 0)
             {
-                list[i].ListNumber = i + 1;
+                return;
             }
 
-            return list;
+            List<ProjectBarListSummary> chronological = new List<ProjectBarListSummary>(list);
+            chronological.Sort(delegate (ProjectBarListSummary a, ProjectBarListSummary b)
+            {
+                int result = CompareBarListNumberingOrder(a, b);
+                if (result != 0)
+                {
+                    return result;
+                }
+
+                return string.Compare(
+                    a == null ? "" : a.FilePath,
+                    b == null ? "" : b.FilePath,
+                    StringComparison.OrdinalIgnoreCase);
+            });
+
+            for (int i = 0; i < chronological.Count; i++)
+            {
+                if (chronological[i] != null)
+                {
+                    chronological[i].ListNumber = i + 1;
+                }
+            }
+        }
+
+        private int CompareBarListNumberingOrder(ProjectBarListSummary a, ProjectBarListSummary b)
+        {
+            if (ReferenceEquals(a, b)) return 0;
+            if (a == null) return -1;
+            if (b == null) return 1;
+
+            DateTime aCreated;
+            DateTime bCreated;
+            bool aCreatedOk = DateTime.TryParse(a.CreatedDate, out aCreated);
+            bool bCreatedOk = DateTime.TryParse(b.CreatedDate, out bCreated);
+
+            if (aCreatedOk && bCreatedOk)
+            {
+                int dateResult = aCreated.Date.CompareTo(bCreated.Date);
+                if (dateResult != 0) return dateResult;
+            }
+            else if (aCreatedOk != bCreatedOk)
+            {
+                return aCreatedOk ? -1 : 1;
+            }
+
+            // ERP에서 내려온 BarList는 auto increment idx가 생성 순서를 가장 안정적으로 보존한다.
+            int aErpId = OviaErpBarListSyncService.GetPersistedErpBarListId(a.FilePath);
+            int bErpId = OviaErpBarListSyncService.GetPersistedErpBarListId(b.FilePath);
+            if (aErpId > 0 && bErpId > 0 && aErpId != bErpId)
+            {
+                return aErpId.CompareTo(bErpId);
+            }
+
+            DateTime aFileCreated = GetFileCreationTimeSafe(a.FilePath);
+            DateTime bFileCreated = GetFileCreationTimeSafe(b.FilePath);
+            int fileResult = aFileCreated.CompareTo(bFileCreated);
+            if (fileResult != 0) return fileResult;
+
+            if (aErpId != bErpId)
+            {
+                if (aErpId <= 0) return -1;
+                if (bErpId <= 0) return 1;
+                return aErpId.CompareTo(bErpId);
+            }
+
+            return 0;
+        }
+
+        private DateTime GetFileCreationTimeSafe(string filePath)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(filePath) && File.Exists(filePath))
+                {
+                    return File.GetCreationTimeUtc(filePath);
+                }
+            }
+            catch
+            {
+            }
+
+            return DateTime.MinValue;
         }
 
         private void ApplyBarListHeaderSort(List<ProjectBarListSummary> list)
@@ -1615,7 +1710,8 @@ namespace OVIA.Desktop
                 int result = CompareBarListRows(a, b, headerSortColumn);
                 if (result == 0 && headerSortColumn != "No.")
                 {
-                    return a.ListNumber.CompareTo(b.ListNumber);
+                    // 동일 값에서는 최신 생성 BarList(큰 No.)를 위에 둔다.
+                    return b.ListNumber.CompareTo(a.ListNumber);
                 }
 
                 return headerSortAscending ? result : -result;
@@ -1667,9 +1763,13 @@ namespace OVIA.Desktop
                 return;
             }
 
+            // 최근등록순은 표시용 등록일(yyyy-MM-dd)만으로 정렬하지 않는다.
+            // AssignStableBarListNumbers()에서 생성 이력에 따라
+            // 오래된 BarList=1, 최신 BarList=가장 큰 No.가 이미 확정되어 있으므로,
+            // 기본 최근등록순은 고정 No.를 내림차순으로 표시한다.
             list.Sort(delegate (ProjectBarListSummary a, ProjectBarListSummary b)
             {
-                return CompareDateText(b.CreatedDate, a.CreatedDate);
+                return b.ListNumber.CompareTo(a.ListNumber);
             });
         }
 
@@ -1841,11 +1941,19 @@ namespace OVIA.Desktop
 
             summary.FilePath = filePath;
             summary.Title = "";
-            summary.CreatedDate = File.GetCreationTime(filePath).ToString("yyyy-MM-dd");
+
+            // 등록일은 해당 BarList CSV/ERP의 "등록일" 값을 우선한다.
+            // 파일 생성일을 먼저 넣으면 SetFirstCellValue()가 CSV 등록일을 읽지 못하므로
+            // CSV를 읽기 전에는 비워 둔다.
+            summary.CreatedDate = "";
+
+            // 수정일 hover는 각 BarList CSV 파일 자체의 마지막 실제 저장시각이다.
             summary.ModifiedDate = File.GetLastWriteTime(filePath).ToString("yyyy-MM-dd HH:mm");
-            summary.Status = "접수";
-            summary.WriteStatus = "공장";
-            summary.Writer = Environment.UserName;
+            // ERP/CSV 값을 먼저 읽고, 값이 없을 때만 fallback을 적용한다.
+            // 기본값을 미리 넣으면 SetFirstCellValue()가 실제 CSV 값을 읽지 못한다.
+            summary.Status = "";
+            summary.WriteStatus = "";
+            summary.Writer = "";
             summary.Memo = "";
 
             try
@@ -1869,6 +1977,7 @@ namespace OVIA.Desktop
                     int totalLengthIndex = FindHeaderIndex(headers, "총길이");
                     int weightIndex = FindHeaderIndex(headers, "중량");
                     int orderQtyIndex = FindHeaderIndex(headers, "주문량");
+                    int writerIndex = FindHeaderIndex(headers, "작성자");
                     int orderNumberIndex = FindHeaderIndex(headers, "발주번호");
                     int orderDateIndex = FindHeaderIndex(headers, "발주일");
                     int dueDateIndex = FindHeaderIndex(headers, "납기일");
@@ -1913,10 +2022,15 @@ namespace OVIA.Desktop
                             summary.TotalWeight += ParseNumber(rows[r][weightIndex]);
                         }
 
-                        if (orderQtyIndex >= 0 && orderQtyIndex < rows[r].Count)
+                        // 주문량은 BarList 헤더 메타값이다. ERP pull 시 모든 상세행에 같은 값이
+                        // 반복될 수 있으므로 합산하지 않고 첫 유효값만 사용한다.
+                        if (summary.OrderQty <= 0 && orderQtyIndex >= 0 && orderQtyIndex < rows[r].Count)
                         {
-                            summary.OrderQty += ParseNumber(rows[r][orderQtyIndex]);
+                            double orderQty = ParseNumber(rows[r][orderQtyIndex]);
+                            if (orderQty > 0) summary.OrderQty = orderQty;
                         }
+
+                        SetFirstCellValue(ref summary.Writer, rows[r], writerIndex);
 
                         SetFirstCellValue(ref summary.OrderNumber, rows[r], orderNumberIndex);
                         SetFirstCellValue(ref summary.OrderDate, rows[r], orderDateIndex);
@@ -1945,6 +2059,31 @@ namespace OVIA.Desktop
             if (string.IsNullOrWhiteSpace(summary.Title))
             {
                 summary.Title = Path.GetFileNameWithoutExtension(filePath);
+            }
+
+            // CSV/ERP 등록일이 없는 과거 로컬 파일만 파일 생성일을 fallback으로 사용한다.
+            if (string.IsNullOrWhiteSpace(summary.CreatedDate))
+            {
+                summary.CreatedDate = File.GetCreationTime(filePath).ToString("yyyy-MM-dd");
+            }
+
+            if (string.IsNullOrWhiteSpace(summary.Status)) summary.Status = "접수";
+            if (string.IsNullOrWhiteSpace(summary.WriteStatus)) summary.WriteStatus = "공장";
+            if (string.IsNullOrWhiteSpace(summary.Writer))
+            {
+                string currentCompanyId;
+                string currentUserId;
+                string currentToken;
+                string authUrl;
+                if (OviaErpAuthenticationService.TryGetCurrentErpWebSso(out currentCompanyId, out currentUserId, out currentToken, out authUrl)
+                    && !string.IsNullOrWhiteSpace(currentUserId))
+                {
+                    summary.Writer = currentUserId.Trim();
+                }
+                else
+                {
+                    summary.Writer = Environment.UserName;
+                }
             }
 
             summary.Status = NormalizeBarListStatus(summary.Status);
@@ -2223,9 +2362,19 @@ namespace OVIA.Desktop
 
         private void NewButton_Click(object sender, EventArgs e)
         {
+            BeginNewBarListRegistration();
+        }
+
+        /// <summary>
+        /// ERP Launch에서도 OVIA 내부 신규등록 버튼과 완전히 동일한 흐름을 재사용합니다.
+        /// 등록정보 팝업 -> ERP 헤더 등록 -> Draft에 ERP idx 보관 -> 신규 BarList 화면 순서를 유지합니다.
+        /// </summary>
+        public async void BeginNewBarListRegistration()
+        {
             List<ProjectBarListSummary> allRows = GetBarListSummaries();
             ProjectBarListSummary newSummary = new ProjectBarListSummary();
             newSummary.CreatedDate = DateTime.Today.ToString("yyyy-MM-dd");
+            BarListEditResult registration = null;
 
             using (OviaBarListEditDialog dialog = new OviaBarListEditDialog(
                 projectName,
@@ -2244,8 +2393,45 @@ namespace OVIA.Desktop
                     return;
                 }
 
-                OviaBarListRegistrationDraftStore.Set(companyId, projectNo, dialog.Result);
+                registration = dialog.Result;
+                // 공사별 BarList의 작성자는 신규등록 당시 OVIA 로그인 ID를 최초 작성자로 고정한다.
+                // 상세 BarList 철근행에는 작성자 필드를 노출하지 않으며, 이후 수정 저장에서도 이 값은 바꾸지 않는다.
+                registration.Writer = (userId ?? "").Trim();
             }
+
+            // 신규등록은 팝업 확인 시점에 ERP barlist 헤더를 먼저 생성한다.
+            // 이 단계에서는 빈 CSV나 가짜 철근 행을 만들지 않는다. ERP가 반환한 idx만
+            // 메모리 Draft에 보관하고, 이후 CAD 추출 + 검토 후 저장에서 같은 idx로 상세를 upsert한다.
+            OviaErpBarListSyncResult registerSync = await OviaErpBarListSyncService.RegisterNewBarListAsync(
+                companyId,
+                projectNo,
+                registration);
+
+            if (!registerSync.IsSuccess || registerSync.BarListId <= 0)
+            {
+                string message = string.IsNullOrWhiteSpace(registerSync.Message)
+                    ? "ERP에 신규 BarList를 등록하지 못했습니다."
+                    : registerSync.Message;
+
+                MessageBox.Show(
+                    "신규 BarList를 ERP에 등록하지 못했습니다.\r\n\r\n" + message +
+                    "\r\n\r\nERP 연결/API 상태를 확인한 뒤 다시 신규등록해 주세요.",
+                    "OVIA ERP 신규등록",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+
+                lblStatus.Text = "ERP 신규등록 실패: " + message;
+                lblStatus.ForeColor = OviaFluentTheme.Danger;
+                return;
+            }
+
+            registration.ErpBarListId = registerSync.BarListId;
+            OviaBarListRegistrationDraftStore.Set(companyId, projectNo, registration);
+            OviaNotificationStore.AddWorkLog(
+                companyId,
+                userId,
+                "BarList 신규등록",
+                "메인  ›  공사관리  ›  공사별 BarList");
 
             IOviaWorkspaceNavigator workspace = OviaWorkspaceNavigation.FindNavigator(this);
 
@@ -2269,7 +2455,7 @@ namespace OVIA.Desktop
             OpenSelectedBarList();
         }
 
-        private void DeleteButton_Click(object sender, EventArgs e)
+        private async void DeleteButton_Click(object sender, EventArgs e)
         {
             string filePath = GetSelectedBarListFilePath();
             if (filePath == "")
@@ -2286,44 +2472,13 @@ namespace OVIA.Desktop
                 return;
             }
 
-            ProjectBarListSummary summary = GetSelectedBarListSummary();
-            if (!CanDeleteBarList(summary))
-            {
-                MessageBox.Show(
-                    "이미 진행되었거나 완료된 BarList는 삭제할 수 없습니다.\r\n\r\n접수 또는 미전송 상태이고 진행/출하 정보가 없는 BarList만 삭제할 수 있습니다.",
-                    "OVIA BarList 삭제 제한",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning
-                );
-                lblStatus.Text = "진행 또는 완료된 BarList는 삭제할 수 없습니다.";
-                lblStatus.ForeColor = OviaFluentTheme.Danger;
-                return;
-            }
-
-            using (OviaBarListDeleteAuthDialog dialog = new OviaBarListDeleteAuthDialog(userId, summary, Path.GetFileName(filePath)))
-            {
-                if (dialog.ShowDialog(this) != DialogResult.OK)
-                {
-                    return;
-                }
-
-                if (!OviaSessionSecurity.ValidateCurrentLogin(companyId, dialog.InputUserId, dialog.InputPassword))
-                {
-                    MessageBox.Show(
-                        "사용자 아이디 또는 비밀번호가 현재 로그인 정보와 일치하지 않습니다.\r\n\r\n삭제하려면 현재 로그인한 사용자의 아이디와 비밀번호를 입력해야 합니다.",
-                        "OVIA 삭제 권한 확인",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning
-                    );
-                    lblStatus.Text = "삭제 권한 확인에 실패했습니다.";
-                    lblStatus.ForeColor = OviaFluentTheme.Danger;
-                    return;
-                }
-            }
-
+            // 삭제 권한/업무 진행 상태는 OVIA의 로컬 문자열로 추측하지 않는다.
+            // 현재 로그인 ERP 토큰으로 삭제 API를 호출하고 ERP가 허용한 경우에만 로컬 파일을 삭제한다.
             DialogResult result = MessageBox.Show(
-                "삭제 권한 확인이 완료되었습니다.\r\n\r\n선택한 BarList를 정말 삭제하시겠습니까?\r\n" + Path.GetFileName(filePath),
-                "OVIA BarList 삭제 최종 확인",
+                "선택한 BarList를 정말 삭제하시겠습니까?\r\n\r\n"
+                + "ERP의 삭제 권한과 현재 업무 상태를 확인한 뒤 삭제합니다.\r\n"
+                + Path.GetFileName(filePath),
+                "OVIA BarList 삭제 확인",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning
             );
@@ -2335,45 +2490,41 @@ namespace OVIA.Desktop
 
             try
             {
+                OviaErpBarListSyncResult sync = await OviaErpBarListSyncService.DeleteBarListAsync(companyId, projectNo, filePath);
+                if (!sync.IsSuccess)
+                {
+                    string message = string.IsNullOrWhiteSpace(sync.Message)
+                        ? "ERP에서 이 BarList의 삭제를 허용하지 않았습니다."
+                        : sync.Message;
+
+                    MessageBox.Show(
+                        message,
+                        "OVIA BarList 삭제 불가",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning
+                    );
+                    lblStatus.Text = "ERP 삭제 불가 - 로컬 파일은 보존했습니다: " + message;
+                    lblStatus.ForeColor = OviaFluentTheme.Danger;
+                    return;
+                }
+
                 File.Delete(filePath);
+                OviaErpBarListSyncService.DeleteLocalShapeDirectory(filePath);
                 currentPage = 1;
                 BindBarListRows();
                 lblStatus.Text = "선택한 BarList를 삭제했습니다.";
                 lblStatus.ForeColor = TextSub;
+                OviaNotificationStore.AddWorkLog(
+                    companyId,
+                    userId,
+                    "BarList 삭제",
+                    "메인  ›  공사관리  ›  공사별 BarList");
             }
             catch (Exception ex)
             {
                 lblStatus.Text = "BarList 삭제 실패: " + ex.Message;
                 lblStatus.ForeColor = OviaFluentTheme.Danger;
             }
-        }
-
-        private bool CanDeleteBarList(ProjectBarListSummary summary)
-        {
-            if (summary == null)
-            {
-                return true;
-            }
-
-            string status = summary.Status == null ? "" : summary.Status.Trim();
-            string progress = summary.Progress == null ? "" : summary.Progress.Trim();
-
-            if (ContainsText(status, "전송") || ContainsText(status, "완료"))
-            {
-                return false;
-            }
-
-            if (progress != "" && !ContainsText(progress, "미완료") && !ContainsText(progress, "미진행"))
-            {
-                return false;
-            }
-
-            if (!string.IsNullOrWhiteSpace(summary.Shipped))
-            {
-                return false;
-            }
-
-            return true;
         }
 
         private void Grid_CellMouseDown(object sender, DataGridViewCellMouseEventArgs e)
@@ -2523,7 +2674,7 @@ namespace OVIA.Desktop
             return null;
         }
 
-        private void ShowEditSelectedBarListDialog()
+        private async void ShowEditSelectedBarListDialog()
         {
             ProjectBarListSummary summary = GetSelectedBarListSummary();
             if (summary == null)
@@ -2553,16 +2704,66 @@ namespace OVIA.Desktop
 
             try
             {
+                List<string> workLogDescriptions = BuildBarListMetadataChangeLogs(summary, dialog.Result);
                 UpdateBarListMetadata(summary.FilePath, dialog.Result);
+                OviaErpBarListSyncResult sync = await OviaErpBarListSyncService.PushSavedBarListAsync(companyId, projectNo, summary.FilePath);
                 currentPage = 1;
                 BindBarListRows();
-                lblStatus.Text = "BarList 정보를 수정했습니다.";
-                lblStatus.ForeColor = TextSub;
+                lblStatus.Text = sync.IsSuccess
+                    ? "BarList 정보를 수정하고 ERP와 동기화했습니다."
+                    : "BarList 정보는 로컬에 수정했지만 ERP 동기화가 보류되었습니다: " + sync.Message;
+                lblStatus.ForeColor = sync.IsSuccess ? TextSub : OviaFluentTheme.Danger;
+
+                WriteBarListMetadataWorkLogs(workLogDescriptions);
             }
             catch (Exception ex)
             {
                 lblStatus.Text = "BarList 수정 실패: " + ex.Message;
                 lblStatus.ForeColor = OviaFluentTheme.Danger;
+            }
+        }
+
+
+        private List<string> BuildBarListMetadataChangeLogs(ProjectBarListSummary before, BarListEditResult after)
+        {
+            List<string> logs = new List<string>();
+            if (before == null || after == null) return logs;
+
+            AddChangedFieldLog(logs, before.Title, after.Title, "제목 수정");
+            AddChangedFieldLog(logs, before.WriteStatus, after.WriteStatus, "작성 수정");
+            AddChangedFieldLog(logs, before.Building, after.Building, "동 수정");
+            AddChangedFieldLog(logs, before.Floor, after.Floor, "층 수정");
+            AddChangedFieldLog(logs, before.WorkType, after.WorkType, "공종 수정");
+            AddChangedFieldLog(logs, before.Tags, after.Tags, "태그 수정");
+            AddChangedFieldLog(logs, before.Color, after.Color, "색상 수정");
+            AddChangedFieldLog(logs, NormalizeDateText(before.OrderDate), NormalizeDateText(after.OrderDate), "발주일 수정");
+            AddChangedFieldLog(logs, NormalizeDateText(before.CreatedDate), NormalizeDateText(after.CreatedDate), "등록일 수정");
+            AddChangedFieldLog(logs, NormalizeDateText(before.DueDate), NormalizeDateText(after.DueDate), "납기일 수정");
+            AddChangedFieldLog(logs, before.Memo, after.Memo, "비고 수정");
+            return logs;
+        }
+
+        private void AddChangedFieldLog(List<string> logs, string before, string after, string description)
+        {
+            if (logs == null) return;
+            string left = before == null ? "" : before.Trim();
+            string right = after == null ? "" : after.Trim();
+            if (!string.Equals(left, right, StringComparison.Ordinal))
+            {
+                logs.Add(description);
+            }
+        }
+
+        private void WriteBarListMetadataWorkLogs(List<string> descriptions)
+        {
+            if (descriptions == null || descriptions.Count == 0) return;
+            const string route = "메인  ›  공사관리  ›  공사별 BarList";
+            HashSet<string> sent = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < descriptions.Count; i++)
+            {
+                string description = descriptions[i] == null ? "" : descriptions[i].Trim();
+                if (description == "" || !sent.Add(description)) continue;
+                OviaNotificationStore.AddWorkLog(companyId, userId, description, route);
             }
         }
 
@@ -2870,12 +3071,42 @@ namespace OVIA.Desktop
         }
 
 
-        private void RefreshButton_Click(object sender, EventArgs e)
+        private async void RefreshButton_Click(object sender, EventArgs e)
         {
             headerSortColumn = "";
             headerSortAscending = true;
             currentPage = 1;
-            BindBarListRows();
+            await SynchronizeBarListsFromErpAsync(true);
+        }
+
+        private async System.Threading.Tasks.Task SynchronizeBarListsFromErpAsync(bool showFailure)
+        {
+            BeginContentLoading();
+            try
+            {
+                OviaErpBarListSyncResult sync = await OviaErpBarListSyncService.PullProjectBarListsAsync(
+                    companyId,
+                    projectNo,
+                    projectName,
+                    GetProjectBarListDirectory());
+
+                BindBarListRows();
+
+                if (sync.IsSuccess)
+                {
+                    lblStatus.Text = "ERP BarList 동기화 완료";
+                    lblStatus.ForeColor = TextSub;
+                }
+                else if (showFailure)
+                {
+                    lblStatus.Text = "ERP 동기화 실패 - 로컬 목록을 유지합니다: " + sync.Message;
+                    lblStatus.ForeColor = OviaFluentTheme.Danger;
+                }
+            }
+            finally
+            {
+                EndContentLoading();
+            }
         }
 
         private void Close_Click(object sender, EventArgs e)
@@ -2964,6 +3195,9 @@ namespace OVIA.Desktop
 
     public class BarListEditResult
     {
+        // 신규등록 팝업에서 ERP가 먼저 생성한 barlist.idx.
+        // 로컬 정식 CSV를 만들기 전까지만 메모리 Draft에서 유지한다.
+        public int ErpBarListId = 0;
         public string Title = "";
         public string WriteStatus = "";
         public string Building = "";
@@ -2974,6 +3208,8 @@ namespace OVIA.Desktop
         public string OrderDate = "";
         public string CreatedDate = "";
         public string DueDate = "";
+        // 메인 > 공사관리 > 공사별 BarList의 최초 작성자(OVIA 로그인 ID).
+        public string Writer = "";
         public string Memo = "";
     }
 
@@ -3016,6 +3252,7 @@ namespace OVIA.Desktop
         private static BarListEditResult Clone(BarListEditResult source)
         {
             BarListEditResult copy = new BarListEditResult();
+            copy.ErpBarListId = source.ErpBarListId;
             copy.Title = source.Title;
             copy.WriteStatus = source.WriteStatus;
             copy.Building = source.Building;
@@ -3026,6 +3263,7 @@ namespace OVIA.Desktop
             copy.OrderDate = source.OrderDate;
             copy.CreatedDate = source.CreatedDate;
             copy.DueDate = source.DueDate;
+            copy.Writer = source.Writer;
             copy.Memo = source.Memo;
             return copy;
         }
@@ -3924,6 +4162,11 @@ namespace OVIA.Desktop
         {
             return MatchesCurrentUser(companyId, userId)
                 && currentUserLevel == SystemAdministratorLevel;
+        }
+
+        public static bool IsCurrentLoginUser(string companyId, string userId)
+        {
+            return MatchesCurrentUser(companyId, userId);
         }
 
         private static bool MatchesCurrentUser(string companyId, string userId)
@@ -5578,22 +5821,90 @@ namespace OVIA.Desktop
 
     public class OviaExcelActionButton : OVIA.Desktop.Controls.OviaButton
     {
+        private bool excelHovered;
+        private bool excelPressed;
+
         public OviaExcelActionButton()
         {
             this.Role = OVIA.Desktop.OviaButtonRole.Neutral;
             this.ForeColor = Color.FromArgb(33, 115, 70);
+
+            // 공사별 BarList의 Excel 전용 버튼은 직접 그리므로 Windows 기본 버튼 잔상/포커스 배경이
+            // 뒤에 비치지 않도록 완전한 사용자 렌더링 상태를 유지한다.
+            this.UseVisualStyleBackColor = false;
+            this.FlatStyle = FlatStyle.Flat;
+            this.FlatAppearance.BorderSize = 0;
+            this.FlatAppearance.MouseOverBackColor = Color.Transparent;
+            this.FlatAppearance.MouseDownBackColor = Color.Transparent;
+            this.TabStop = false;
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            excelHovered = true;
+            base.OnMouseEnter(e);
+            Invalidate();
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            excelHovered = false;
+            excelPressed = false;
+            base.OnMouseLeave(e);
+            Invalidate();
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                excelPressed = true;
+            }
+
+            base.OnMouseDown(e);
+            Invalidate();
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            excelPressed = false;
+            base.OnMouseUp(e);
+            Invalidate();
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs pevent)
+        {
+            PaintParentSurface(pevent.Graphics);
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            RectangleF rect = new RectangleF(0.5F, 0.5F, Math.Max(1F, Width - 1.5F), Math.Max(1F, Height - 1.5F));
+            e.Graphics.CompositingQuality = CompositingQuality.HighQuality;
+
+            // 매 프레임 버튼 바깥 픽셀까지 부모 배경으로 먼저 지워서
+            // 이전 hover/focus 색상이나 흰색 사각 잔상이 모서리/후면에 남지 않게 한다.
+            PaintParentSurface(e.Graphics);
+
             Color excelGreen = Color.FromArgb(33, 115, 70);
-            Color fill = ClientRectangle.Contains(PointToClient(Control.MousePosition)) ? Color.FromArgb(238, 248, 241) : Color.White;
+            Color fill = excelPressed
+                ? OviaFluentTheme.NeutralLight
+                : (excelHovered ? Color.FromArgb(238, 248, 241) : OviaFluentTheme.ButtonNeutralBack);
             Color border = OviaFluentTheme.ButtonNeutralBorder;
 
-            using (GraphicsPath path = OviaProjectBarListDrawHelper.RoundRect(Rectangle.Round(rect), OviaFluentTheme.ButtonRadius))
+            // OVIA 버튼 규칙에 맞춰 그림자/외곽 잔선은 파란 계열을 사용하지 않는다.
+            // 그림자는 공통 중립 회색 계열(CardShadow)로만 1px 안쪽에 표현한다.
+            Rectangle shadowRect = new Rectangle(1, 1, Math.Max(1, Width - 2), Math.Max(1, Height - 2));
+            Rectangle buttonRect = new Rectangle(0, 0, Math.Max(1, Width - 2), Math.Max(1, Height - 2));
+
+            using (GraphicsPath shadowPath = OviaProjectBarListDrawHelper.RoundRect(shadowRect, OviaFluentTheme.ButtonRadius))
+            using (SolidBrush shadowBrush = new SolidBrush(OviaFluentTheme.CardShadow))
+            {
+                e.Graphics.FillPath(shadowBrush, shadowPath);
+            }
+
+            using (GraphicsPath path = OviaProjectBarListDrawHelper.RoundRect(buttonRect, OviaFluentTheme.ButtonRadius))
             using (SolidBrush brush = new SolidBrush(fill))
             using (Pen pen = new Pen(border, 1F))
             {
@@ -5601,7 +5912,40 @@ namespace OVIA.Desktop
                 e.Graphics.DrawPath(pen, path);
             }
 
-            TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, excelGreen, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
+            Rectangle textRect = new Rectangle(0, 0, Math.Max(1, Width - 2), Math.Max(1, Height - 2));
+            TextRenderer.DrawText(
+                e.Graphics,
+                Text,
+                Font,
+                textRect,
+                excelGreen,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding
+            );
+        }
+
+        private void PaintParentSurface(Graphics graphics)
+        {
+            Color parentBackColor = OviaFluentTheme.AppBackground;
+
+            if (Parent != null)
+            {
+                parentBackColor = Parent.BackColor;
+
+                if (parentBackColor == Color.Transparent && Parent.Parent != null)
+                {
+                    parentBackColor = Parent.Parent.BackColor;
+                }
+            }
+
+            if (parentBackColor == Color.Transparent)
+            {
+                parentBackColor = OviaFluentTheme.AppBackground;
+            }
+
+            using (SolidBrush parentBrush = new SolidBrush(parentBackColor))
+            {
+                graphics.FillRectangle(parentBrush, ClientRectangle);
+            }
         }
     }
 

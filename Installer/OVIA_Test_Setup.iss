@@ -75,6 +75,14 @@ Source: "{#SourceRoot}\OVIA.Desktop\Data\Version\ovia_version_history.ovia"; Des
 Name: "{group}\OVIA"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Icons\ovia_symbol.ico"
 Name: "{autodesktop}\OVIA"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Icons\ovia_symbol.ico"; Tasks: desktopicon
 
+[Registry]
+; ERP 웹에서 ovia://launch?... 링크로 설치된 OVIA.Desktop.exe를 실행합니다.
+; ID/PW/ovia_token은 URI에 넣지 않고 1회용 Launch Ticket만 전달합니다.
+Root: HKCR; Subkey: "ovia"; ValueType: string; ValueData: "URL:OVIA Protocol"; Flags: uninsdeletekey
+Root: HKCR; Subkey: "ovia"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCR; Subkey: "ovia\DefaultIcon"; ValueType: string; ValueData: "{app}\Assets\Icons\ovia_symbol.ico"
+Root: HKCR; Subkey: "ovia\shell\open\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}" "%1"""
+
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "OVIA 실행"; Flags: nowait postinstall skipifsilent
 

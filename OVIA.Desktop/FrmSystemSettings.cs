@@ -506,7 +506,7 @@ namespace OVIA.Desktop
             listSection.Controls.Add(txtListPageSize);
 
             Label helper = new Label();
-            helper.Text = "기본값은 100개입니다. 입력한 숫자는 알림 목록을 포함한 OVIA 리스트 형식 화면의 한 페이지 출력 개수 기준으로 사용됩니다.";
+            helper.Text = "기본값은 100개입니다. 입력한 숫자는 OVIA 리스트 형식 화면의 한 페이지 출력 개수 기준으로 사용됩니다.";
             helper.AutoSize = false;
             helper.Location = new Point(2, 96);
             helper.Size = new Size(980, 24);

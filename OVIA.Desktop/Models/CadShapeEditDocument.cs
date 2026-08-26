@@ -13,6 +13,7 @@ namespace OVIA.Desktop
         public int RowNo = 0;
         public double Width = 100D;
         public double Height = 60D;
+        public string LayoutPolicy = "";
         public string Source = "CAD";
         public string OriginalSourcePath = "";
         public List<CadShapeEditElement> Elements = new List<CadShapeEditElement>();
@@ -22,6 +23,7 @@ namespace OVIA.Desktop
             CadShapeEditDocument document = new CadShapeEditDocument();
             document.Version = 4;
             document.Source = "OVIA_MANUAL";
+            document.LayoutPolicy = "CONTENT_BOUNDS";
             document.Width = 160D;
             document.Height = 80D;
             return document;
@@ -42,6 +44,7 @@ namespace OVIA.Desktop
                 document.RowNo = (int)Math.Round(GetNumber(json, "rowNo", 0D));
                 document.Width = GetNumber(json, "width", 100D);
                 document.Height = GetNumber(json, "height", 60D);
+                document.LayoutPolicy = GetString(json, "layoutPolicy");
                 document.Source = GetString(json, "source");
                 document.OriginalSourcePath = GetString(json, "originalSourcePath");
 
@@ -122,6 +125,7 @@ namespace OVIA.Desktop
             copy.RowNo = RowNo;
             copy.Width = Width;
             copy.Height = Height;
+            copy.LayoutPolicy = LayoutPolicy;
             copy.Source = Source;
             copy.OriginalSourcePath = OriginalSourcePath;
 
@@ -299,7 +303,24 @@ namespace OVIA.Desktop
             }
 
             EnsureTextIds();
-            RecalculateDocumentSize();
+
+            // CAD 최초 추출 JSON의 layoutPolicy=SOURCE_CELL은
+            // 실제 CAD 셀 좌표계(width/height + 원래 여백)를 표시 기준으로 사용합니다.
+            // 편집 후 RecalculateDocumentSize()를 실행하면 셀 크기는 작아지는데
+            // 요소 좌표는 기존 CAD 좌표 그대로 남아 ERP에서 형상이 사라지거나
+            // 글씨/선/원이 과도하게 확대되는 문제가 발생합니다.
+            //
+            // SOURCE_CELL은 최초 추출의 width/height를 그대로 유지하고,
+            // 수동/과거 CONTENT_BOUNDS 문서만 기존 방식대로 실제 bounds를 재계산합니다.
+            bool preserveSourceCell = LayoutPolicy != null
+                && LayoutPolicy.Trim().Equals("SOURCE_CELL", StringComparison.OrdinalIgnoreCase)
+                && Width > 0D
+                && Height > 0D;
+
+            if (!preserveSourceCell)
+            {
+                RecalculateDocumentSize();
+            }
 
             string directory = Path.GetDirectoryName(path);
 
@@ -312,6 +333,13 @@ namespace OVIA.Desktop
             sb.Append("{\r\n");
             sb.Append("  \"version\": 4,\r\n");
             sb.Append("  \"source\": ").Append(JsonString(Source == null || Source.Trim() == "" ? "OVIA_EDIT" : Source)).Append(",\r\n");
+            sb.Append("  \"layoutPolicy\": ").Append(JsonString(
+                LayoutPolicy == null || LayoutPolicy.Trim() == ""
+                    ? (Source != null && Source.Trim().StartsWith("CAD", StringComparison.OrdinalIgnoreCase)
+                        ? "SOURCE_CELL"
+                        : "CONTENT_BOUNDS")
+                    : LayoutPolicy.Trim().ToUpperInvariant()
+            )).Append(",\r\n");
             sb.Append("  \"coordinateSystem\": \"TOP_LEFT_Y_DOWN\",\r\n");
             sb.Append("  \"editor\": {\"name\": \"OVIA CAD Shape Editor\", \"preserveCadDirection\": true, \"cellFit\": \"PRESERVE_CAD_GEOMETRY\", \"dimensionTextAffectsGeometry\": false},\r\n");
 

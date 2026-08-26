@@ -14,6 +14,10 @@ namespace OVIA.Desktop
         public string Message { get; set; }
         public int HttpStatusCode { get; set; }
         public List<OviaProjectRow> Projects { get; set; }
+        public string SessionCompanyId { get; set; }
+        public string SessionUserId { get; set; }
+        public string SessionUserName { get; set; }
+        public string SessionIpAddress { get; set; }
 
         public OviaErpProjectListResult()
         {
@@ -270,12 +274,34 @@ namespace OVIA.Desktop
                     ));
                 }
 
+                string sessionCompanyId = "";
+                string sessionUserId = "";
+                string sessionUserName = "";
+                string sessionIpAddress = "";
+
+                object sessionValue;
+                if (TryGetValueIgnoreCase(data, "session", out sessionValue) && sessionValue != null)
+                {
+                    IDictionary<string, object> session = ToStringObjectDictionary(sessionValue);
+                    if (session != null)
+                    {
+                        sessionCompanyId = ReadString(session, "company_id");
+                        sessionUserId = ReadString(session, "user_id");
+                        sessionUserName = ReadString(session, "user_name");
+                        sessionIpAddress = ReadString(session, "ip");
+                    }
+                }
+
                 return new OviaErpProjectListResult
                 {
                     IsSuccess = true,
                     Message = message,
                     HttpStatusCode = httpStatusCode,
-                    Projects = projects
+                    Projects = projects,
+                    SessionCompanyId = sessionCompanyId,
+                    SessionUserId = sessionUserId,
+                    SessionUserName = sessionUserName,
+                    SessionIpAddress = sessionIpAddress
                 };
             }
             catch (Exception)

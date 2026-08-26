@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -190,7 +190,7 @@ namespace OVIA.Desktop
         {
             lblCurrentVersion = new Label();
             lblCurrentVersion.AutoSize = false;
-            lblCurrentVersion.Location = new Point(32, 122);
+            lblCurrentVersion.Location = new Point(32, 98);
             lblCurrentVersion.Size = new Size(520, 40);
             lblCurrentVersion.Font = OviaFluentTheme.FontTitle(16F, FontStyle.Bold);
             lblCurrentVersion.ForeColor = TextDark;
@@ -200,7 +200,7 @@ namespace OVIA.Desktop
 
             lblVersionGuide = new Label();
             lblVersionGuide.AutoSize = false;
-            lblVersionGuide.Location = new Point(0, 122);
+            lblVersionGuide.Location = new Point(0, 98);
             lblVersionGuide.Size = new Size(520, 40);
             lblVersionGuide.Font = OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
             lblVersionGuide.ForeColor = Color.FromArgb(148, 163, 184);
@@ -212,7 +212,7 @@ namespace OVIA.Desktop
 
             lblVersionPath = new Label();
             lblVersionPath.AutoSize = false;
-            lblVersionPath.Location = new Point(0, 146);
+            lblVersionPath.Location = new Point(0, 122);
             lblVersionPath.Size = new Size(520, 22);
             lblVersionPath.Font = OviaFluentTheme.FontStatus(8.7F, FontStyle.Regular);
             lblVersionPath.ForeColor = Color.FromArgb(156, 163, 175);
@@ -221,19 +221,19 @@ namespace OVIA.Desktop
             lblVersionPath.AutoEllipsis = true;
             parent.Controls.Add(lblVersionPath);
 
-            btnSave = CreateButton("저장하기", 0, 122, true);
+            btnSave = CreateButton("저장하기", 0, 98, true);
             btnSave.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnSave.Enabled = false;
             btnSave.Visible = canEdit;
             btnSave.Click += Save_Click;
             parent.Controls.Add(btnSave);
 
-            btnExport = CreateButton("엑셀다운로드", 0, 122, false);
+            btnExport = CreateButton("엑셀다운로드", 0, 98, false);
             btnExport.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnExport.Click += Export_Click;
             parent.Controls.Add(btnExport);
 
-            btnAdd = CreateButton("항목 추가", 0, 122, false);
+            btnAdd = CreateButton("항목 추가", 0, 98, false);
             btnAdd.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnAdd.Visible = canEdit;
             btnAdd.Enabled = canEdit;
@@ -254,7 +254,7 @@ namespace OVIA.Desktop
         private void BuildGrid(Control parent)
         {
             grid = new DataGridView();
-            grid.Location = new Point(32, 178);
+            grid.Location = new Point(32, 154);
             grid.Size = new Size(1116, 430);
             grid.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
             grid.AllowUserToAddRows = false;
@@ -1077,25 +1077,25 @@ namespace OVIA.Desktop
             {
                 int measuredVersionWidth = TextRenderer.MeasureText(lblCurrentVersion.Text, lblCurrentVersion.Font).Width + 12;
                 lblCurrentVersion.Width = Math.Max(300, Math.Min(360, measuredVersionWidth));
-                lblCurrentVersion.Location = new Point(32, 122);
+                lblCurrentVersion.Location = new Point(32, 98);
             }
 
             int right = Math.Max(32, width - 32);
             if (btnSave != null)
             {
-                btnSave.Location = new Point(right - btnSave.Width, 122);
+                btnSave.Location = new Point(right - btnSave.Width, 98);
                 right = btnSave.Left - 10;
             }
 
             if (btnExport != null)
             {
-                btnExport.Location = new Point(right - btnExport.Width, 122);
+                btnExport.Location = new Point(right - btnExport.Width, 98);
                 right = btnExport.Left - 10;
             }
 
             if (btnAdd != null)
             {
-                btnAdd.Location = new Point(right - btnAdd.Width, 122);
+                btnAdd.Location = new Point(right - btnAdd.Width, 98);
             }
 
             if (lblVersionGuide != null && lblCurrentVersion != null)
@@ -1111,12 +1111,12 @@ namespace OVIA.Desktop
                     guideRight = btnExport.Left - 24;
                 }
 
-                lblVersionGuide.Location = new Point(guideLeft, 118);
+                lblVersionGuide.Location = new Point(guideLeft, 98);
                 lblVersionGuide.Size = new Size(Math.Max(160, guideRight - guideLeft), 22);
 
                 if (lblVersionPath != null)
                 {
-                    lblVersionPath.Location = new Point(guideLeft, 142);
+                    lblVersionPath.Location = new Point(guideLeft, 122);
                     lblVersionPath.Size = new Size(Math.Max(160, guideRight - guideLeft), 22);
                     UpdateVersionPathLabel();
                 }
@@ -1124,7 +1124,7 @@ namespace OVIA.Desktop
 
             if (grid != null)
             {
-                grid.Location = new Point(32, 178);
+                grid.Location = new Point(32, 154);
                 grid.Size = new Size(Math.Max(400, width - 64), Math.Max(260, height - grid.Top - 18));
                 if (grid.Columns.Contains(ColumnContent))
                 {

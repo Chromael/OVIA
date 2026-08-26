@@ -49,6 +49,9 @@ namespace OVIA.Desktop
         private static string currentErpPassword = "";
         private static bool hasCurrentErpWebLogin = false;
         private static string currentErpApiToken = "";
+        private static string currentErpWebSessionTicket = "";
+        private static string currentErpLogoutTicket = "";
+        private static bool currentSessionFromErpLaunch = false;
 
         public static void ClearSession()
         {
@@ -67,6 +70,65 @@ namespace OVIA.Desktop
         /// ERP 로그인 성공 시 발급된 64자리 OVIA API 토큰을 현재 로그인 기업에서만 사용합니다.
         /// 토큰은 파일/설정/로그에 저장하지 않고 OVIA 프로세스 메모리에만 유지합니다.
         /// </summary>
+        public static void AdoptLaunchSession(string companyId, string userId, string oviaToken)
+        {
+            AdoptLaunchSession(companyId, userId, oviaToken, "", "");
+        }
+
+        public static void AdoptLaunchSession(
+            string companyId,
+            string userId,
+            string oviaToken,
+            string webSessionTicket)
+        {
+            AdoptLaunchSession(companyId, userId, oviaToken, webSessionTicket, "");
+        }
+
+        public static void AdoptLaunchSession(
+            string companyId,
+            string userId,
+            string oviaToken,
+            string webSessionTicket,
+            string logoutTicket)
+        {
+            companyId = companyId == null ? "" : companyId.Trim();
+            userId = userId == null ? "" : userId.Trim();
+            oviaToken = oviaToken == null ? "" : oviaToken.Trim();
+            webSessionTicket = webSessionTicket == null ? "" : webSessionTicket.Trim();
+            logoutTicket = logoutTicket == null ? "" : logoutTicket.Trim();
+
+            lock (SyncRoot)
+            {
+                // ERP Launch는 비밀번호를 전달하지 않는다.
+                // API token과 ERP 웹 세션 handoff ticket만 메모리에 유지한다.
+                sessionCookies = new List<OviaErpSessionCookie>();
+                currentErpCompanyId = companyId;
+                currentErpUserId = userId;
+                currentErpPassword = "";
+                currentErpApiToken = oviaToken.Length == 64 ? oviaToken : "";
+                currentErpWebSessionTicket =
+                    webSessionTicket.Length == 64 ? webSessionTicket : "";
+                currentErpLogoutTicket =
+                    IsHexToken64(logoutTicket) ? logoutTicket.ToLowerInvariant() : "";
+                hasCurrentErpWebLogin = false;
+                currentSessionFromErpLaunch = true;
+            }
+        }
+
+        public static bool IsCurrentSessionFromErpLaunch(string companyId)
+        {
+            companyId = companyId == null ? "" : companyId.Trim();
+
+            lock (SyncRoot)
+            {
+                return currentSessionFromErpLaunch
+                    && companyId != ""
+                    && string.Equals(currentErpCompanyId, companyId, StringComparison.OrdinalIgnoreCase)
+                    && currentErpApiToken != ""
+                    && currentErpApiToken.Length == 64;
+            }
+        }
+
         public static bool TryGetCurrentErpApiToken(string companyId, out string token)
         {
             companyId = companyId == null ? "" : companyId.Trim();
@@ -78,6 +140,62 @@ namespace OVIA.Desktop
                     && string.Equals(currentErpCompanyId, companyId, StringComparison.OrdinalIgnoreCase)
                     && token != ""
                     && token.Length == 64;
+            }
+        }
+
+        /// <summary>
+        /// ERP Launch Ticket 또는 일반 OVIA 로그인에서 받은 64자리 API 토큰으로
+        /// WebView2용 ERP PHP 세션을 만들 때 사용합니다.
+        /// 비밀번호는 브라우저/URI에 전달하지 않습니다.
+        /// </summary>
+        /// <summary>
+        /// ERP 브라우저의 실제 로그인 세션을 WebView2로 넘기기 위한
+        /// 60초 1회용 서버측 ticket을 꺼냅니다.
+        /// </summary>
+        public static bool TryTakeCurrentErpWebSessionTicket(
+            out string companyId,
+            out string webSessionTicket,
+            out string authenticationUrl)
+        {
+            lock (SyncRoot)
+            {
+                companyId = currentErpCompanyId;
+                webSessionTicket = currentErpWebSessionTicket;
+                authenticationUrl = OviaCompanyConnectionStore.GetErpAuthUrl(companyId);
+
+                bool valid = companyId != ""
+                    && webSessionTicket != ""
+                    && webSessionTicket.Length == 64
+                    && authenticationUrl != "";
+
+                if (valid)
+                {
+                    // 한 번만 사용한다.
+                    currentErpWebSessionTicket = "";
+                }
+
+                return valid;
+            }
+        }
+
+        public static bool TryGetCurrentErpWebSso(
+            out string companyId,
+            out string userId,
+            out string oviaToken,
+            out string authenticationUrl)
+        {
+            lock (SyncRoot)
+            {
+                companyId = currentErpCompanyId;
+                userId = currentErpUserId;
+                oviaToken = currentErpApiToken;
+                authenticationUrl = OviaCompanyConnectionStore.GetErpAuthUrl(companyId);
+
+                return companyId != ""
+                    && userId != ""
+                    && oviaToken != ""
+                    && oviaToken.Length == 64
+                    && authenticationUrl != "";
             }
         }
 
@@ -104,6 +222,71 @@ namespace OVIA.Desktop
                     && password != ""
                     && authenticationUrl != "";
             }
+        }
+
+        /// <summary>
+        /// ERP 브라우저의 실제 로그아웃 이벤트가 ovia://logout으로 전달되었을 때만
+        /// 현재 ERP Launch 세션의 1회용 logout ticket을 확인하고 소비합니다.
+        /// 주기적 세션 조회/polling은 사용하지 않습니다.
+        /// </summary>
+        public static bool TryConsumeErpLogoutSignal(string companyId, string logoutTicket)
+        {
+            companyId = companyId == null ? "" : companyId.Trim();
+            logoutTicket = logoutTicket == null ? "" : logoutTicket.Trim().ToLowerInvariant();
+
+            lock (SyncRoot)
+            {
+                if (!currentSessionFromErpLaunch
+                    || companyId == ""
+                    || !string.Equals(currentErpCompanyId, companyId, StringComparison.OrdinalIgnoreCase)
+                    || !IsHexToken64(currentErpLogoutTicket)
+                    || !IsHexToken64(logoutTicket)
+                    || !FixedTimeEqualsAscii(currentErpLogoutTicket, logoutTicket))
+                {
+                    return false;
+                }
+
+                // 같은 로그아웃 명령을 다시 사용할 수 없게 즉시 소비합니다.
+                currentErpLogoutTicket = "";
+                return true;
+            }
+        }
+
+        private static bool IsHexToken64(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value.Length != 64)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < value.Length; i++)
+            {
+                char ch = value[i];
+                bool hex = (ch >= '0' && ch <= '9')
+                    || (ch >= 'a' && ch <= 'f')
+                    || (ch >= 'A' && ch <= 'F');
+                if (!hex)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool FixedTimeEqualsAscii(string left, string right)
+        {
+            if (left == null || right == null || left.Length != right.Length)
+            {
+                return false;
+            }
+
+            int diff = 0;
+            for (int i = 0; i < left.Length; i++)
+            {
+                diff |= left[i] ^ right[i];
+            }
+            return diff == 0;
         }
 
         public static async Task<OviaErpAuthenticationResult> AuthenticateAsync(string companyId, string userId, string password)
@@ -688,6 +871,7 @@ namespace OVIA.Desktop
                     && currentErpUserId != ""
                     && currentErpPassword != ""
                     && currentErpApiToken.Length == 64;
+                currentSessionFromErpLaunch = false;
             }
         }
 
@@ -700,7 +884,10 @@ namespace OVIA.Desktop
                 currentErpUserId = "";
                 currentErpPassword = "";
                 currentErpApiToken = "";
+                currentErpWebSessionTicket = "";
+                currentErpLogoutTicket = "";
                 hasCurrentErpWebLogin = false;
+                currentSessionFromErpLaunch = false;
             }
         }
 

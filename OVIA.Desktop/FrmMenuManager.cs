@@ -2153,7 +2153,6 @@ namespace OVIA.Desktop
                 case "MASTER_WORKER_TEAM":
                 case "MASTER_MACHINE_LOCATION":
                     return "MASTER_DATA";
-                case "LEGACY_MAIN_DASHBOARD":
                 case "SYSTEM_SETTINGS":
                 case "BARLIST_MAPPING":
                 case "REBAR_UNIT_WEIGHT":
@@ -2319,8 +2318,6 @@ namespace OVIA.Desktop
             {
                 case "MAIN":
                     return "OVIA.Desktop/FrmMain.cs";
-                case "NOTIFICATIONS":
-                    return "OVIA.Desktop/FrmNotificationList.cs";
                 case "PROJECT_MANAGER":
                     return "OVIA.Desktop/FrmProjectManager.cs";
                 case "PROJECT_REGISTER":
@@ -2331,8 +2328,6 @@ namespace OVIA.Desktop
                     return "OVIA.Desktop/FrmBarList.cs";
                 case "ERP":
                     return "OVIA.Desktop/FrmWorkspaceShell.cs";
-                case "LEGACY_MAIN_DASHBOARD":
-                    return "OVIA.Desktop/FrmMain.cs";
                 case "SYSTEM_SETTINGS":
                     return "OVIA.Desktop/FrmSystemSettings.cs";
                 case "BARLIST_MAPPING":
@@ -2354,7 +2349,6 @@ namespace OVIA.Desktop
         {
             List<OviaMenuSetting> list = new List<OviaMenuSetting>();
             Add(list, "MAIN", "메인", 1, false);
-            Add(list, "NOTIFICATIONS", "알림", 2, false);
             Add(list, "PROJECT_MANAGER", "공사관리", 1, false);
             Add(list, "PROJECT_REGISTER", "공사등록", 2, false);
             Add(list, "PROJECT_BARLIST_LIST", "공사별 BarList", 3, false);
@@ -2392,7 +2386,6 @@ namespace OVIA.Desktop
             Add(list, "MASTER_MACHINE_LOCATION", "기계/위치 관리", 2, false);
 
             Add(list, "SETTINGS", "환경설정", 1, true);
-            Add(list, "LEGACY_MAIN_DASHBOARD", "기존 메인대시보드", 2, true);
             Add(list, "SYSTEM_SETTINGS", "시스템 설정", 2, true);
             Add(list, "BARLIST_MAPPING", "BarList 항목 매핑", 2, true);
             Add(list, "REBAR_UNIT_WEIGHT", "이형철근 단위중량표", 2, true);
@@ -2408,7 +2401,6 @@ namespace OVIA.Desktop
             switch (normalized)
             {
                 case "MAIN": return "E80F";
-                case "NOTIFICATIONS": return "E7F4";
                 case "PROJECT_MANAGER": return "E74C";
                 case "PROJECT_REGISTER": return "E710";
                 case "PROJECT_BARLIST_LIST": return "E8A5";
@@ -2440,7 +2432,6 @@ namespace OVIA.Desktop
                 case "MASTER_WORKER_TEAM": return "E716";
                 case "MASTER_MACHINE_LOCATION": return "E950";
                 case "SETTINGS": return "E713";
-                case "LEGACY_MAIN_DASHBOARD": return "E9D2";
                 case "SYSTEM_SETTINGS": return "E713";
                 case "BARLIST_MAPPING": return "E8A5";
                 case "REBAR_UNIT_WEIGHT": return "E9D9";

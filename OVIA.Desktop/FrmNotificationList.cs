@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -160,15 +160,7 @@ namespace OVIA.Desktop
 
         private void BuildToolbar(Control parent)
         {
-            btnToggleSelectAll = CreateButton("전체 선택", 0, 116, 110, OviaButtonRole.Neutral);
-            btnToggleSelectAll.Click += ToggleSelectAll_Click;
-            parent.Controls.Add(btnToggleSelectAll);
-
-            btnConfirmSelected = CreateButton("확인", btnToggleSelectAll.Right + 10, 122, 92, OviaButtonRole.Primary);
-            btnConfirmSelected.Click += ConfirmSelected_Click;
-            parent.Controls.Add(btnConfirmSelected);
-
-            LayoutToolbarButtons();
+            // ERP log_ovia는 읽음/확인 상태를 저장하지 않으므로 선택/확인 툴바를 사용하지 않는다.
         }
 
         private void BuildGrid(Control parent)
@@ -202,40 +194,13 @@ namespace OVIA.Desktop
             grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(229, 237, 255);
             grid.DefaultCellStyle.SelectionForeColor = TextDark;
             grid.RowTemplate.Height = 34;
-            grid.CellClick += Grid_CellClick;
-            grid.CellPainting += Grid_CellPainting;
-            grid.CurrentCellDirtyStateChanged += Grid_CurrentCellDirtyStateChanged;
-            grid.CellValueChanged += Grid_CellValueChanged;
 
-            DataGridViewTextBoxColumn idColumn = new DataGridViewTextBoxColumn();
-            idColumn.Name = "Id";
-            idColumn.HeaderText = "Id";
-            idColumn.Visible = false;
-            grid.Columns.Add(idColumn);
-
-            DataGridViewCheckBoxColumn checkColumn = new DataGridViewCheckBoxColumn();
-            checkColumn.Name = "Check";
-            checkColumn.HeaderText = "체크";
-            checkColumn.Width = 54;
-            checkColumn.TrueValue = true;
-            checkColumn.FalseValue = false;
-            checkColumn.HeaderCell.Style.BackColor = OviaFluentTheme.HeaderBackground;
-            checkColumn.HeaderCell.Style.ForeColor = TextDark;
-            checkColumn.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
-            grid.Columns.Add(checkColumn);
-
-            AddTextColumn("No", "순번", 64, DataGridViewContentAlignment.MiddleCenter);
-            AddTextColumn("WorkContent", "작업내용", 240, DataGridViewContentAlignment.MiddleLeft);
-            AddTextColumn("WorkPath", "경로", 330, DataGridViewContentAlignment.MiddleLeft);
+            AddTextColumn("No", "No.", 72, DataGridViewContentAlignment.MiddleCenter);
             AddTextColumn("WorkDate", "일시", 150, DataGridViewContentAlignment.MiddleCenter);
-            AddTextColumn("Worker", "작업자", 120, DataGridViewContentAlignment.MiddleCenter);
-
-            DataGridViewButtonColumn confirmColumn = new DataGridViewButtonColumn();
-            confirmColumn.Name = "Confirm";
-            confirmColumn.HeaderText = "확인";
-            confirmColumn.Width = 100;
-            confirmColumn.UseColumnTextForButtonValue = false;
-            grid.Columns.Add(confirmColumn);
+            AddTextColumn("Worker", "로그인 ID", 130, DataGridViewContentAlignment.MiddleCenter);
+            AddTextColumn("WorkPath", "경로", 300, DataGridViewContentAlignment.MiddleLeft);
+            AddTextColumn("WorkContent", "작업내용", 300, DataGridViewContentAlignment.MiddleLeft);
+            AddTextColumn("Ip", "접속 IP", 130, DataGridViewContentAlignment.MiddleCenter);
 
             ApplyNotificationHeaderSelectionStyle();
 
@@ -338,19 +303,12 @@ namespace OVIA.Desktop
                 OviaNotificationEntry entry = allEntries[i];
                 int rowIndex = grid.Rows.Add();
                 DataGridViewRow row = grid.Rows[rowIndex];
-                row.Cells["Id"].Value = entry.Id;
-                row.Cells["Check"].Value = false;
-                row.Cells["No"].Value = (i + 1).ToString();
-                row.Cells["WorkContent"].Value = entry.WorkContent;
-                row.Cells["WorkPath"].Value = entry.WorkPath;
-                row.Cells["WorkDate"].Value = entry.WorkDate.ToString("yyyy-MM-dd HH:mm");
+                row.Cells["No"].Value = entry.Id;
+                row.Cells["WorkDate"].Value = entry.WorkDate.ToString("yyyy-MM-dd HH:mm:ss");
                 row.Cells["Worker"].Value = entry.Worker;
-                row.Cells["Confirm"].Value = entry.IsConfirmed ? "확인됨" : "확인";
-
-                if (entry.IsConfirmed)
-                {
-                    row.DefaultCellStyle.ForeColor = TextSub;
-                }
+                row.Cells["WorkPath"].Value = entry.WorkPath;
+                row.Cells["WorkContent"].Value = entry.WorkContent;
+                row.Cells["Ip"].Value = entry.Ip;
             }
 
             RenderPager();
@@ -796,8 +754,8 @@ namespace OVIA.Desktop
 
         public void ApplyWorkspaceLayout()
         {
-            const int toolbarTop = 116;
-            const int gridTop = 164;
+            const int toolbarTop = 73;
+            const int gridTop = 121;
             const int contentInset = 25;
             const int pagerHeight = 38;
             const int bottomInset = 12;

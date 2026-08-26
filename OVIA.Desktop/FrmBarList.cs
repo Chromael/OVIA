@@ -7,6 +7,7 @@ using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
@@ -2080,10 +2081,6 @@ namespace OVIA.Desktop
             changePartItem.Click += ContextChangePart_Click;
             gridContextMenu.Items.Add(changePartItem);
 
-            ToolStripMenuItem changeMarkItem = new ToolStripMenuItem("부호 및 명칭 변경");
-            changeMarkItem.Click += ContextChangeMarkName_Click;
-            gridContextMenu.Items.Add(changeMarkItem);
-
             ToolStripMenuItem changeSpecItem = new ToolStripMenuItem("규격 변경");
             changeSpecItem.Click += ContextChangeSpec_Click;
             gridContextMenu.Items.Add(changeSpecItem);
@@ -3413,8 +3410,36 @@ namespace OVIA.Desktop
             LoadCsvWithImportPolicy(dialog.FileName, false);
         }
 
-        private void SaveProjectBarList_Click(object sender, EventArgs e)
+        private void CommitPendingGridEdit()
         {
+            if (grid == null || grid.IsDisposed)
+            {
+                return;
+            }
+
+            try
+            {
+                // 마지막 셀이 아직 편집 모드인 채로 저장 버튼을 누르면
+                // CellEndEdit가 저장 완료 이후(예: 뒤로가기 클릭 시점)에 발생하면서
+                // MarkUnsaved()가 호출되어 실제 저장본과 무관하게 미저장 상태가 될 수 있다.
+                // 저장/이동 판정 전에 현재 편집을 먼저 확정하여 이벤트 순서를 고정한다.
+                if (grid.IsCurrentCellInEditMode)
+                {
+                    grid.EndEdit();
+                }
+            }
+            catch
+            {
+                // 편집 확정 실패는 기존 저장/이동 흐름의 오류 처리에 맡긴다.
+            }
+        }
+
+        private async void SaveProjectBarList_Click(object sender, EventArgs e)
+        {
+            // 저장 baseline을 잡기 전에 현재 셀의 편집값을 확정한다.
+            // 이렇게 해야 저장 후 뒤로가기 시 늦게 발생한 CellEndEdit가 저장 상태를 다시 dirty로 만들지 않는다.
+            CommitPendingGridEdit();
+
             if (grid.Columns.Count == 0 || grid.Rows.Count == 0)
             {
                 MessageBox.Show(
@@ -3470,23 +3495,71 @@ namespace OVIA.Desktop
                     filePath = Path.Combine(dir, fileName);
                 }
 
+                List<string> workLogDescriptions = BuildBarListWorkLogDescriptions();
+
+                // 기존 ERP 고유 idx는 화면 그리드 컬럼이 아니라 CSV 시스템 메타데이터에 저장된다.
+                // SaveGridToCsv가 파일을 다시 쓸 때 이 메타데이터가 사라지면 다음 저장이 신규 INSERT로 처리되므로
+                // 저장 직전 idx를 보관하고 CSV 재작성 직후 반드시 복원한다.
+                int persistedErpBarListId = OviaErpBarListSyncService.GetPersistedErpBarListId(filePath);
+                if (persistedErpBarListId <= 0 && registrationDraft != null && registrationDraft.ErpBarListId > 0)
+                {
+                    // 신규등록 팝업에서 이미 ERP barlist 헤더를 생성했다.
+                    // 첫 상세 저장은 반드시 그 idx를 재사용하여 중복 INSERT가 발생하지 않게 한다.
+                    persistedErpBarListId = registrationDraft.ErpBarListId;
+                }
+
                 NormalizeCadShapeJsonFilesForSave(filePath);
                 SaveGridToCsv(filePath);
+                OviaErpBarListSyncService.RestorePersistedErpBarListId(filePath, persistedErpBarListId);
+
+                OviaErpBarListSyncResult erpSync = await OviaErpBarListSyncService.PushSavedBarListAsync(
+                    companyId,
+                    projectNo,
+                    filePath);
+
                 ResetAllRowOriginalValuesToCurrent();
-                CaptureSavedGridBaseline();
 
                 allowExtractEditMenu = true;
                 ClearUndoRedoStates();
                 grid.Invalidate();
 
-                lblStatus.Text = "BarList 저장 완료 - 공사별 BarList 목록에 반영되었습니다.";
-                lblStatus.ForeColor = TextSub;
+                lblStatus.Text = erpSync.IsSuccess
+                    ? "BarList 저장 완료 - ERP와 동기화되었습니다."
+                    : "BarList 로컬 저장 완료 - ERP 동기화 보류: " + erpSync.Message;
+                lblStatus.ForeColor = erpSync.IsSuccess ? TextSub : OviaFluentTheme.Danger;
+
+                if (!erpSync.IsSuccess)
+                {
+                    MessageBox.Show(
+                        "BarList는 OVIA 로컬에 저장되었습니다.\r\n\r\nERP에는 아직 반영되지 않았습니다.\r\n"
+                        + erpSync.Message
+                        + "\r\n\r\n서버/API 상태를 확인한 뒤 '검토 후 저장'을 다시 눌러주세요.",
+                        "OVIA ERP 동기화",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning
+                    );
+                }
+
+                // 저장 경로를 먼저 현재 BarList의 canonical 경로로 확정한 뒤 저장 baseline을 잡는다.
+                // 신규 BarList 첫 저장에서 baseline을 먼저 잡으면 lastLoadedFilePath(CAD 추출 CSV)의
+                // ERP pending 상태를 잘못 참조하여 실제 저장 성공 후에도 isSaved=false가 남을 수 있다.
                 SetReferenceFilePath(filePath);
                 lastLoadedFilePath = filePath;
                 savedProjectFilePath = filePath;
+
+                if (erpSync.IsSuccess)
+                {
+                    CaptureSavedGridBaseline();
+                }
+                else
+                {
+                    // 로컬 저장만 성공하고 ERP 반영이 실패한 경우에는 기존 정책대로 미저장 상태를 유지한다.
+                    RefreshSaveStateFromCurrentGrid();
+                }
+
                 OviaBarListRegistrationDraftStore.Clear(companyId, projectNo);
                 RefreshProjectContextHeaderFromGrid();
-                OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 저장", "메인  ›  공사관리  ›  공사별 BarList  ›  BarList");
+                WriteBarListWorkLogs(workLogDescriptions);
             }
             catch (Exception ex)
             {
@@ -3496,6 +3569,147 @@ namespace OVIA.Desktop
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error
                 );
+            }
+        }
+
+        private List<string> BuildBarListWorkLogDescriptions()
+        {
+            List<string> logs = new List<string>();
+
+            if (savedGridBaseline == null)
+            {
+                logs.Add("BarList 저장");
+                return logs;
+            }
+
+            GridUndoSnapshot current = CaptureGridState();
+            GridUndoSnapshot saved = savedGridBaseline;
+            Dictionary<long, int> currentRows = BuildSnapshotRowIndexMap(current);
+            Dictionary<long, int> savedRows = BuildSnapshotRowIndexMap(saved);
+
+            foreach (KeyValuePair<long, int> pair in currentRows)
+            {
+                if (!savedRows.ContainsKey(pair.Key))
+                {
+                    AddUniqueWorkLog(logs, "BarList 행 추가");
+                }
+            }
+
+            foreach (KeyValuePair<long, int> pair in savedRows)
+            {
+                if (!currentRows.ContainsKey(pair.Key))
+                {
+                    AddUniqueWorkLog(logs, "BarList 행 삭제");
+                }
+            }
+
+            foreach (KeyValuePair<long, int> pair in currentRows)
+            {
+                int savedIndex;
+                if (!savedRows.TryGetValue(pair.Key, out savedIndex)) continue;
+
+                int currentIndex = pair.Value;
+                object[] currentRow = currentIndex >= 0 && currentIndex < current.Rows.Count ? current.Rows[currentIndex] : null;
+                object[] savedRow = savedIndex >= 0 && savedIndex < saved.Rows.Count ? saved.Rows[savedIndex] : null;
+                if (currentRow == null || savedRow == null) continue;
+
+                string currentShape = currentIndex < current.ShapeContentFingerprints.Count ? current.ShapeContentFingerprints[currentIndex] : "";
+                string savedShape = savedIndex < saved.ShapeContentFingerprints.Count ? saved.ShapeContentFingerprints[savedIndex] : "";
+                if (!string.Equals(currentShape, savedShape, StringComparison.Ordinal))
+                {
+                    AddUniqueWorkLog(logs, "철근형상 수정");
+                }
+
+                int columnCount = Math.Min(currentRow.Length, savedRow.Length);
+                for (int c = 0; c < columnCount && c < grid.Columns.Count; c++)
+                {
+                    string currentText = currentRow[c] == null ? "" : currentRow[c].ToString();
+                    string savedText = savedRow[c] == null ? "" : savedRow[c].ToString();
+                    if (string.Equals(currentText, savedText, StringComparison.Ordinal)) continue;
+
+                    string description = GetBarListColumnChangeDescription(c);
+                    if (description != "") AddUniqueWorkLog(logs, description);
+                }
+            }
+
+            if (logs.Count == 0 && !AreGridStatesEquivalent(current, saved))
+            {
+                logs.Add("BarList 내용 수정");
+            }
+
+            return logs;
+        }
+
+        private Dictionary<long, int> BuildSnapshotRowIndexMap(GridUndoSnapshot state)
+        {
+            Dictionary<long, int> map = new Dictionary<long, int>();
+            if (state == null) return map;
+
+            for (int i = 0; i < state.Rows.Count; i++)
+            {
+                long key = i < state.RowOrderKeys.Count ? state.RowOrderKeys[i] : (i + 1);
+                if (!map.ContainsKey(key)) map.Add(key, i);
+            }
+            return map;
+        }
+
+        private string GetBarListColumnChangeDescription(int columnIndex)
+        {
+            if (grid == null || columnIndex < 0 || columnIndex >= grid.Columns.Count) return "";
+            DataGridViewColumn column = grid.Columns[columnIndex];
+            string header = column.HeaderText == null ? "" : column.HeaderText.Trim();
+            string name = column.Name == null ? "" : column.Name.Trim();
+            string key = (header + " " + name).ToUpperInvariant();
+
+            if (key.Contains("OVIA_CAD_SHAPE") || key.Contains("CAD_SHAPE_JSON")
+                || key.Contains("SHAPE_SOURCE") || key.Contains("SHAPE_STATUS")
+                || key.Contains("SHAPE_TEXT") || key.Contains("형상치수")
+                || IsRebarShapeHeader(header))
+            {
+                return "철근형상 수정";
+            }
+
+            if (header == "부위") return "부위 수정";
+            if (header == "번호") return "번호 수정";
+            if (header.Contains("철근규격") || header == "규격") return "철근규격 수정";
+            if ((header.Contains("길이") && !header.Contains("총길이")) || header == "길이(mm)") return "길이 수정";
+            if (header.Contains("수량")) return "수량 수정";
+            if (header == "비고") return "비고 수정";
+            if (header == "제목") return "제목 수정";
+            if (header == "발주일") return "발주일 수정";
+            if (header == "납기일") return "납기일 수정";
+            if (header == "등록일") return "등록일 수정";
+
+            // 계산 결과/원본 경로/OVIA 내부 메타데이터는 사용자가 직접 한 작업으로 기록하지 않는다.
+            if (header.Contains("총길이") || header.Contains("중량") || header.Contains("원본")
+                || key.Contains("OVIA_") || key.Contains("SOURCE_"))
+            {
+                return "";
+            }
+
+            if (column.Visible && header != "") return header + " 수정";
+            return "";
+        }
+
+        private void AddUniqueWorkLog(List<string> logs, string description)
+        {
+            if (logs == null || string.IsNullOrWhiteSpace(description)) return;
+            for (int i = 0; i < logs.Count; i++)
+            {
+                if (string.Equals(logs[i], description, StringComparison.Ordinal)) return;
+            }
+            logs.Add(description);
+        }
+
+        private void WriteBarListWorkLogs(List<string> descriptions)
+        {
+            if (descriptions == null || descriptions.Count == 0) return;
+            const string route = "메인  ›  공사관리  ›  공사별 BarList  ›  BarList";
+            for (int i = 0; i < descriptions.Count; i++)
+            {
+                string description = descriptions[i] == null ? "" : descriptions[i].Trim();
+                if (description == "") continue;
+                OviaNotificationStore.AddWorkLog(companyId, userId, description, route);
             }
         }
 
@@ -5661,7 +5875,6 @@ namespace OVIA.Desktop
             MarkUnsaved();
             RecalculateSummary();
             grid.Invalidate();
-            OviaNotificationStore.AddWorkLog(companyId, userId, "BarList 행 삭제", "메인  ›  공사관리  ›  공사별 BarList  ›  BarList");
         }
 
         private void Grid_CellBeginEdit(object sender, DataGridViewCellCancelEventArgs e)
@@ -6414,7 +6627,9 @@ namespace OVIA.Desktop
                 return;
             }
 
-            string rowNumber = (e.RowIndex + 1).ToString();
+            // ERP BarList의 No. 표시와 동일하게 큰 번호가 위에 오도록 표시합니다.
+            // 예: 50행이면 50, 49, 48 ... 1
+            string rowNumber = (grid.Rows.Count - e.RowIndex).ToString(CultureInfo.InvariantCulture);
             Rectangle headerBounds = new Rectangle(e.RowBounds.Left, e.RowBounds.Top, grid.RowHeadersWidth, e.RowBounds.Height);
             bool rowSelected = IsRowFullySelected(e.RowIndex);
             Color headerBack = rowSelected ? Color.FromArgb(255, 235, 112) : OviaFluentTheme.HeaderBackground;
@@ -7941,11 +8156,6 @@ namespace OVIA.Desktop
             ApplyBulkChangeByColumn("부위", new string[] { "부위", "위치", "구간" });
         }
 
-        private void ContextChangeMarkName_Click(object sender, EventArgs e)
-        {
-            ApplyBulkChangeByColumn("부호 및 명칭", new string[] { "부호", "명칭", "철근명", "기호" });
-        }
-
         private void ContextChangeSpec_Click(object sender, EventArgs e)
         {
             ApplyBulkChangeByColumn("규격", new string[] { "규격", "강종", "직경", "Dia", "DIA" });
@@ -8529,6 +8739,7 @@ namespace OVIA.Desktop
                 state.Rows.Add(values);
                 state.OriginalRows.Add(CloneRowOriginalValues(grid.Rows[r]));
                 state.RowOrderKeys.Add(GetLogicalRowOrderKey(grid.Rows[r]));
+                state.ShapeContentFingerprints.Add(BuildCadShapeContentFingerprint(r));
             }
 
             return state;
@@ -8686,6 +8897,9 @@ namespace OVIA.Desktop
 
         private bool ConfirmDiscardUnsavedForNavigation()
         {
+            // 뒤로가기 클릭 자체가 마지막 셀의 CellEndEdit를 늦게 발생시키지 않도록
+            // 먼저 편집을 확정한 다음 실제 저장 baseline과 비교한다.
+            CommitPendingGridEdit();
             RefreshSaveStateFromCurrentGrid();
 
             if (!isSaved && grid != null && grid.Columns.Count > 0 && grid.Rows.Count > 0)
@@ -8720,6 +8934,7 @@ namespace OVIA.Desktop
 
         public bool HasUnsavedWorkspaceData()
         {
+            CommitPendingGridEdit();
             RefreshSaveStateFromCurrentGrid();
             return !isSaved && grid != null && grid.Columns.Count > 0 && grid.Rows.Count > 0;
         }
@@ -9382,6 +9597,8 @@ namespace OVIA.Desktop
             SetRegistrationDraftCsvValue(rows, "발주일", registrationDraft.OrderDate);
             SetRegistrationDraftCsvValue(rows, "등록일", registrationDraft.CreatedDate);
             SetRegistrationDraftCsvValue(rows, "납기일", registrationDraft.DueDate);
+            // 공사별 BarList 헤더의 최초 작성자를 CSV 메타로 보존한다. 상세 철근 Grid에는 표시하지 않는다.
+            SetRegistrationDraftCsvValue(rows, "작성자", registrationDraft.Writer);
             SetRegistrationDraftCsvValue(rows, "OVIA_BARLIST_MEMO", registrationDraft.Memo);
         }
 
@@ -10152,6 +10369,53 @@ namespace OVIA.Desktop
                 && status.Trim().Equals("CAD_EDITED", StringComparison.OrdinalIgnoreCase);
         }
 
+        private string BuildCadShapeContentFingerprint(int rowIndex)
+        {
+            if (grid == null || rowIndex < 0 || rowIndex >= grid.Rows.Count || grid.Rows[rowIndex].IsNewRow)
+            {
+                return "";
+            }
+
+            string savedValue = GetCadShapeJsonText(rowIndex);
+            string path = ResolveCadShapeJsonPath(savedValue);
+
+            if (path == "" || !File.Exists(path))
+            {
+                return savedValue == null ? "" : savedValue.Trim();
+            }
+
+            try
+            {
+                using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (SHA256 sha = SHA256.Create())
+                {
+                    byte[] hash = sha.ComputeHash(stream);
+                    StringBuilder sb = new StringBuilder(hash.Length * 2);
+
+                    for (int i = 0; i < hash.Length; i++)
+                    {
+                        sb.Append(hash[i].ToString("x2", CultureInfo.InvariantCulture));
+                    }
+
+                    return sb.ToString();
+                }
+            }
+            catch
+            {
+                try
+                {
+                    FileInfo info = new FileInfo(path);
+                    return info.Length.ToString(CultureInfo.InvariantCulture)
+                        + "|" + info.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture);
+                }
+                catch
+                {
+                    return savedValue == null ? "" : savedValue.Trim();
+                }
+            }
+        }
+
+
         private string ResolveCadShapeJsonPath(string value)
         {
             if (value == null)
@@ -10463,8 +10727,21 @@ namespace OVIA.Desktop
 
                 if (picker.SelectedCadShapeJsonPath != null && picker.SelectedCadShapeJsonPath.Trim() != "")
                 {
-                    // 원본 CAD JSON은 보존하고 편집기에서 생성한 별도 JSON 경로를 현재 행에 연결합니다.
-                    SetShapeMetaCellIfExists(rowIndex, new string[] { "OVIA_CAD_SHAPE_JSON", "CAD_SHAPE_JSON", "OVIA CAD SHAPE JSON" }, picker.SelectedCadShapeJsonPath);
+                    // 철근형상 확인·수정은 같은 *_ovia_edit.json 파일을 다시 덮어쓸 수 있습니다.
+                    // ERP 동기화가 과거 파일/동일 경로를 다시 읽지 않도록, "수정 적용" 시점마다
+                    // 프로젝트 Shapes 폴더에 현재 편집 결과의 새 snapshot을 만들고 그 파일을 행에 연결합니다.
+                    // 이렇게 하면 검토 후 저장 시 CSV의 OVIA_CAD_SHAPE_JSON 경로 자체도 변경되어
+                    // 최신 편집 JSON이 ERP barlist_sync_push에 확실하게 전달됩니다.
+                    string appliedCadShapePath = PersistAppliedCadShapeSnapshotForRow(
+                        rowIndex,
+                        picker.SelectedCadShapeJsonPath
+                    );
+
+                    SetShapeMetaCellIfExists(
+                        rowIndex,
+                        new string[] { "OVIA_CAD_SHAPE_JSON", "CAD_SHAPE_JSON", "OVIA CAD SHAPE JSON" },
+                        appliedCadShapePath
+                    );
                 }
 
                 string editedShapeSource = picker.SelectedShapeSource != null
@@ -10476,8 +10753,8 @@ namespace OVIA.Desktop
                 SetShapeMetaCellIfExists(rowIndex, new string[] { "OVIA_SHAPE_STATUS", "SHAPE_STATUS", "OVIA SHAPE STATUS" }, editedShapeStatus);
                 SetShapeDimensionColumnsIfExists(rowIndex, picker.SelectedDimensionText);
                 lblStatus.Text = editedShapeSource == "MANUAL"
-                    ? "직접 작성한 철근형상의 선·원호·문자 수정사항을 적용했습니다."
-                    : "CAD 철근형상의 선·원호·문자 수정사항을 적용했습니다.";
+                    ? "직접 작성한 철근형상 수정사항을 적용했습니다. 검토 후 저장 시 ERP에 최신 형상이 반영됩니다."
+                    : "CAD 철근형상 수정사항을 적용했습니다. 검토 후 저장 시 ERP에 최신 형상이 반영됩니다.";
             }
             else
             {
@@ -10511,6 +10788,107 @@ namespace OVIA.Desktop
             lblStatus.ForeColor = TextSub;
             grid.InvalidateRow(rowIndex);
         }
+
+        private string PersistAppliedCadShapeSnapshotForRow(int rowIndex, string editedJsonPath)
+        {
+            if (editedJsonPath == null || editedJsonPath.Trim() == "")
+            {
+                return "";
+            }
+
+            string sourcePath = ResolveCadShapeJsonPath(editedJsonPath);
+
+            if (sourcePath == "" || !File.Exists(sourcePath))
+            {
+                return editedJsonPath.Trim();
+            }
+
+            try
+            {
+                string projectDirectory = GetProjectBarListDirectory();
+
+                if (projectDirectory == null || projectDirectory.Trim() == "")
+                {
+                    return sourcePath;
+                }
+
+                string shapeDirectory = Path.Combine(projectDirectory, "Shapes");
+                Directory.CreateDirectory(shapeDirectory);
+
+                // 같은 행을 여러 번 수정해도 매번 다른 파일명이 되도록 현재 JSON 내용의 SHA-256과
+                // 시각을 조합합니다. 경로가 바뀌므로 저장 상태/ERP 동기화에서 이전 형상과 혼동하지 않습니다.
+                string contentHash = ComputeFileSha256Hex(sourcePath);
+                string shortHash = contentHash.Length >= 12 ? contentHash.Substring(0, 12) : contentHash;
+                string sourceBaseName = Path.GetFileNameWithoutExtension(sourcePath);
+
+                if (sourceBaseName == null || sourceBaseName.Trim() == "")
+                {
+                    sourceBaseName = "shape";
+                }
+
+                // 누적 suffix가 길어지는 것을 방지합니다.
+                sourceBaseName = Regex.Replace(
+                    sourceBaseName,
+                    @"_ovia_applied_\d{8}_\d{9}_[a-f0-9]{6,64}$",
+                    "",
+                    RegexOptions.IgnoreCase
+                );
+
+                string snapshotFileName =
+                    sourceBaseName
+                    + "_ovia_applied_"
+                    + DateTime.Now.ToString("yyyyMMdd_HHmmssfff", CultureInfo.InvariantCulture)
+                    + "_"
+                    + shortHash
+                    + ".json";
+
+                string snapshotPath = Path.Combine(shapeDirectory, snapshotFileName);
+                File.Copy(sourcePath, snapshotPath, true);
+
+                // CAD 원본 복원용 companion도 함께 보존하고, snapshot 내부 originalSourcePath를
+                // 해당 companion 파일명으로 다시 맞춥니다.
+                CopyCadShapeOriginalCompanion(sourcePath, snapshotPath, shapeDirectory);
+
+                // 저장 전 grid에서는 절대경로를 사용해 참조 파일 위치가 바뀌지 않도록 하고,
+                // 검토 후 저장의 NormalizeCadShapeJsonFilesForSave에서 프로젝트 상대경로로 정리합니다.
+                return snapshotPath;
+            }
+            catch
+            {
+                // snapshot 생성 실패가 기존 철근형상 수정 적용 자체를 막지 않도록 기존 편집 파일로 fallback합니다.
+                return sourcePath;
+            }
+        }
+
+        private string ComputeFileSha256Hex(string filePath)
+        {
+            if (filePath == null || filePath.Trim() == "" || !File.Exists(filePath))
+            {
+                return "";
+            }
+
+            try
+            {
+                using (FileStream stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (SHA256 sha = SHA256.Create())
+                {
+                    byte[] hash = sha.ComputeHash(stream);
+                    StringBuilder sb = new StringBuilder(hash.Length * 2);
+
+                    for (int i = 0; i < hash.Length; i++)
+                    {
+                        sb.Append(hash[i].ToString("x2", CultureInfo.InvariantCulture));
+                    }
+
+                    return sb.ToString();
+                }
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
 
         private string GetShapeNumberText(int rowIndex)
         {
@@ -11847,12 +12225,32 @@ namespace OVIA.Desktop
             ReindexLogicalRowOrder();
             savedGridBaseline = CaptureGridState();
             isSaved = true;
+
+            string syncPath = savedProjectFilePath.Trim() != "" ? savedProjectFilePath : lastLoadedFilePath;
+            if (syncPath.Trim() != ""
+                && File.Exists(syncPath)
+                && OviaErpBarListSyncService.IsSynchronizationPending(syncPath))
+            {
+                // ERP에 반영되지 않은 로컬 저장본은 별도 '재동기화' 기능을 노출하지 않고
+                // 기존 '검토 후 저장' 액션으로 다시 저장/전송할 수 있도록 미저장 상태로 유지한다.
+                isSaved = false;
+            }
+
             UpdateSaveState();
         }
 
         private void RefreshSaveStateFromCurrentGrid()
         {
             isSaved = IsCurrentGridEquivalentToSavedBaseline();
+
+            string syncPath = savedProjectFilePath.Trim() != "" ? savedProjectFilePath : lastLoadedFilePath;
+            if (syncPath.Trim() != ""
+                && File.Exists(syncPath)
+                && OviaErpBarListSyncService.IsSynchronizationPending(syncPath))
+            {
+                isSaved = false;
+            }
+
             UpdateSaveState();
         }
 
@@ -11899,6 +12297,19 @@ namespace OVIA.Desktop
                     {
                         return false;
                     }
+                }
+
+                // 동일한 *_ovia_edit.json 경로를 덮어쓴 경우에도 실제 형상 내용 변경을 감지합니다.
+                string leftShapeFingerprint = leftIndexes[i] < left.ShapeContentFingerprints.Count
+                    ? left.ShapeContentFingerprints[leftIndexes[i]]
+                    : "";
+                string rightShapeFingerprint = rightIndexes[i] < right.ShapeContentFingerprints.Count
+                    ? right.ShapeContentFingerprints[rightIndexes[i]]
+                    : "";
+
+                if (!String.Equals(leftShapeFingerprint, rightShapeFingerprint, StringComparison.Ordinal))
+                {
+                    return false;
                 }
             }
 
@@ -13419,6 +13830,10 @@ namespace OVIA.Desktop
         public List<object[]> Rows = new List<object[]>();
         public List<object[]> OriginalRows = new List<object[]>();
         public List<long> RowOrderKeys = new List<long>();
+
+        // 저장 상태 판정용 철근형상 JSON 내용 지문
+        public List<string> ShapeContentFingerprints = new List<string>();
+
         public int CurrentRowIndex = 0;
         public int CurrentColumnIndex = 0;
     }

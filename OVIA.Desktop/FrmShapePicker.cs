@@ -103,6 +103,7 @@ namespace OVIA.Desktop
                 || loadedDocument.Source.Equals("MANUAL", StringComparison.OrdinalIgnoreCase);
             rawDocument = trueOriginalDocument.Clone();
             workingDocument = loadedDocument.Clone();
+
             ApplyDimensionOverrides(workingDocument, currentDimensionText);
 
             SelectedShape = null;
@@ -1278,13 +1279,22 @@ namespace OVIA.Desktop
 
                     resultDocument.OriginalSourcePath = Path.GetFileName(rawCopyPath);
                     resultDocument.Source = "OVIA_EDIT";
+
+                    // OVIA BarList에서는 수정된 전체 형상이 셀 안에서
+                    // 충분히 크게 보이도록 현재 콘텐츠 기준의 로컬 셀로 정규화합니다.
+                    // ERP 전송 시에는 raw companion의 최초 CAD 셀을 기준으로
+                    // 별도의 ERP용 좌표를 생성하므로 로컬 표시와 ERP 표시를 분리합니다.
+                    NormalizeEditedDocumentForBarListDisplay(resultDocument);
                 }
                 else
                 {
                     resultDocument.OriginalSourcePath = "";
                     resultDocument.Source = "OVIA_MANUAL";
+                    NormalizeEditedDocumentForBarListDisplay(resultDocument);
                 }
 
+                // NormalizeEditedDocumentForBarListDisplay()에서 정한
+                // compact cell 크기를 그대로 저장합니다.
                 resultDocument.Save(outputPath);
 
                 SelectedCadShapeJsonPath = outputPath;
@@ -1301,6 +1311,80 @@ namespace OVIA.Desktop
             {
                 MessageBox.Show("철근 형상 저장 중 오류가 발생했습니다.\r\n" + ex.Message, "OVIA", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+
+        private void NormalizeEditedDocumentForBarListDisplay(CadShapeEditDocument document)
+        {
+            if (document == null || document.Elements == null || document.Elements.Count == 0)
+            {
+                return;
+            }
+
+            double minX;
+            double minY;
+            double maxX;
+            double maxY;
+
+            if (!document.TryGetBounds(out minX, out minY, out maxX, out maxY))
+            {
+                return;
+            }
+
+            if (Double.IsNaN(minX) || Double.IsInfinity(minX)
+                || Double.IsNaN(minY) || Double.IsInfinity(minY)
+                || Double.IsNaN(maxX) || Double.IsInfinity(maxX)
+                || Double.IsNaN(maxY) || Double.IsInfinity(maxY))
+            {
+                return;
+            }
+
+            double contentWidth = Math.Max(maxX - minX, 1D);
+            double contentHeight = Math.Max(maxY - minY, 1D);
+            double padX = Math.Max(contentWidth * 0.07D, 2D);
+            double padY = Math.Max(contentHeight * 0.10D, 2D);
+            double offsetX = padX - minX;
+            double offsetY = padY - minY;
+
+            for (int i = 0; i < document.Elements.Count; i++)
+            {
+                CadShapeEditElement element = document.Elements[i];
+                if (element == null) continue;
+
+                string type = element.Type == null ? "" : element.Type.Trim().ToUpperInvariant();
+
+                if (type == "LINE")
+                {
+                    element.X1 += offsetX;
+                    element.Y1 += offsetY;
+                    element.X2 += offsetX;
+                    element.Y2 += offsetY;
+                }
+                else if (type == "ARC" || type == "CIRCLE")
+                {
+                    element.CX += offsetX;
+                    element.CY += offsetY;
+                }
+                else if (type == "TEXT")
+                {
+                    element.X1 += offsetX;
+                    element.Y1 += offsetY;
+
+                    if (element.HasBounds)
+                    {
+                        element.BoundsMinX += offsetX;
+                        element.BoundsMinY += offsetY;
+                        element.BoundsMaxX += offsetX;
+                        element.BoundsMaxY += offsetY;
+                    }
+                }
+            }
+
+            document.Width = contentWidth + padX * 2D;
+            document.Height = contentHeight + padY * 2D;
+
+            // Save()에서 다시 content bounds로 줄이지 않도록 현재 compact cell을 보존합니다.
+            document.LayoutPolicy = "SOURCE_CELL";
         }
 
 

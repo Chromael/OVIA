@@ -23,7 +23,6 @@ namespace OVIA.Desktop.Controls
         private const int HeaderHeight = 32;
         private const int BaseNavigationWidth = 188;
         private const int ErpNavigationWidth = 224;
-        private const int NotificationWidth = 30;
         private const int SettingsWidth = 30;
         private const int HeaderActionGap = 6;
         private const int HeaderRightGap = 20;
@@ -47,13 +46,11 @@ namespace OVIA.Desktop.Controls
         private OviaExplorerIconButton btnRefresh;
         private OviaExplorerIconButton btnHome;
         private OviaExplorerIconButton btnErp;
-        private OviaExplorerIconButton btnNotification;
         private OviaExplorerIconButton btnSettings;
         private Panel autoCadStatusPanel;
         private Label autoCadStatusIcon;
         private Label autoCadStatusLabel;
         private Timer autoCadStatusRefreshTimer;
-        private Timer notificationRefreshTimer;
         private OviaRoundedPanel addressBar;
         private OviaBreadcrumbLabel breadcrumbLabel;
         private TextBox pathTextBox;
@@ -64,7 +61,6 @@ namespace OVIA.Desktop.Controls
         public event EventHandler ForwardClicked;
         public event EventHandler UpClicked;
         public event EventHandler RefreshClicked;
-        public event EventHandler NotificationClicked;
         public event EventHandler MainPathClicked;
         public event EventHandler<OviaWorkspacePathClickedEventArgs> PathSegmentClicked;
 
@@ -89,7 +85,6 @@ namespace OVIA.Desktop.Controls
             BuildControls();
             LayoutControls();
             StartAutoCadStatusRefreshTimer();
-            StartNotificationRefreshTimer();
         }
 
         public static OviaWorkspaceHeader AddTo(Control parent, string pathText, Action backAction, Action upAction, Action refreshAction, Action logoutAction, bool backEnabled, bool upEnabled, Action<string> pathSegmentAction = null)
@@ -130,16 +125,10 @@ namespace OVIA.Desktop.Controls
                 header.RefreshClicked += delegate { refreshAction(); };
             }
 
-            if (logoutAction != null)
-            {
-                header.NotificationClicked += delegate { };
-            }
-
             parent.Controls.Add(header);
             header.RefreshNavigationButtonStates();
             header.RefreshErpMenuState();
             header.RefreshSettingsMenuState();
-            header.RefreshNotificationBadge();
 
             parent.Resize += delegate
             {
@@ -426,14 +415,6 @@ namespace OVIA.Desktop.Controls
             autoCadStatusLabel.TabStop = false;
             autoCadStatusPanel.Controls.Add(autoCadStatusLabel);
 
-            btnNotification = CreateExplorerButton("\uF2A3", "알림");
-            // U+F2A3 종 아이콘은 같은 버튼 영역 안에서 뒤로/앞으로/위로가기 아이콘과 시각 크기를 맞춘다.
-            btnNotification.Font = OVIA.Desktop.OviaIconFont.Create(15F, FontStyle.Regular);
-            btnNotification.BadgeBackColor = OviaFluentTheme.NotificationBadgeBack;
-            btnNotification.BadgeFont = OviaFluentTheme.FontData(7.2F, FontStyle.Bold);
-            btnNotification.Click += Notification_Click;
-            Controls.Add(btnNotification);
-
             btnSettings = CreateExplorerButton("\uE713", "환경설정");
             btnSettings.Font = OVIA.Desktop.OviaIconFont.Create(15F, FontStyle.Regular);
             btnSettings.Click += Settings_Click;
@@ -443,7 +424,7 @@ namespace OVIA.Desktop.Controls
 
         private void LayoutControls()
         {
-            if (btnBack == null || btnErp == null || btnNotification == null || btnSettings == null || autoCadStatusPanel == null || addressBar == null)
+            if (btnBack == null || btnErp == null || btnSettings == null || autoCadStatusPanel == null || addressBar == null)
             {
                 return;
             }
@@ -469,9 +450,7 @@ namespace OVIA.Desktop.Controls
                 btnSettings.Location = new Point(Math.Max(navigationWidth, this.ClientSize.Width), 0);
             }
 
-            int notificationX = Math.Max(navigationWidth, rightEdge - NotificationWidth);
-            int autoCadStatusX = Math.Max(navigationWidth, notificationX - AutoCadStatusGap - AutoCadStatusWidth);
-            btnNotification.Location = new Point(notificationX, 0);
+            int autoCadStatusX = Math.Max(navigationWidth, rightEdge - AutoCadStatusGap - AutoCadStatusWidth);
             autoCadStatusPanel.Location = new Point(autoCadStatusX, 0);
             addressBar.Location = new Point(navigationWidth, 0);
             addressBar.Size = new Size(Math.Max(1, autoCadStatusX - BreadcrumbSafeGap - navigationWidth), HeaderHeight);
@@ -494,7 +473,6 @@ namespace OVIA.Desktop.Controls
         {
             UninstallPathEditMessageFilter();
             StopAutoCadStatusRefreshTimer();
-            StopNotificationRefreshTimer();
             OVIA.Desktop.OviaWorkspaceCommandBar.CloseOpenDropDown();
             base.OnHandleDestroyed(e);
         }
@@ -525,7 +503,7 @@ namespace OVIA.Desktop.Controls
         {
             OviaExplorerIconButton button = new OviaExplorerIconButton();
             button.Text = text;
-            button.Size = new Size(NotificationWidth, 30);
+            button.Size = new Size(SettingsWidth, 30);
             button.Font = OVIA.Desktop.OviaIconFont.Create(9.5F, FontStyle.Regular);
             button.ForeColor = textColor;
             button.NormalForeColor = textColor;
@@ -622,108 +600,6 @@ namespace OVIA.Desktop.Controls
             autoCadStatusLabel.Invalidate();
         }
 
-        private void StartNotificationRefreshTimer()
-        {
-            if (notificationRefreshTimer != null)
-            {
-                return;
-            }
-
-            OVIA.Desktop.OviaNotificationStore.NotificationsChanged += NotificationStore_NotificationsChanged;
-
-            notificationRefreshTimer = new Timer();
-            notificationRefreshTimer.Interval = 15000;
-            notificationRefreshTimer.Tick += delegate { RefreshNotificationBadge(); };
-            notificationRefreshTimer.Start();
-        }
-
-        private void StopNotificationRefreshTimer()
-        {
-            if (notificationRefreshTimer == null)
-            {
-                return;
-            }
-
-            OVIA.Desktop.OviaNotificationStore.NotificationsChanged -= NotificationStore_NotificationsChanged;
-            notificationRefreshTimer.Stop();
-            notificationRefreshTimer.Dispose();
-            notificationRefreshTimer = null;
-        }
-
-        private void NotificationStore_NotificationsChanged(object sender, EventArgs e)
-        {
-            RefreshNotificationBadge();
-        }
-
-        protected override void OnParentChanged(EventArgs e)
-        {
-            base.OnParentChanged(e);
-            RefreshNavigationButtonStates();
-            RefreshErpMenuState();
-            RefreshSettingsMenuState();
-            RefreshAutoCadStatus();
-            RefreshNotificationBadge();
-        }
-
-        protected override void OnVisibleChanged(EventArgs e)
-        {
-            base.OnVisibleChanged(e);
-            if (Visible)
-            {
-                RefreshNavigationButtonStates();
-                RefreshErpMenuState();
-                RefreshSettingsMenuState();
-                RefreshAutoCadStatus();
-                RefreshNotificationBadge();
-            }
-        }
-
-        public void RefreshNotificationBadge()
-        {
-            if (btnNotification == null || btnNotification.IsDisposed)
-            {
-                return;
-            }
-
-            int count = 0;
-
-            try
-            {
-                OVIA.Desktop.IOviaWorkspaceNavigator navigator = OVIA.Desktop.OviaWorkspaceNavigation.FindNavigator(this);
-                if (navigator != null)
-                {
-                    count = OVIA.Desktop.OviaNotificationStore.GetUnreadCount(navigator.CurrentCompanyId, navigator.CurrentUserId);
-                }
-            }
-            catch
-            {
-                count = 0;
-            }
-
-            if (count <= 0)
-            {
-                btnNotification.BadgeVisible = false;
-                btnNotification.BadgeText = string.Empty;
-                btnNotification.Invalidate();
-                return;
-            }
-
-            btnNotification.BadgeBackColor = OviaFluentTheme.NotificationBadgeBack;
-            btnNotification.BadgeText = count > 99 ? "99+" : count.ToString();
-            btnNotification.BadgeVisible = true;
-            btnNotification.Invalidate();
-        }
-
-        private void LayoutNotificationBadge()
-        {
-            // 알림 숫자 배지는 알림 아이콘 버튼 내부에서 직접 렌더링한다.
-            // 별도 자식 컨트롤을 겹치지 않아 hover 시 사각 배경이 보이지 않는다.
-        }
-
-        private void ApplyNotificationBadgeRegion()
-        {
-        }
-
         private void RefreshErpMenuState()
         {
             if (btnErp == null || btnErp.IsDisposed)
@@ -774,19 +650,6 @@ namespace OVIA.Desktop.Controls
             }
 
             OVIA.Desktop.OviaWorkspaceCommandBar.ToggleSettingsOptions(btnSettings);
-        }
-
-        private void Notification_Click(object sender, EventArgs e)
-        {
-            OVIA.Desktop.IOviaWorkspaceNavigator navigator = OVIA.Desktop.OviaWorkspaceNavigation.FindNavigator(this);
-            if (navigator != null)
-            {
-                navigator.NavigateToNotifications();
-                RefreshNotificationBadge();
-                return;
-            }
-
-            Raise(NotificationClicked);
         }
 
         private void SetNavigationEnabled(OviaExplorerIconButton button, bool enabled)

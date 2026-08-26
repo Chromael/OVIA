@@ -1,7 +1,11 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
-using System.IO;
+using System.Globalization;
+using System.Net;
+using System.Net.Http;
 using System.Text;
+using System.Web.Script.Serialization;
 
 namespace OVIA.Desktop
 {
@@ -14,16 +18,14 @@ namespace OVIA.Desktop
         public string WorkPath = "";
         public DateTime WorkDate = DateTime.Now;
         public string Worker = "";
-        public bool IsConfirmed = false;
+        public string Ip = "";
+        public bool IsConfirmed = true;
     }
 
     public static class OviaNotificationStore
     {
-        private const string NotificationFolderName = "Notifications";
-        private const string NotificationFileName = "work_notifications.dat";
-        private static readonly object syncRoot = new object();
-
         public static event EventHandler NotificationsChanged;
+        public static string LastError = "";
 
         public static void AddWorkLog(string companyId, string userId, string workContent, string workPath)
         {
@@ -32,394 +34,136 @@ namespace OVIA.Desktop
 
         public static void AddWorkLog(string companyId, string userId, string workContent, string workPath, string worker)
         {
-            if (string.IsNullOrWhiteSpace(workContent))
+            if (string.IsNullOrWhiteSpace(workContent)) return;
+            try
             {
-                return;
+                Dictionary<string, object> payload = new Dictionary<string, object>();
+                payload["route"] = Safe(workPath);
+                payload["description"] = Safe(workContent);
+                Post(companyId, "ovia_log_write", payload);
+                LastError = "";
+                RaiseNotificationsChanged();
             }
-
-            lock (syncRoot)
+            catch (Exception ex)
             {
-                List<OviaNotificationEntry> entries = LoadAllInternal(false);
-                entries.Add(new OviaNotificationEntry
-                {
-                    Id = Guid.NewGuid().ToString("N"),
-                    CompanyId = Safe(companyId),
-                    UserId = Safe(userId),
-                    WorkContent = Safe(workContent),
-                    WorkPath = Safe(workPath),
-                    WorkDate = DateTime.Now,
-                    Worker = string.IsNullOrWhiteSpace(worker) ? Safe(userId) : Safe(worker),
-                    IsConfirmed = false
-                });
-
-                SaveAllInternal(Prune(entries));
+                // 로그 전송 실패가 기존 저장/로그인/ERP 동작을 막아서는 안 된다.
+                LastError = ex.Message;
             }
-
-            RaiseNotificationsChanged();
         }
 
         public static int GetUnreadCount(string companyId, string userId)
         {
-            List<OviaNotificationEntry> entries = GetVisibleEntries(companyId, userId);
-            int count = 0;
-            int i;
-
-            for (i = 0; i < entries.Count; i++)
-            {
-                if (!entries[i].IsConfirmed)
-                {
-                    count++;
-                }
-            }
-
-            return count;
+            // ERP log_ovia는 읽음/미확인 상태를 보관하지 않으므로 배지는 사용하지 않는다.
+            return 0;
         }
 
         public static List<OviaNotificationEntry> GetVisibleEntries(string companyId, string userId)
         {
-            lock (syncRoot)
+            List<OviaNotificationEntry> result = new List<OviaNotificationEntry>();
+            try
             {
-                List<OviaNotificationEntry> entries = LoadAllInternal(true);
-                bool isAdmin = OviaSystemSettingsStore.IsSystemAdministrator(companyId, userId);
-                string currentCompany = Safe(companyId);
-                string currentUser = Safe(userId);
-                List<OviaNotificationEntry> result = new List<OviaNotificationEntry>();
-                int i;
+                Dictionary<string, object> payload = new Dictionary<string, object>();
+                payload["days"] = 7;
+                IDictionary<string, object> root = Post(companyId, "ovia_log_list", payload);
+                object dataValue;
+                if (!root.TryGetValue("data", out dataValue) || dataValue == null) return result;
 
-                for (i = 0; i < entries.Count; i++)
+                object[] rows = dataValue as object[];
+                ArrayList arrayList = dataValue as ArrayList;
+                if (rows == null && arrayList != null) rows = arrayList.ToArray();
+                if (rows == null) return result;
+
+                for (int i = 0; i < rows.Length; i++)
                 {
-                    OviaNotificationEntry entry = entries[i];
-
-                    if (!IsSameCompanyOrBlank(entry.CompanyId, currentCompany))
-                    {
-                        continue;
-                    }
-
-                    if (!isAdmin && !string.Equals(entry.UserId, currentUser, StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    result.Add(Clone(entry));
+                    IDictionary<string, object> row = rows[i] as IDictionary<string, object>;
+                    if (row == null) continue;
+                    OviaNotificationEntry entry = new OviaNotificationEntry();
+                    entry.Id = ReadString(row, "idx");
+                    entry.CompanyId = ReadString(row, "site_id");
+                    entry.UserId = ReadString(row, "mb_id");
+                    entry.Worker = entry.UserId;
+                    entry.WorkPath = ReadString(row, "route");
+                    entry.WorkContent = ReadString(row, "description");
+                    entry.Ip = ReadString(row, "ip");
+                    DateTime dt;
+                    if (!DateTime.TryParse(ReadString(row, "created_at"), out dt)) dt = DateTime.Now;
+                    entry.WorkDate = dt;
+                    entry.IsConfirmed = true;
+                    result.Add(entry);
                 }
+                LastError = "";
+            }
+            catch (Exception ex)
+            {
+                LastError = ex.Message;
+            }
+            return result;
+        }
 
-                result.Sort(delegate(OviaNotificationEntry a, OviaNotificationEntry b)
+        public static void Confirm(string id) { }
+        public static void ConfirmMany(List<string> ids) { }
+        public static string GetNotificationFilePath() { return ""; }
+
+        private static IDictionary<string, object> Post(string companyId, string mode, Dictionary<string, object> payload)
+        {
+            string token;
+            if (!OviaErpAuthenticationService.TryGetCurrentErpApiToken(companyId, out token))
+                throw new Exception("ERP API 인증정보가 없습니다. 다시 로그인해주세요.");
+
+            string authBase = OviaCompanyConnectionStore.GetErpAuthUrl(companyId);
+            Uri baseUri;
+            if (!Uri.TryCreate((authBase ?? "").TrimEnd('/') + "/", UriKind.Absolute, out baseUri))
+                throw new Exception("ERP 연결 주소가 올바르지 않습니다.");
+
+            Uri endpointBase = new Uri(baseUri, "ovia_api.php");
+            UriBuilder builder = new UriBuilder(endpointBase);
+            builder.Query = "mode=" + Uri.EscapeDataString(mode ?? "");
+
+            JavaScriptSerializer serializer = new JavaScriptSerializer();
+            serializer.MaxJsonLength = int.MaxValue;
+            string json = serializer.Serialize(payload ?? new Dictionary<string, object>());
+
+            using (HttpClientHandler handler = new HttpClientHandler())
+            using (HttpClient client = new HttpClient(handler))
+            using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, builder.Uri))
+            {
+                handler.AllowAutoRedirect = false;
+                handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+                client.Timeout = TimeSpan.FromSeconds(8);
+                request.Headers.TryAddWithoutValidation("Authorization", token);
+                request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+                HttpResponseMessage response = client.SendAsync(request).GetAwaiter().GetResult();
+                string responseText = response.Content == null ? "" : response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                if (!response.IsSuccessStatusCode) throw new Exception("ERP 로그 API HTTP " + ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture));
+                object parsed = serializer.DeserializeObject(responseText);
+                IDictionary<string, object> root = parsed as IDictionary<string, object>;
+                if (root == null) throw new Exception("ERP 로그 API 응답 형식이 올바르지 않습니다.");
+                string res = ReadString(root, "res");
+                bool ok = string.Equals(res, "true", StringComparison.OrdinalIgnoreCase) || res == "1";
+                object boolValue;
+                if (root.TryGetValue("res", out boolValue) && boolValue is bool) ok = (bool)boolValue;
+                if (!ok)
                 {
-                    int dateCompare = b.WorkDate.CompareTo(a.WorkDate);
-                    if (dateCompare != 0)
-                    {
-                        return dateCompare;
-                    }
-
-                    return string.Compare(b.Id, a.Id, StringComparison.OrdinalIgnoreCase);
-                });
-
-                return result;
+                    string msg = ReadString(root, "msg");
+                    throw new Exception(string.IsNullOrWhiteSpace(msg) ? "ERP 로그 API 요청이 거부되었습니다." : msg);
+                }
+                return root;
             }
         }
 
-        public static void Confirm(string id)
+        private static string ReadString(IDictionary<string, object> dict, string key)
         {
-            if (string.IsNullOrWhiteSpace(id))
-            {
-                return;
-            }
-
-            bool changed = false;
-
-            lock (syncRoot)
-            {
-                List<OviaNotificationEntry> entries = LoadAllInternal(false);
-                int i;
-
-                for (i = 0; i < entries.Count; i++)
-                {
-                    if (string.Equals(entries[i].Id, id, StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (!entries[i].IsConfirmed)
-                        {
-                            entries[i].IsConfirmed = true;
-                            changed = true;
-                        }
-                        break;
-                    }
-                }
-
-                if (changed)
-                {
-                    SaveAllInternal(Prune(entries));
-                }
-            }
-
-            if (changed)
-            {
-                RaiseNotificationsChanged();
-            }
-        }
-
-        public static void ConfirmMany(List<string> ids)
-        {
-            if (ids == null || ids.Count == 0)
-            {
-                return;
-            }
-
-            bool changed = false;
-
-            lock (syncRoot)
-            {
-                List<OviaNotificationEntry> entries = LoadAllInternal(false);
-                int i;
-                int j;
-
-                for (i = 0; i < entries.Count; i++)
-                {
-                    for (j = 0; j < ids.Count; j++)
-                    {
-                        if (string.Equals(entries[i].Id, ids[j], StringComparison.OrdinalIgnoreCase))
-                        {
-                            if (!entries[i].IsConfirmed)
-                            {
-                                entries[i].IsConfirmed = true;
-                                changed = true;
-                            }
-                            break;
-                        }
-                    }
-                }
-
-                if (changed)
-                {
-                    SaveAllInternal(Prune(entries));
-                }
-            }
-
-            if (changed)
-            {
-                RaiseNotificationsChanged();
-            }
-        }
-
-        public static string GetNotificationFilePath()
-        {
-            return Path.Combine(GetNotificationFolder(), NotificationFileName);
+            object value;
+            if (dict == null || !dict.TryGetValue(key, out value) || value == null) return "";
+            return Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
         }
 
         private static void RaiseNotificationsChanged()
         {
             EventHandler handler = NotificationsChanged;
-            if (handler != null)
-            {
-                handler(null, EventArgs.Empty);
-            }
+            if (handler != null) handler(null, EventArgs.Empty);
         }
 
-        private static List<OviaNotificationEntry> LoadAllInternal(bool pruneAndSave)
-        {
-            List<OviaNotificationEntry> entries = new List<OviaNotificationEntry>();
-            string path = GetNotificationFilePath();
-
-            if (!File.Exists(path))
-            {
-                return entries;
-            }
-
-            try
-            {
-                string[] lines = File.ReadAllLines(path, Encoding.UTF8);
-                int i;
-
-                for (i = 0; i < lines.Length; i++)
-                {
-                    OviaNotificationEntry entry = ParseLine(lines[i]);
-                    if (entry != null)
-                    {
-                        entries.Add(entry);
-                    }
-                }
-            }
-            catch
-            {
-                return new List<OviaNotificationEntry>();
-            }
-
-            List<OviaNotificationEntry> pruned = Prune(entries);
-            if (pruneAndSave && pruned.Count != entries.Count)
-            {
-                SaveAllInternal(pruned);
-            }
-
-            return pruned;
-        }
-
-        private static List<OviaNotificationEntry> Prune(List<OviaNotificationEntry> entries)
-        {
-            List<OviaNotificationEntry> result = new List<OviaNotificationEntry>();
-            DateTime minDate = DateTime.Now.AddDays(-7);
-            int i;
-
-            if (entries == null)
-            {
-                return result;
-            }
-
-            for (i = 0; i < entries.Count; i++)
-            {
-                if (entries[i] != null && entries[i].WorkDate >= minDate)
-                {
-                    result.Add(entries[i]);
-                }
-            }
-
-            return result;
-        }
-
-        private static void SaveAllInternal(List<OviaNotificationEntry> entries)
-        {
-            string folder = GetNotificationFolder();
-            Directory.CreateDirectory(folder);
-
-            List<string> lines = new List<string>();
-            int i;
-
-            if (entries != null)
-            {
-                for (i = 0; i < entries.Count; i++)
-                {
-                    lines.Add(FormatLine(entries[i]));
-                }
-            }
-
-            File.WriteAllLines(GetNotificationFilePath(), lines.ToArray(), Encoding.UTF8);
-        }
-
-        private static string GetNotificationFolder()
-        {
-            return Path.Combine(OviaSystemSettingsStore.GetSettingsFolder(), NotificationFolderName);
-        }
-
-        private static string FormatLine(OviaNotificationEntry entry)
-        {
-            if (entry == null)
-            {
-                entry = new OviaNotificationEntry();
-            }
-
-            string[] values = new string[]
-            {
-                entry.Id,
-                entry.CompanyId,
-                entry.UserId,
-                entry.WorkContent,
-                entry.WorkPath,
-                entry.WorkDate.ToString("o"),
-                entry.Worker,
-                entry.IsConfirmed ? "1" : "0"
-            };
-
-            int i;
-            for (i = 0; i < values.Length; i++)
-            {
-                values[i] = Encode(values[i]);
-            }
-
-            return string.Join("\t", values);
-        }
-
-        private static OviaNotificationEntry ParseLine(string line)
-        {
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                return null;
-            }
-
-            string[] values = line.Split('\t');
-            if (values.Length < 8)
-            {
-                return null;
-            }
-
-            DateTime workDate;
-            if (!DateTime.TryParse(Decode(values[5]), null, System.Globalization.DateTimeStyles.RoundtripKind, out workDate))
-            {
-                workDate = DateTime.Now;
-            }
-
-            OviaNotificationEntry entry = new OviaNotificationEntry();
-            entry.Id = Decode(values[0]);
-            entry.CompanyId = Decode(values[1]);
-            entry.UserId = Decode(values[2]);
-            entry.WorkContent = Decode(values[3]);
-            entry.WorkPath = Decode(values[4]);
-            entry.WorkDate = workDate;
-            entry.Worker = Decode(values[6]);
-            entry.IsConfirmed = Decode(values[7]) == "1";
-
-            if (entry.Id.Trim() == "")
-            {
-                entry.Id = Guid.NewGuid().ToString("N");
-            }
-
-            return entry;
-        }
-
-        private static OviaNotificationEntry Clone(OviaNotificationEntry entry)
-        {
-            OviaNotificationEntry clone = new OviaNotificationEntry();
-            clone.Id = entry.Id;
-            clone.CompanyId = entry.CompanyId;
-            clone.UserId = entry.UserId;
-            clone.WorkContent = entry.WorkContent;
-            clone.WorkPath = entry.WorkPath;
-            clone.WorkDate = entry.WorkDate;
-            clone.Worker = entry.Worker;
-            clone.IsConfirmed = entry.IsConfirmed;
-            return clone;
-        }
-
-        private static bool IsSameCompanyOrBlank(string entryCompanyId, string currentCompanyId)
-        {
-            string entryCompany = Safe(entryCompanyId);
-            string currentCompany = Safe(currentCompanyId);
-
-            if (entryCompany == "" || currentCompany == "")
-            {
-                return true;
-            }
-
-            return string.Equals(entryCompany, currentCompany, StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static string Safe(string value)
-        {
-            return value == null ? "" : value.Trim();
-        }
-
-        private static string Encode(string value)
-        {
-            if (value == null)
-            {
-                value = "";
-            }
-
-            return Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
-        }
-
-        private static string Decode(string value)
-        {
-            try
-            {
-                if (value == null)
-                {
-                    return "";
-                }
-
-                return Encoding.UTF8.GetString(Convert.FromBase64String(value.Trim()));
-            }
-            catch
-            {
-                return "";
-            }
-        }
+        private static string Safe(string value) { return value == null ? "" : value.Trim(); }
     }
 }

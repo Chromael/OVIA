@@ -16,14 +16,13 @@ namespace OVIA.Desktop
         void NavigateToProjectManager();
         void NavigateToProjectRegisterWebErp();
         void NavigateToErpModulePage(string menuKey);
-        void NavigateToLegacyMainDashboard();
         void NavigateToProjectBarListList(string projectNo, string projectName, string clientName, string projectStatus);
         void NavigateToBarList(string projectNo, string projectName, string clientName, string projectStatus, string initialFilePath);
         void NavigateToBarListMapping();
         void NavigateToRebarUnitWeightTable();
         void NavigateToSystemSettings();
+        void NavigateToBackupRestore();
         void NavigateToVersionInfo();
-        void NavigateToNotifications();
         void NavigateToWorkspaceInfoPage(string menuKey, string pathText, string title, string selectedMenu, string descriptionText, string bodyText);
         bool CanNavigateBackInWorkspace { get; }
         bool CanNavigateForwardInWorkspace { get; }
@@ -437,10 +436,6 @@ namespace OVIA.Desktop
         {
             ToggleDropDown(settingsButton, delegate(OviaAnimatedDropDownMenu menu)
             {
-                AddDropDownItem(menu, settingsButton, "기존 메인대시보드", "\uE9D2", delegate(IOviaWorkspaceNavigator navigator)
-                {
-                    navigator.NavigateToLegacyMainDashboard();
-                });
 
                 AddDropDownItem(menu, settingsButton, "시스템 설정", "\uE713", delegate(IOviaWorkspaceNavigator navigator)
                 {
@@ -457,22 +452,9 @@ namespace OVIA.Desktop
                     navigator.NavigateToRebarUnitWeightTable();
                 });
 
-                menu.AddItem("백업/복원", "\uE74E", delegate
+                AddDropDownItem(menu, settingsButton, "백업/복원", "\uE74E", delegate(IOviaWorkspaceNavigator navigator)
                 {
-                    IOviaWorkspaceNavigator navigator = OviaWorkspaceNavigation.FindNavigator(settingsButton);
-                    menu.CloseImmediate();
-                    currentSettingsDropDown = null;
-                    if (navigator != null)
-                    {
-                        navigator.NavigateToWorkspaceInfoPage(
-                            "BACKUP_RESTORE",
-                            "메인  ›  환경설정  ›  백업/복원",
-                            "백업/복원",
-                            "SETTINGS",
-                            "로컬 데이터, 설정, 공사 데이터를 백업하거나 복원합니다.",
-                            "백업/복원은 운영 안전장치로 후속 개발에서 실제 ZIP 백업 생성과 복원 기능을 연결합니다."
-                        );
-                    }
+                    navigator.NavigateToBackupRestore();
                 });
 
                 AddDropDownItem(menu, settingsButton, "버전정보", "\uE946", delegate(IOviaWorkspaceNavigator navigator)
@@ -1172,24 +1154,6 @@ namespace OVIA.Desktop
             );
         }
 
-        public void NavigateToLegacyMainDashboard()
-        {
-ShowScreenWithHistory(
-                new FrmOviaMenuPage(
-                    companyId,
-                    userId,
-                    "LEGACY_MAIN_DASHBOARD",
-                    "기존 메인대시보드",
-                    "메인  ›  환경설정  ›  기존 메인대시보드",
-                    "SETTINGS",
-                    "WebView2 전환 전 메인에서 사용하던 대시보드 화면입니다.",
-                    "기존 메인대시보드는 상단 환경설정 아이콘에서 확인하는 것을 기준으로 합니다. WebView2 전환 완료 후 정리 여부를 결정합니다."
-                ),
-                "OVIA 기존 메인대시보드",
-                new OviaWorkspaceNavigationEntry("LEGACY_MAIN_DASHBOARD")
-            );
-        }
-
         public void NavigateToProjectBarListList(string projectNo, string projectName, string clientName, string projectStatus)
         {
             ShowScreenWithHistory(
@@ -1236,21 +1200,21 @@ ShowScreenWithHistory(
             );
         }
 
+        public void NavigateToBackupRestore()
+        {
+            ShowScreenWithHistory(
+                new FrmBackupRestore(companyId, userId),
+                "OVIA 백업/복원",
+                new OviaWorkspaceNavigationEntry("BACKUP_RESTORE")
+            );
+        }
+
         public void NavigateToVersionInfo()
         {
 ShowScreenWithHistory(
                 new FrmVersionInfo(companyId, userId),
                 "OVIA 버전정보",
                 new OviaWorkspaceNavigationEntry("VERSION_INFO")
-            );
-        }
-
-        public void NavigateToNotifications()
-        {
-            ShowScreenWithHistory(
-                new FrmNotificationList(companyId, userId),
-                "OVIA 알림",
-                new OviaWorkspaceNavigationEntry("NOTIFICATIONS")
             );
         }
 
@@ -1282,9 +1246,6 @@ ShowScreenWithHistory(
                 case "ERP_MODULE_PAGE":
                     NavigateToErpModulePage(entry.Get(0));
                     return true;
-                case "LEGACY_MAIN_DASHBOARD":
-                    NavigateToLegacyMainDashboard();
-                    return true;
                 case "PROJECT_BARLIST_LIST":
                     NavigateToProjectBarListList(entry.Get(0), entry.Get(1), entry.Get(2), entry.Get(3));
                     return true;
@@ -1300,11 +1261,11 @@ ShowScreenWithHistory(
                 case "SYSTEM_SETTINGS":
                     NavigateToSystemSettings();
                     return true;
+                case "BACKUP_RESTORE":
+                    NavigateToBackupRestore();
+                    return true;
                 case "VERSION_INFO":
                     NavigateToVersionInfo();
-                    return true;
-                case "NOTIFICATIONS":
-                    NavigateToNotifications();
                     return true;
                 case "WORKSPACE_INFO":
                     NavigateToWorkspaceInfoPage(entry.Get(0), entry.Get(1), entry.Get(2), entry.Get(3), entry.Get(4), entry.Get(5));
@@ -1330,16 +1291,15 @@ ShowScreenWithHistory(
                     return new OviaWorkspaceNavigationEntry("PROJECT_MANAGER");
                 case "BARLIST":
                     return new OviaWorkspaceNavigationEntry("PROJECT_BARLIST_LIST", entry.Get(0), entry.Get(1), entry.Get(2), entry.Get(3));
-                case "LEGACY_MAIN_DASHBOARD":
                 case "BARLIST_MAPPING":
                 case "REBAR_UNIT_WEIGHT":
+                case "BACKUP_RESTORE":
                 case "VERSION_INFO":
                     return CreateEnvironmentSettingsParentEntry();
                 case "SYSTEM_SETTINGS":
                     return CreateEnvironmentSettingsParentEntry();
                 case "WORKSPACE_INFO":
                     return ResolveWorkspaceInfoParentEntry(entry);
-                case "NOTIFICATIONS":
                 case "PROJECT_MANAGER":
                 default:
                     return null;

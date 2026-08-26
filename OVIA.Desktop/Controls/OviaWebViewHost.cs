@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -415,11 +416,19 @@ namespace OVIA.Desktop.Controls
 
             try
             {
-                // WebView2 사용자 데이터 폴더는 실행 간 쿠키가 남을 수 있으므로
-                // 이전 사용자 ERP 세션을 제거한 뒤 현재 로그인에서 받은 세션만 다시 주입합니다.
-                webView.CoreWebView2.CookieManager.DeleteAllCookies();
+                IList<OviaErpSessionCookie> cookies =
+                    OviaErpAuthenticationService.GetSessionCookies();
 
-                foreach (OviaErpSessionCookie sessionCookie in OviaErpAuthenticationService.GetSessionCookies())
+                // OVIA 자체 ID/PW 로그인은 현재 로그인에서 받은 쿠키가 있으므로 교체한다.
+                // ERP Launch SSO는 별도 쿠키 목록이 없고 web_session_exchange가 PHPSESSID를
+                // WebView2에 생성한다. 이 경우 DeleteAllCookies()를 실행하면 정상 SSO 세션까지
+                // 다음 ERP 진입 때 삭제하게 되므로 삭제하지 않는다.
+                if (cookies != null && cookies.Count > 0)
+                {
+                    webView.CoreWebView2.CookieManager.DeleteAllCookies();
+                }
+
+                foreach (OviaErpSessionCookie sessionCookie in cookies)
                 {
                     if (sessionCookie == null || string.IsNullOrWhiteSpace(sessionCookie.Name) || string.IsNullOrWhiteSpace(sessionCookie.Domain))
                     {
@@ -457,6 +466,81 @@ namespace OVIA.Desktop.Controls
                 return false;
             }
 
+            Uri targetUri;
+            if (!Uri.TryCreate(NormalizeUrl(targetUrl), UriKind.Absolute, out targetUri))
+            {
+                return false;
+            }
+
+            if (!string.Equals(targetUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(targetUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            // 1순위: ERP에서 OVIA를 실행한 Launch 세션.
+            // Launch 당시 ERP 브라우저의 실제 PHP session snapshot은 서버의 ovia_token cache에
+            // 같이 보관되어 있으므로, 60초짜리 handoff ticket에 의존하지 않고
+            // 현재 64자리 Bearer token으로 필요할 때 WebView 세션을 복원한다.
+            string ssoCompanyId;
+            string ssoUserId;
+            string ssoToken;
+            string ssoAuthenticationUrl;
+
+            if (OviaErpAuthenticationService.TryGetCurrentErpWebSso(
+                out ssoCompanyId,
+                out ssoUserId,
+                out ssoToken,
+                out ssoAuthenticationUrl))
+            {
+                Uri ssoAuthUri;
+                if (Uri.TryCreate(ssoAuthenticationUrl, UriKind.Absolute, out ssoAuthUri)
+                    && (string.Equals(ssoAuthUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(ssoAuthUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+                    && string.Equals(ssoAuthUri.Host, targetUri.Host, StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        Uri authDirectory = new Uri(ssoAuthUri.AbsoluteUri.TrimEnd('/') + "/");
+                        Uri endpoint = new Uri(authDirectory, "ovia_api.php?mode=web_session_login");
+
+                        string ssoPostBody =
+                            "target_url=" + Uri.EscapeDataString(targetUri.AbsoluteUri);
+
+                        byte[] ssoPostBytes = Encoding.UTF8.GetBytes(ssoPostBody);
+                        MemoryStream ssoPostData = new MemoryStream(ssoPostBytes, false);
+
+                        CoreWebView2WebResourceRequest ssoRequest =
+                            webViewEnvironment.CreateWebResourceRequest(
+                                endpoint.AbsoluteUri,
+                                "POST",
+                                ssoPostData,
+                                "Authorization: Bearer " + ssoToken + "\r\n"
+                                + "Accept: text/html,application/xhtml+xml,application/json\r\n"
+                                + "Content-Type: application/x-www-form-urlencoded\r\n"
+                            );
+
+                        // 서버가 세션 복원 후 target_url로 302 redirect 한다.
+                        // redirect가 차단/실패하는 경우를 위해 기존 target 이동 fallback도 유지한다.
+                        erpAutoLoginTargetUrl = targetUri.AbsoluteUri;
+                        erpAutoLoginRequestInProgress = true;
+                        erpAutoLoginTargetPending = false;
+                        ShowLoadingOverlay();
+                        webView.CoreWebView2.NavigateWithWebResourceRequest(ssoRequest);
+                        ShowWebView();
+                        RaiseNavigationStateChanged();
+                        return true;
+                    }
+                    catch
+                    {
+                        erpAutoLoginRequestInProgress = false;
+                        erpAutoLoginTargetPending = false;
+                        erpAutoLoginTargetUrl = "";
+                    }
+                }
+            }
+
+            // 2순위: OVIA 자체 실행 후 ID/PW로 로그인한 기존 경로.
             string companyId;
             string userId;
             string password;
@@ -471,9 +555,7 @@ namespace OVIA.Desktop.Controls
             }
 
             Uri authUri;
-            Uri targetUri;
-            if (!Uri.TryCreate(authenticationUrl, UriKind.Absolute, out authUri)
-                || !Uri.TryCreate(NormalizeUrl(targetUrl), UriKind.Absolute, out targetUri))
+            if (!Uri.TryCreate(authenticationUrl, UriKind.Absolute, out authUri))
             {
                 return false;
             }
@@ -484,14 +566,6 @@ namespace OVIA.Desktop.Controls
                 return false;
             }
 
-            if (!string.Equals(targetUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(targetUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            // 시스템 설정의 ERP 인증 주소와 ERP 연결 주소가 같은 서버 계열일 때만
-            // 현재 OVIA 계정으로 브라우저 세션을 생성한다.
             if (!string.Equals(authUri.Host, targetUri.Host, StringComparison.OrdinalIgnoreCase))
             {
                 return false;
