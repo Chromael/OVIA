@@ -44,6 +44,7 @@ namespace OVIA.Desktop.Controls
         private int erpAutoLoginFormAttemptCount;
         private Timer erpAutoLoginFormTimer;
         private string erpAutoLoginTargetUrl = "";
+        private DateTime lastBlockedOviaLaunchUtc = DateTime.MinValue;
 
         public bool AutoResizeToDocumentHeight { get; set; }
         public bool EnableErpAutomaticLogin { get; set; }
@@ -850,6 +851,8 @@ namespace OVIA.Desktop.Controls
 
             navigationEventsAttached = true;
             webView.CoreWebView2.NavigationStarting += HandleNavigationStarting;
+            webView.CoreWebView2.NewWindowRequested += HandleNewWindowRequested;
+            webView.CoreWebView2.LaunchingExternalUriScheme += HandleLaunchingExternalUriScheme;
             webView.CoreWebView2.NavigationCompleted += HandleNavigationCompleted;
             webView.CoreWebView2.SourceChanged += HandleSourceChanged;
             webView.CoreWebView2.HistoryChanged += HandleHistoryChanged;
@@ -858,8 +861,96 @@ namespace OVIA.Desktop.Controls
 
         private void HandleNavigationStarting(object sender, CoreWebView2NavigationStartingEventArgs e)
         {
+            if (IsOviaProtocolUri(e == null ? null : e.Uri))
+            {
+                if (e != null)
+                {
+                    e.Cancel = true;
+                }
+
+                HandleBlockedOviaLaunchFromWebView();
+                return;
+            }
+
             ShowLoadingOverlay();
             RaiseNavigationStateChanged();
+        }
+
+        private void HandleNewWindowRequested(object sender, CoreWebView2NewWindowRequestedEventArgs e)
+        {
+            if (!IsOviaProtocolUri(e == null ? null : e.Uri))
+            {
+                return;
+            }
+
+            if (e != null)
+            {
+                e.Handled = true;
+            }
+
+            HandleBlockedOviaLaunchFromWebView();
+        }
+
+        private void HandleLaunchingExternalUriScheme(object sender, CoreWebView2LaunchingExternalUriSchemeEventArgs e)
+        {
+            if (!IsOviaProtocolUri(e == null ? null : e.Uri))
+            {
+                return;
+            }
+
+            if (e != null)
+            {
+                e.Cancel = true;
+            }
+
+            HandleBlockedOviaLaunchFromWebView();
+        }
+
+        private static bool IsOviaProtocolUri(string uri)
+        {
+            if (String.IsNullOrWhiteSpace(uri))
+            {
+                return false;
+            }
+
+            return uri.Trim().StartsWith("ovia://", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void HandleBlockedOviaLaunchFromWebView()
+        {
+            // 하나의 ovia:// 실행 요청이 WebView2의 여러 이벤트로 동시에 보고될 수 있으므로
+            // 같은 사용자 동작에서는 알림을 한 번만 표시한다.
+            DateTime now = DateTime.UtcNow;
+            if ((now - lastBlockedOviaLaunchUtc).TotalMilliseconds < 1500)
+            {
+                return;
+            }
+
+            lastBlockedOviaLaunchUtc = now;
+            loadingPending = false;
+            navigationInProgress = false;
+            if (showLoadingTimer != null)
+            {
+                showLoadingTimer.Stop();
+            }
+            if (hideLoadingTimer != null)
+            {
+                hideLoadingTimer.Stop();
+            }
+            if (loadingOverlay != null)
+            {
+                loadingOverlay.Visible = false;
+            }
+
+            ShowWebView();
+            RaiseNavigationStateChanged();
+
+            MessageBox.Show(
+                "이미 OVIA가 실행중입니다. 중복 실행은 허용되지 않습니다.",
+                "OVIA",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information
+            );
         }
 
         private void HandleSourceChanged(object sender, CoreWebView2SourceChangedEventArgs e)
@@ -946,6 +1037,32 @@ namespace OVIA.Desktop.Controls
                 return;
             }
 
+            // OVIA 내부 WebView에서 ovia:// 중복 실행을 차단한 경우 WebView2가
+            // 취소된 탐색을 OperationCanceled로 NavigationCompleted에 보고할 수 있다.
+            // 이것은 실제 웹 접근 실패가 아니므로 오류 패널로 전환하지 않고
+            // 직전 ERP 페이지를 그대로 유지한다.
+            if (IsRecentBlockedOviaNavigationCancellation(e))
+            {
+                navigationInProgress = false;
+                loadingPending = false;
+                if (showLoadingTimer != null)
+                {
+                    showLoadingTimer.Stop();
+                }
+                if (hideLoadingTimer != null)
+                {
+                    hideLoadingTimer.Stop();
+                }
+                if (loadingOverlay != null)
+                {
+                    loadingOverlay.Visible = false;
+                }
+
+                ShowWebView();
+                RaiseNavigationStateChanged();
+                return;
+            }
+
             string currentUrl = GetCurrentWebViewUrl();
             string fallbackUrl;
             if (!celmonWwwRetryAttempted && statusCode == 403 && TryGetCelmonWwwFallback(currentUrl, out fallbackUrl))
@@ -959,6 +1076,29 @@ namespace OVIA.Desktop.Controls
 
             ShowWebAccessMessage(currentUrl, statusCode, e.WebErrorStatus.ToString());
             RaiseNavigationStateChanged();
+        }
+
+
+        private bool IsRecentBlockedOviaNavigationCancellation(CoreWebView2NavigationCompletedEventArgs e)
+        {
+            if (e == null || e.IsSuccess)
+            {
+                return false;
+            }
+
+            if ((DateTime.UtcNow - lastBlockedOviaLaunchUtc).TotalSeconds > 5.0)
+            {
+                return false;
+            }
+
+            try
+            {
+                return e.WebErrorStatus == CoreWebView2WebErrorStatus.OperationCanceled;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private string GetCurrentWebViewUrl()

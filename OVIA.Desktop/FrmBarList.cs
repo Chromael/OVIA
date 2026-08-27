@@ -80,9 +80,6 @@ namespace OVIA.Desktop
         private const string ReferenceFilePrefix = "참고용 : ";
         private Panel actionPanel;
         private TextBox txtFilePath;
-        private OviaBarListButton recentExtractButton;
-        private OviaBarListButton openCsvButton;
-        private OviaBarListButton saveCsvButton;
         private Label lblRowCount;
         private Label lblTotalQty;
         private Label lblTotalLength;
@@ -99,7 +96,6 @@ namespace OVIA.Desktop
         private OviaBarListButton filterChipButton;
         private Panel actionSeparator1;
         private Panel actionSeparator2;
-        private Panel actionSeparator3;
         private Panel summaryDrawer;
         private DataGridView summaryGrid;
         private Button summarySpecTabButton;
@@ -147,6 +143,7 @@ namespace OVIA.Desktop
         private DateTime autoImportStartTime;
         private string lastLoadedFilePath = "";
         private HashSet<string> autoCadProcessedCsvFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private HashSet<string> autoCadImportedCsvFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private bool isProcessingAutoCadCsvQueue = false;
         private bool waitingAutoCadImport = false;
         private bool autoCadContinuousAppendMode = false;
@@ -864,40 +861,13 @@ namespace OVIA.Desktop
 
             actionSeparator1 = CreateActionSeparator(actionPanel);
 
-            recentExtractButton = new OviaBarListButton();
-            recentExtractButton.Text = "최근 추출";
-            recentExtractButton.Size = new Size(70, 34);
-            recentExtractButton.StartColor = OviaFluentTheme.Accent;
-            recentExtractButton.EndColor = BrandViolet;
-            recentExtractButton.Click += LoadRecent_Click;
-            actionPanel.Controls.Add(recentExtractButton);
-
-            openCsvButton = new OviaBarListButton();
-            openCsvButton.Text = "CSV 선택";
-            openCsvButton.Size = new Size(70, 34);
-            openCsvButton.StartColor = BrandViolet;
-            openCsvButton.EndColor = BrandIndigo;
-            openCsvButton.Click += OpenCsv_Click;
-            actionPanel.Controls.Add(openCsvButton);
-
-            actionSeparator2 = CreateActionSeparator(actionPanel);
-
-            saveCsvButton = new OviaBarListButton();
-            saveCsvButton.Text = "CSV 저장";
-            saveCsvButton.Size = new Size(75, 34);
-            saveCsvButton.StartColor = OviaFluentTheme.Success;
-            saveCsvButton.EndColor = OviaFluentTheme.Success;
-            saveCsvButton.UseCustomColors = true;
-            saveCsvButton.Click += SaveCsv_Click;
-            actionPanel.Controls.Add(saveCsvButton);
-
             saveProjectButton = new OviaBarListButton();
             saveProjectButton.Text = "검토 후 저장";
             saveProjectButton.Size = new Size(92, 34);
             saveProjectButton.Click += SaveProjectBarList_Click;
             actionPanel.Controls.Add(saveProjectButton);
 
-            actionSeparator3 = CreateActionSeparator(actionPanel);
+            actionSeparator2 = CreateActionSeparator(actionPanel);
 
             excelExportButton = new OviaBarListButton();
             excelExportButton.Text = "Excel 다운";
@@ -953,11 +923,10 @@ namespace OVIA.Desktop
             Control[][] groups = new Control[][]
             {
                 new Control[] { cadSelectionButton, cadSelectionModeOffButton, deleteCadBoxButton },
-                new Control[] { recentExtractButton, openCsvButton },
-                new Control[] { saveCsvButton, saveProjectButton },
+                new Control[] { saveProjectButton },
                 new Control[] { excelExportButton, summaryButton, filterChipButton, otherBarListButton }
             };
-            Panel[] separators = new Panel[] { actionSeparator1, actionSeparator2, actionSeparator3 };
+            Panel[] separators = new Panel[] { actionSeparator1, actionSeparator2 };
             int x = 0;
             int groupIndex;
             int separatorIndex = 0;
@@ -1107,7 +1076,7 @@ namespace OVIA.Desktop
             AddCompactSummaryCard(parent, "중량", "0.000", "Ton", new Point(679, y), new Size(220, 50), out lblTotalWeight);
 
             lblStatus = new Label();
-            lblStatus.Text = "AutoCAD에서 가져오거나 CSV를 선택하세요.";
+            lblStatus.Text = "CAD에서 영역을 추출하거나 저장된 BarList를 불러오세요.";
             lblStatus.AutoSize = false;
             lblStatus.AutoEllipsis = true;
             lblStatus.Size = new Size(289, 44);
@@ -2744,10 +2713,16 @@ namespace OVIA.Desktop
         {
             StopAutoCadWatcher();
 
-            string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            string importDirectory;
 
-            if (!Directory.Exists(desktop))
+            try
             {
+                importDirectory = OviaProjectWorkspacePaths.PrepareCadOutputDirectory(projectNo);
+            }
+            catch (Exception ex)
+            {
+                lblStatus.Text = "CAD 추출 임시폴더를 준비하지 못했습니다: " + ex.Message;
+                lblStatus.ForeColor = OviaFluentTheme.Danger;
                 return;
             }
 
@@ -2771,7 +2746,7 @@ namespace OVIA.Desktop
             }
 
             autoCadWatcher = new FileSystemWatcher();
-            autoCadWatcher.Path = desktop;
+            autoCadWatcher.Path = importDirectory;
             autoCadWatcher.Filter = "*.csv";
             autoCadWatcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime;
             autoCadWatcher.Created += AutoCadWatcher_Changed;
@@ -3055,6 +3030,7 @@ namespace OVIA.Desktop
                     }
 
                     autoCadProcessedCsvFiles.Add(filePath);
+                    autoCadImportedCsvFiles.Add(filePath);
                     autoCadLoadedCsvCount++;
                     waitingAutoCadImport = true;
                     autoCadContinuousAppendMode = true;
@@ -3383,7 +3359,7 @@ namespace OVIA.Desktop
             if (filePath == "")
             {
                 MessageBox.Show(
-                    "바탕화면에서 OVIA_BoxTable CSV 파일을 찾지 못했습니다.\r\n\r\nCAD에서 영역선택 버튼으로 도면 영역을 추출하거나 CSV 선택 버튼으로 파일을 직접 선택해 주세요.",
+                    "현재 공사의 CAD 임시폴더에서 OVIA_BoxTable CSV 파일을 찾지 못했습니다.\r\n\r\nCAD에서 영역선택 버튼으로 도면 영역을 다시 추출해 주세요.",
                     "OVIA",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information
@@ -3538,6 +3514,17 @@ namespace OVIA.Desktop
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning
                     );
+                }
+                else
+                {
+                    // ERP 저장 성공 후에는 project_no + ERP idx 기준의 단일 canonical cache만 유지한다.
+                    if (!string.IsNullOrWhiteSpace(erpSync.LocalCachePath) && File.Exists(erpSync.LocalCachePath))
+                    {
+                        filePath = erpSync.LocalCachePath;
+                    }
+
+                    // AutoCAD → OVIA 전달용 CSV/.ready/Temp Shapes는 ERP 저장 성공 후 수명이 끝난다.
+                    CleanupImportedAutoCadTempPackages();
                 }
 
                 // 저장 경로를 먼저 현재 BarList의 canonical 경로로 확정한 뒤 저장 baseline을 잡는다.
@@ -3713,22 +3700,70 @@ namespace OVIA.Desktop
             }
         }
 
-        private string GetProjectBarListDirectory()
+        private void CleanupImportedAutoCadTempPackages()
         {
-            string baseDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "OVIA",
-                "Projects"
-            );
+            if (autoCadImportedCsvFiles == null || autoCadImportedCsvFiles.Count == 0) return;
 
-            string projectKey = SanitizeFileName(projectNo + "_" + projectName);
+            string tempDirectory = GetProjectBarListTempDirectory();
+            List<string> completed = new List<string>();
 
-            if (projectKey == "_")
+            foreach (string csvPath in autoCadImportedCsvFiles)
             {
-                projectKey = "NoProject";
+                if (!OviaProjectWorkspacePaths.IsPathInsideDirectory(csvPath, tempDirectory)) continue;
+
+                try
+                {
+                    DeleteAutoCadTempFile(csvPath);
+                    DeleteAutoCadTempFile(csvPath + ".tmp");
+                    DeleteAutoCadTempFile(csvPath + ".ready");
+                    DeleteAutoCadTempFile(csvPath + ".ready.tmp");
+
+                    string csvBaseName = Path.GetFileNameWithoutExtension(csvPath);
+                    if (!string.IsNullOrWhiteSpace(csvBaseName))
+                    {
+                        string extractionShapeDirectory = Path.Combine(tempDirectory, "Shapes", SanitizeFileName(csvBaseName));
+                        if (Directory.Exists(extractionShapeDirectory)) Directory.Delete(extractionShapeDirectory, true);
+                    }
+
+                    completed.Add(csvPath);
+                }
+                catch
+                {
+                    // ERP 저장은 이미 완료되었으므로 임시파일 정리 실패가 저장 성공을 되돌리지는 않는다.
+                }
             }
 
-            return Path.Combine(baseDir, projectKey, "BarList");
+            for (int i = 0; i < completed.Count; i++) autoCadImportedCsvFiles.Remove(completed[i]);
+
+            try
+            {
+                string tempShapes = Path.Combine(tempDirectory, "Shapes");
+                if (Directory.Exists(tempShapes) && Directory.GetFileSystemEntries(tempShapes).Length == 0) Directory.Delete(tempShapes);
+            }
+            catch
+            {
+            }
+        }
+
+        private void DeleteAutoCadTempFile(string path)
+        {
+            try
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch
+            {
+            }
+        }
+
+        private string GetProjectBarListDirectory()
+        {
+            return OviaProjectWorkspacePaths.GetProjectBarListDirectory(projectNo);
+        }
+
+        private string GetProjectBarListTempDirectory()
+        {
+            return OviaProjectWorkspacePaths.GetProjectBarListTempDirectory(projectNo);
         }
 
         private string SanitizeFileName(string value)
@@ -4917,7 +4952,6 @@ namespace OVIA.Desktop
             List<int> selectedSourceRows = new List<int>();
             List<List<string>> currentPreviewRows = null;
             OtherBarListFileInfo currentFileInfo = null;
-            bool recentOnly = false;
 
             using (Form dialog = new Form())
             {
@@ -4929,13 +4963,13 @@ namespace OVIA.Desktop
                 dialog.FormBorderStyle = FormBorderStyle.Sizable;
                 dialog.MinimizeBox = false;
                 dialog.MaximizeBox = true;
-                dialog.ClientSize = new Size(1120, 690);
-                dialog.MinimumSize = new Size(900, 580);
+                dialog.ClientSize = new Size(1460, 720);
+                dialog.MinimumSize = new Size(1200, 620);
                 dialog.BackColor = SurfaceColor;
                 dialog.Font = OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
 
                 Label searchLabel = new Label();
-                searchLabel.Text = "공사 / BarList 검색";
+                searchLabel.Text = "BarList 검색";
                 searchLabel.AutoSize = true;
                 searchLabel.Font = OviaFluentTheme.FontData(8.7F, FontStyle.Bold);
                 searchLabel.ForeColor = TextSub;
@@ -4943,41 +4977,16 @@ namespace OVIA.Desktop
                 dialog.Controls.Add(searchLabel);
 
                 TextBox searchBox = new TextBox();
-                searchBox.Location = new Point(140, 16);
-                searchBox.Size = new Size(360, 26);
+                searchBox.Location = new Point(96, 16);
+                searchBox.Size = new Size(404, 26);
                 searchBox.Anchor = AnchorStyles.Top | AnchorStyles.Left;
                 OviaFluentTheme.ApplyTextBox(searchBox);
                 dialog.Controls.Add(searchBox);
 
-                Button recentButton = new Button();
-                recentButton.Text = "최근 저장";
-                recentButton.Size = new Size(82, 30);
-                recentButton.Location = new Point(516, 14);
-                recentButton.Cursor = Cursors.Hand;
-                dialog.Controls.Add(recentButton);
-
-                Button allButton = new Button();
-                allButton.Text = "전체 공사";
-                allButton.Size = new Size(82, 30);
-                allButton.Location = new Point(606, 14);
-                allButton.Cursor = Cursors.Hand;
-                dialog.Controls.Add(allButton);
-
-                Label guideLabel = new Label();
-                guideLabel.Text = "다른 BarList의 번호가 현재 번호와 같아도 중복으로 삭제하지 않고 선택한 행을 현재 목록 뒤에 추가합니다.";
-                guideLabel.AutoSize = false;
-                guideLabel.Size = new Size(390, 32);
-                guideLabel.Location = new Point(708, 11);
-                guideLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-                guideLabel.Font = OviaFluentTheme.FontData(8F, FontStyle.Regular);
-                guideLabel.ForeColor = TextSub;
-                guideLabel.TextAlign = ContentAlignment.MiddleLeft;
-                dialog.Controls.Add(guideLabel);
-
                 DataGridView fileGrid = new DataGridView();
                 EnableGridDoubleBuffering(fileGrid);
                 fileGrid.Location = new Point(20, 58);
-                fileGrid.Size = new Size(400, 548);
+                fileGrid.Size = new Size(420, 578);
                 fileGrid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left;
                 fileGrid.ReadOnly = true;
                 fileGrid.AllowUserToAddRows = false;
@@ -5000,37 +5009,43 @@ namespace OVIA.Desktop
                 fileGrid.ColumnHeadersDefaultCellStyle.ForeColor = TextDark;
                 fileGrid.ColumnHeadersDefaultCellStyle.Font = OviaFluentTheme.FontData(8.4F, FontStyle.Regular);
                 fileGrid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                fileGrid.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.False;
                 fileGrid.DefaultCellStyle.SelectionBackColor = OviaFluentTheme.AccentLight;
                 fileGrid.DefaultCellStyle.SelectionForeColor = TextDark;
+                fileGrid.Columns.Add("OtherNo", "No.");
                 fileGrid.Columns.Add("OtherProject", "공사");
                 fileGrid.Columns.Add("OtherTitle", "BarList");
                 fileGrid.Columns.Add("OtherDate", "수정일");
                 fileGrid.Columns.Add("OtherRows", "행");
-                fileGrid.Columns[0].FillWeight = 110F;
-                fileGrid.Columns[1].FillWeight = 170F;
-                fileGrid.Columns[2].FillWeight = 88F;
-                fileGrid.Columns[3].FillWeight = 45F;
+                fileGrid.Columns[0].FillWeight = 42F;
+                fileGrid.Columns[1].FillWeight = 118F;
+                fileGrid.Columns[2].FillWeight = 190F;
+                fileGrid.Columns[3].FillWeight = 92F;
+                fileGrid.Columns[4].FillWeight = 48F;
+                fileGrid.Columns[0].SortMode = DataGridViewColumnSortMode.NotSortable;
                 for (int fileColumnIndex = 0; fileColumnIndex < fileGrid.Columns.Count; fileColumnIndex++)
                 {
                     fileGrid.Columns[fileColumnIndex].SortMode = DataGridViewColumnSortMode.Automatic;
                 }
-                fileGrid.Columns[3].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+                fileGrid.Columns[0].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                fileGrid.Columns[4].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
                 dialog.Controls.Add(fileGrid);
 
                 DataGridView previewGrid = new DataGridView();
                 EnableGridDoubleBuffering(previewGrid);
-                previewGrid.Location = new Point(434, 58);
-                previewGrid.Size = new Size(666, 548);
+                previewGrid.Location = new Point(454, 58);
+                previewGrid.Size = new Size(986, 578);
                 previewGrid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
                 previewGrid.ReadOnly = true;
                 previewGrid.AllowUserToAddRows = false;
                 previewGrid.AllowUserToDeleteRows = false;
                 previewGrid.AllowUserToResizeRows = false;
                 previewGrid.RowHeadersVisible = true;
-                previewGrid.RowHeadersWidth = 42;
+                previewGrid.RowHeadersWidth = 48;
+                previewGrid.TopLeftHeaderCell.Value = "No.";
                 previewGrid.MultiSelect = true;
                 previewGrid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-                previewGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+                previewGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
                 previewGrid.BackgroundColor = Color.White;
                 previewGrid.BorderStyle = BorderStyle.FixedSingle;
                 previewGrid.EnableHeadersVisualStyles = false;
@@ -5044,6 +5059,8 @@ namespace OVIA.Desktop
                 previewGrid.ColumnHeadersDefaultCellStyle.ForeColor = TextDark;
                 previewGrid.ColumnHeadersDefaultCellStyle.Font = OviaFluentTheme.FontData(8.2F, FontStyle.Regular);
                 previewGrid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                previewGrid.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.False;
+                previewGrid.TopLeftHeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
                 previewGrid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(255, 248, 205);
                 previewGrid.DefaultCellStyle.SelectionForeColor = TextDark;
                 AddOtherBarListPreviewColumns(previewGrid);
@@ -5076,21 +5093,11 @@ namespace OVIA.Desktop
                 importAllButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
                 dialog.Controls.Add(importAllButton);
 
-                OVIA.Desktop.Controls.OviaButton cancelButton = new OVIA.Desktop.Controls.OviaButton();
-                cancelButton.Text = "취소";
-                cancelButton.Role = OviaButtonRole.Neutral;
-                cancelButton.Size = new Size(80, OviaFluentTheme.ButtonHeight);
-                cancelButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
-                cancelButton.DialogResult = DialogResult.Cancel;
-                dialog.Controls.Add(cancelButton);
-                dialog.CancelButton = cancelButton;
-
                 Action layoutPopupBottom = delegate
                 {
                     int buttonY = Math.Max(12, dialog.ClientSize.Height - 54);
                     int right = Math.Max(20, dialog.ClientSize.Width - 20);
 
-                    cancelButton.Location = new Point(20, buttonY);
                     importAllButton.Location = new Point(right - importAllButton.Width, buttonY);
                     importSelectedButton.Location = new Point(importAllButton.Left - 10 - importSelectedButton.Width, buttonY);
 
@@ -5107,20 +5114,6 @@ namespace OVIA.Desktop
                 dialog.Resize += delegate { layoutPopupBottom(); };
                 layoutPopupBottom();
 
-                Action refreshModeButtons = delegate
-                {
-                    recentButton.FlatStyle = FlatStyle.Flat;
-                    allButton.FlatStyle = FlatStyle.Flat;
-                    recentButton.FlatAppearance.BorderSize = 1;
-                    allButton.FlatAppearance.BorderSize = 1;
-                    recentButton.BackColor = recentOnly ? OviaFluentTheme.AccentLight : Color.White;
-                    recentButton.ForeColor = recentOnly ? OviaFluentTheme.Accent : TextSub;
-                    recentButton.FlatAppearance.BorderColor = recentOnly ? OviaFluentTheme.Accent : OviaFluentTheme.ButtonNeutralBorder;
-                    allButton.BackColor = recentOnly ? Color.White : OviaFluentTheme.AccentLight;
-                    allButton.ForeColor = recentOnly ? TextSub : OviaFluentTheme.Accent;
-                    allButton.FlatAppearance.BorderColor = recentOnly ? OviaFluentTheme.ButtonNeutralBorder : OviaFluentTheme.Accent;
-                };
-
                 Action bindFiles = delegate
                 {
                     string keyword = searchBox.Text == null ? "" : searchBox.Text.Trim();
@@ -5136,25 +5129,26 @@ namespace OVIA.Desktop
                         {
                             OtherBarListFileInfo info = allFiles[i];
 
-                            if (recentOnly && i >= 30)
-                            {
-                                continue;
-                            }
-
                             if (keyword != "" && info.SearchText.IndexOf(keyword, StringComparison.CurrentCultureIgnoreCase) < 0)
                             {
                                 continue;
                             }
 
+                            // "No." is an OVIA display sequence, not ERP barlist_idx.
+                            // The oldest discovered BarList is No.1 and the newest has the largest No.
+                            // allFiles is already newest-first, so preserve the assigned sequence even when filtered.
+                            int displayNo = allFiles.Count - i;
+
                             int rowIndex = fileGrid.Rows.Add(
+                                displayNo,
                                 info.ProjectDisplayName,
                                 info.Title,
                                 info.LastWriteTime.ToString("yyyy-MM-dd HH:mm"),
                                 info.RowCount.ToString("N0", CultureInfo.InvariantCulture)
                             );
                             fileGrid.Rows[rowIndex].Tag = info;
-                            fileGrid.Rows[rowIndex].Cells[0].ToolTipText = info.ProjectDisplayName;
-                            fileGrid.Rows[rowIndex].Cells[1].ToolTipText = info.Title + "\r\n" + info.FilePath;
+                            fileGrid.Rows[rowIndex].Cells[1].ToolTipText = info.ProjectDisplayName;
+                            fileGrid.Rows[rowIndex].Cells[2].ToolTipText = info.Title + "\r\n" + info.FilePath;
                             shown++;
                         }
 
@@ -5212,18 +5206,6 @@ namespace OVIA.Desktop
                 };
 
                 searchBox.TextChanged += delegate { bindFiles(); };
-                recentButton.Click += delegate
-                {
-                    recentOnly = true;
-                    refreshModeButtons();
-                    bindFiles();
-                };
-                allButton.Click += delegate
-                {
-                    recentOnly = false;
-                    refreshModeButtons();
-                    bindFiles();
-                };
                 fileGrid.SelectionChanged += delegate { loadPreview(); };
                 previewGrid.SelectionChanged += delegate { UpdateOtherBarListPreviewSelectionSummary(previewGrid, selectionLabel); };
 
@@ -5270,7 +5252,6 @@ namespace OVIA.Desktop
                     dialog.Close();
                 };
 
-                refreshModeButtons();
                 bindFiles();
                 searchBox.Focus();
 
@@ -5360,6 +5341,24 @@ namespace OVIA.Desktop
 
             result.Sort(delegate(OtherBarListFileInfo left, OtherBarListFileInfo right)
             {
+                // "다른 BarList"의 표시 순서는 BarList의 입력/등록 시점을 기준으로 최신순입니다.
+                // 화면의 No.는 ERP barlist_idx와 무관한 OVIA 표시 순번입니다.
+                // SESSION cache는 파일 시간을 재생성하므로 등록일을 우선하고, 같은 등록일에서는
+                // ERP id를 오직 안정적인 동률 해소용으로만 사용합니다.
+                int registeredCompare = right.RegisteredDate.CompareTo(left.RegisteredDate);
+
+                if (registeredCompare != 0)
+                {
+                    return registeredCompare;
+                }
+
+                int erpIdCompare = right.ErpBarListId.CompareTo(left.ErpBarListId);
+
+                if (erpIdCompare != 0 && (left.ErpBarListId > 0 || right.ErpBarListId > 0))
+                {
+                    return erpIdCompare;
+                }
+
                 int timeCompare = right.LastWriteTime.CompareTo(left.LastWriteTime);
 
                 if (timeCompare != 0)
@@ -5395,6 +5394,8 @@ namespace OVIA.Desktop
                     int orderColumn = FindCsvColumnIndex(rows[0], "발주번호", "발주 번호");
                     int dueColumn = FindCsvColumnIndex(rows[0], "납기일", "납기 일자", "납기일자");
                     int authorColumn = FindCsvColumnIndex(rows[0], "작성자", "작성");
+                    int erpIdColumn = FindCsvColumnIndex(rows[0], "OVIA_ERP_BARLIST_IDX");
+                    int registeredColumn = FindCsvColumnIndex(rows[0], "등록일", "등록 일자", "등록일자");
                     int r;
 
                     for (r = 1; r < rows.Count; r++)
@@ -5423,6 +5424,20 @@ namespace OVIA.Desktop
                         {
                             info.Author = GetCsvCellText(rows[r], authorColumn);
                         }
+
+                        if (erpIdColumn >= 0 && info.ErpBarListId <= 0)
+                        {
+                            int erpId;
+                            if (Int32.TryParse(GetCsvCellText(rows[r], erpIdColumn), NumberStyles.Integer, CultureInfo.InvariantCulture, out erpId))
+                            {
+                                info.ErpBarListId = erpId;
+                            }
+                        }
+
+                        if (registeredColumn >= 0 && info.RegisteredDate == DateTime.MinValue)
+                        {
+                            info.RegisteredDate = ParseOtherBarListRegisteredDate(GetCsvCellText(rows[r], registeredColumn), info.LastWriteTime);
+                        }
                     }
                 }
 
@@ -5442,6 +5457,45 @@ namespace OVIA.Desktop
             {
                 return null;
             }
+        }
+
+        private DateTime ParseOtherBarListRegisteredDate(string value, DateTime fallbackReference)
+        {
+            if (String.IsNullOrWhiteSpace(value))
+            {
+                return DateTime.MinValue;
+            }
+
+            string text = value.Trim();
+            DateTime parsed;
+            string[] fullFormats = new string[]
+            {
+                "yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd",
+                "yyyy-MM-dd HH:mm", "yyyy/MM/dd HH:mm", "yyyy.MM.dd HH:mm"
+            };
+
+            if (DateTime.TryParseExact(text, fullFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsed)
+                || DateTime.TryParse(text, CultureInfo.CurrentCulture, DateTimeStyles.None, out parsed))
+            {
+                return parsed;
+            }
+
+            string[] shortFormats = new string[] { "MM-dd", "MM/dd", "MM.dd" };
+            DateTime shortDate;
+            if (DateTime.TryParseExact(text, shortFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out shortDate))
+            {
+                int year = fallbackReference == DateTime.MinValue ? DateTime.Now.Year : fallbackReference.Year;
+                try
+                {
+                    return new DateTime(year, shortDate.Month, shortDate.Day);
+                }
+                catch
+                {
+                    return DateTime.MinValue;
+                }
+            }
+
+            return DateTime.MinValue;
         }
 
         private string NormalizeFilePathForCompare(string path)
@@ -5467,7 +5521,7 @@ namespace OVIA.Desktop
             {
                 "부위", "번호", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(Ton)", "비고", "원본 도면"
             };
-            float[] fillWeights = new float[] { 58F, 48F, 70F, 130F, 74F, 68F, 78F, 76F, 96F, 120F };
+            int[] widths = new int[] { 58, 50, 74, 148, 82, 74, 82, 82, 105, 145 };
             int i;
 
             for (i = 0; i < headers.Length; i++)
@@ -5475,8 +5529,9 @@ namespace OVIA.Desktop
                 DataGridViewTextBoxColumn column = new DataGridViewTextBoxColumn();
                 column.Name = "Preview" + i.ToString(CultureInfo.InvariantCulture);
                 column.HeaderText = headers[i];
-                column.FillWeight = fillWeights[i];
-                column.MinimumWidth = i == 3 ? 100 : 48;
+                column.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+                column.Width = widths[i];
+                column.MinimumWidth = widths[i];
                 column.SortMode = DataGridViewColumnSortMode.Automatic;
                 column.DefaultCellStyle.Alignment = GetBarListCellAlignment(headers[i]);
                 previewGrid.Columns.Add(column);
@@ -5539,7 +5594,9 @@ namespace OVIA.Desktop
                     );
                     DataGridViewRow previewRow = previewGrid.Rows[previewRowIndex];
                     previewRow.Tag = r;
-                    previewRow.HeaderCell.Value = previewRowIndex + 1;
+                    // Match the main BarList row-header rule exactly: top row has the largest No.
+                    // Example: 20 rows => 20, 19, ... 1.
+                    previewRow.HeaderCell.Value = (rows.Count - 1 - previewRowIndex);
 
                     OtherBarListPreviewShapeInfo shapeInfo = new OtherBarListPreviewShapeInfo();
                     shapeInfo.RawShapeText = rawShapeText;
@@ -5581,7 +5638,35 @@ namespace OVIA.Desktop
         {
             DataGridView previewGrid = sender as DataGridView;
 
-            if (previewGrid == null || e.RowIndex < 0 || e.ColumnIndex != 3 || e.RowIndex >= previewGrid.Rows.Count)
+            if (previewGrid == null || e.RowIndex < 0 || e.RowIndex >= previewGrid.Rows.Count)
+            {
+                return;
+            }
+
+            if (e.ColumnIndex == -1)
+            {
+                bool rowSelected = previewGrid.Rows[e.RowIndex].Selected;
+                e.PaintBackground(e.CellBounds, rowSelected);
+                e.Paint(e.CellBounds, DataGridViewPaintParts.Border);
+
+                object headerValue = previewGrid.Rows[e.RowIndex].HeaderCell.Value;
+                string rowNumber = headerValue == null
+                    ? (previewGrid.Rows.Count - e.RowIndex).ToString(CultureInfo.InvariantCulture)
+                    : Convert.ToString(headerValue, CultureInfo.InvariantCulture);
+
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    rowNumber,
+                    previewGrid.RowHeadersDefaultCellStyle.Font ?? previewGrid.Font,
+                    e.CellBounds,
+                    TextDark,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine
+                );
+                e.Handled = true;
+                return;
+            }
+
+            if (e.ColumnIndex != 3)
             {
                 return;
             }
@@ -9068,9 +9153,9 @@ namespace OVIA.Desktop
         private List<string> FindOviaBoxTableCsvFilesAfter(DateTime startTime)
         {
             List<string> candidates = new List<string>();
-            string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            string importDirectory = GetProjectBarListTempDirectory();
 
-            if (!Directory.Exists(desktop))
+            if (!Directory.Exists(importDirectory))
             {
                 return candidates;
             }
@@ -9079,7 +9164,7 @@ namespace OVIA.Desktop
              * OVIABOXTABLE은 이제 스마트 통합 추출 명령입니다.
              * 과거 테스트용 OVIAGRIDTABLE 파일명도 자동 입력 대상에 포함해 둡니다.
              */
-            string[] files = Directory.GetFiles(desktop, "OVIA_*Table_*.csv");
+            string[] files = Directory.GetFiles(importDirectory, "OVIA_*Table_*.csv");
 
             if (files == null || files.Length == 0)
             {
@@ -12448,19 +12533,25 @@ namespace OVIA.Desktop
                 return;
             }
 
-            saveProjectButton.Enabled = true;
-            saveProjectButton.UseDisabledAppearance = false;
-
             if (isSaved)
             {
+                // 저장이 완료된 상태는 완료 표식일 뿐 추가 액션이 아니다.
+                // AutoCAD 비활성 버튼과 같은 중립/비활성 외형으로 낮춰 사용자의 시선을 끌지 않는다.
+                saveProjectButton.Enabled = false;
+                saveProjectButton.UseDisabledAppearance = true;
+                saveProjectButton.KeepCustomColorsWhenDisabled = false;
                 saveProjectButton.Cursor = Cursors.Default;
                 saveProjectButton.Text = "저장완료";
-                saveProjectButton.UseCustomColors = true;
-                saveProjectButton.StartColor = OviaFluentTheme.Success;
-                saveProjectButton.EndColor = OviaFluentTheme.Success;
+                saveProjectButton.UseCustomColors = false;
+                saveProjectButton.StartColor = OviaFluentTheme.Accent;
+                saveProjectButton.EndColor = OviaFluentTheme.Accent;
             }
             else
             {
+                // 마지막 저장본과 실제 차이가 있을 때만 주 액션인 '검토 후 저장'을 다시 활성화한다.
+                saveProjectButton.Enabled = true;
+                saveProjectButton.UseDisabledAppearance = false;
+                saveProjectButton.KeepCustomColorsWhenDisabled = false;
                 saveProjectButton.Cursor = Cursors.Hand;
                 saveProjectButton.Text = "검토 후 저장";
                 saveProjectButton.UseCustomColors = false;
@@ -13985,6 +14076,8 @@ namespace OVIA.Desktop
         public string Author = "";
         public string SearchText = "";
         public int RowCount = 0;
+        public int ErpBarListId = 0;
+        public DateTime RegisteredDate = DateTime.MinValue;
         public DateTime LastWriteTime = DateTime.MinValue;
     }
 

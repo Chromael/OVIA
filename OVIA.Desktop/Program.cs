@@ -49,10 +49,17 @@ namespace OVIA.Desktop
                     MessageBoxIcon.Warning
                 );
 
-                Application.Run(new FrmMain(
-                    masterRecoveryContext.CompanyId,
-                    masterRecoveryContext.UserId
-                ));
+                try
+                {
+                    Application.Run(new FrmMain(
+                        masterRecoveryContext.CompanyId,
+                        masterRecoveryContext.UserId
+                    ));
+                }
+                finally
+                {
+                    OviaSessionCacheService.CleanupProjectsCache();
+                }
                 return;
             }
 
@@ -98,6 +105,8 @@ namespace OVIA.Desktop
             }
             finally
             {
+                // Projects는 실행 세션 전용 캐시다. 모든 Form/파일 사용이 끝난 뒤 정리한다.
+                OviaSessionCacheService.CleanupProjectsCache();
                 OviaSingleInstanceService.Stop();
             }
         }
@@ -260,22 +269,30 @@ namespace OVIA.Desktop
             }
             else
             {
-                // 이미 열린 메인 화면의 권한/회사 컨텍스트를 다른 사용자로 몰래 바꾸지 않습니다.
                 if (!OviaSessionSecurity.IsCurrentLoginUser(launch.CompanyId, launch.UserId))
                 {
+                    ActivateForm(mainForm);
+
                     MessageBox.Show(
-                        "현재 실행 중인 OVIA의 로그인 사용자와 ERP 실행 사용자가 다릅니다.\r\n" +
-                        "데이터와 권한이 섞이지 않도록 현재 OVIA에서 로그아웃한 뒤 다시 실행해주세요.",
+                        "현재 실행 중인 OVIA 로그인 사용자와 ERP 실행 사용자가 다릅니다.\r\n" +
+                        "ERP 사용자 우선으로 로그인이 전환됩니다.",
                         "OVIA 사용자 확인",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information
                     );
-                    ActivateCurrentOviaWindow();
-                    return;
-                }
 
-                // 같은 사용자라면 ERP가 새로 발급한 API 토큰만 현재 메모리 세션에 갱신합니다.
-                OviaErpAuthenticationService.AdoptLaunchSession(launch.CompanyId, launch.UserId, launch.OviaToken, launch.WebSessionTicket, launch.LogoutTicket);
+                    // ERP에서 새로 실행한 사용자를 최종 로그인 기준으로 채택합니다.
+                    // 기존 메인 Form 자체는 유지하여 Application.Run 수명주기를 깨지 않고,
+                    // 기존 사용자 화면/탐색 상태만 폐기한 뒤 새 ERP 사용자 컨텍스트로 다시 구성합니다.
+                    OviaErpAuthenticationService.AdoptLaunchSession(launch.CompanyId, launch.UserId, launch.OviaToken, launch.WebSessionTicket, launch.LogoutTicket);
+                    OviaSessionSecurity.SetCurrentLogin(launch.CompanyId, launch.UserId, "", launch.UserLevel);
+                    mainForm.SwitchToErpLaunchUser(launch.CompanyId, launch.UserId);
+                }
+                else
+                {
+                    // 같은 사용자라면 ERP가 새로 발급한 API/Web 세션 정보만 현재 메모리 세션에 갱신합니다.
+                    OviaErpAuthenticationService.AdoptLaunchSession(launch.CompanyId, launch.UserId, launch.OviaToken, launch.WebSessionTicket, launch.LogoutTicket);
+                }
             }
 
             ActivateForm(mainForm);
@@ -367,6 +384,17 @@ namespace OVIA.Desktop
 
             try
             {
+                // 현재 BarList가 열려 있는 상태에서 ERP Pull을 먼저 수행하면
+                // Pull 과정의 canonical CSV/Shapes 재생성 및 stale Shape 정리가
+                // 아직 열린 FrmBarList의 저장 baseline/형상 파일을 외부에서 변경할 수 있다.
+                // 그 결과 실제 저장 완료 상태인데도 "저장하지 않은 BarList" 경고가 뜨거나
+                // 수정했던 셀이 "CAD 형상 없음"으로 보이는 문제가 발생한다.
+                // 반드시 기존 화면의 미저장 판정과 종료를 먼저 완료한 뒤 ERP 캐시를 갱신한다.
+                if (!mainForm.PrepareForExternalLaunchNavigation())
+                {
+                    return;
+                }
+
                 string filePath = await OviaErpLaunchService.PrepareBarListAsync(launch);
                 if (!string.IsNullOrWhiteSpace(filePath))
                 {

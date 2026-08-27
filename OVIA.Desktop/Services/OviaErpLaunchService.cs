@@ -321,10 +321,7 @@ namespace OVIA.Desktop
 
         private static string GetProjectBarListDirectory(string projectNo, string projectName)
         {
-            string baseDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OVIA", "Projects");
-            string projectKey = SanitizeFileName((projectNo ?? "") + "_" + (projectName ?? ""));
-            if (projectKey == "_") projectKey = "NoProject";
-            return Path.Combine(baseDir, projectKey, "BarList");
+            return OviaProjectWorkspacePaths.GetProjectBarListDirectory(projectNo);
         }
 
         private static string SanitizeFileName(string value)

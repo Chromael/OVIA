@@ -17,6 +17,7 @@ namespace OVIA.Desktop
         public string Message { get; set; }
         public int BarListId { get; set; }
         public int SyncedItemCount { get; set; }
+        public string LocalCachePath { get; set; }
         internal string RawResponse { get; set; }
     }
 
@@ -82,6 +83,8 @@ namespace OVIA.Desktop
                     PersistCanonicalMetaAfterPush(companyId, rows, headers);
                     PersistErpId(csvPath, rows, headers, result.BarListId);
                     SetSyncPending(csvPath, false);
+                    result.LocalCachePath = CanonicalizeLocalCachePath(projectNo, csvPath, result.BarListId);
+                    CleanupUnreferencedShapeFiles(Path.GetDirectoryName(result.LocalCachePath == "" ? csvPath : result.LocalCachePath));
                 }
                 else
                 {
@@ -134,6 +137,7 @@ namespace OVIA.Desktop
                 }
 
                 RemoveServerDeletedLocalCaches(localDirectory, serverIds);
+                CleanupUnreferencedShapeFiles(localDirectory);
                 return Ok("ERP BarList 동기화 완료", 0);
             }
             catch (Exception ex)
@@ -202,10 +206,13 @@ namespace OVIA.Desktop
                 if (string.IsNullOrWhiteSpace(dir)) return;
                 // Shapes는 여러 BarList가 공유할 수 있으므로 전체 폴더를 지우지 않는다.
                 // ERP pull 전용 파일만 개별 정리한다.
-                string name = Path.GetFileNameWithoutExtension(csvPath);
-                if (name == null || name.IndexOf("_ERP_", StringComparison.OrdinalIgnoreCase) < 0) return;
-                int marker = name.LastIndexOf("_ERP_", StringComparison.OrdinalIgnoreCase);
-                int id = marker < 0 ? 0 : ParseInt(name.Substring(marker + 5));
+                int id = GetPersistedErpBarListId(csvPath);
+                if (id <= 0)
+                {
+                    string name = Path.GetFileNameWithoutExtension(csvPath);
+                    int marker = name == null ? -1 : name.LastIndexOf("_ERP_", StringComparison.OrdinalIgnoreCase);
+                    id = marker < 0 ? 0 : ParseInt(name.Substring(marker + 5));
+                }
                 if (id <= 0) return;
                 string shapeDir = Path.Combine(dir, "Shapes");
                 if (!Directory.Exists(shapeDir)) return;
@@ -389,7 +396,10 @@ namespace OVIA.Desktop
 
             string existing = FindLocalFileByErpId(dir, id);
             if (existing != "" && IsSyncPending(existing)) return;
-            string csvPath = existing != "" ? existing : Path.Combine(dir, "BarList_" + Safe(projectNo) + "_ERP_" + id.ToString(CultureInfo.InvariantCulture) + ".csv");
+
+            // ERP barlist_idx 하나당 로컬 CSV도 반드시 하나만 유지한다.
+            // 제목/공사명/저장시각은 물리 파일 식별자로 사용하지 않는다.
+            string csvPath = Path.Combine(dir, "BarList_" + Safe(projectNo) + "_ERP_" + id.ToString(CultureInfo.InvariantCulture) + ".csv");
             string shapeDir = Path.Combine(dir, "Shapes");
             Directory.CreateDirectory(shapeDir);
 
@@ -433,6 +443,20 @@ namespace OVIA.Desktop
             // 내용이 동일한 다른 CSV까지 매번 다시 저장하면 모든 LastWriteTime이
             // 같은 시각으로 갱신되므로 실제 내용이 변경된 BarList만 저장한다.
             WriteCsvIfChanged(csvPath, rows);
+
+            if (existing != "")
+            {
+                try
+                {
+                    if (!string.Equals(Path.GetFullPath(existing), Path.GetFullPath(csvPath), StringComparison.OrdinalIgnoreCase))
+                    {
+                        File.Delete(existing);
+                    }
+                }
+                catch
+                {
+                }
+            }
         }
 
         private static void ApplyMeta(List<string> row, string[] headers, IDictionary<string, object> meta)
@@ -457,11 +481,24 @@ namespace OVIA.Desktop
                 try
                 {
                     List<List<string>> rows = ReadCsv(file);
-                    if (rows.Count < 2) continue;
+                    if (rows.Count < 2)
+                    {
+                        if (!IsSyncPending(file)) File.Delete(file);
+                        continue;
+                    }
+
                     int id = ParseInt(GetFirstValue(rows, rows[0], ErpIdHeader));
-                    if (id > 0 && !serverIds.Contains(id) && !IsSyncPending(file)) { File.Delete(file); DeleteLocalShapeDirectory(file); }
+
+                    // 성공한 ERP pull이 목록의 원장이다.
+                    // ERP id가 없고 pending도 아닌 과거 로컬 CSV는 stale cache이므로 제거한다.
+                    if (!IsSyncPending(file) && (id <= 0 || !serverIds.Contains(id)))
+                    {
+                        File.Delete(file);
+                    }
                 }
-                catch { }
+                catch
+                {
+                }
             }
         }
 
@@ -472,6 +509,118 @@ namespace OVIA.Desktop
                 try { List<List<string>> rows = ReadCsv(file); if (rows.Count > 1 && ParseInt(GetFirstValue(rows, rows[0], ErpIdHeader)) == id) return file; } catch { }
             }
             return "";
+        }
+
+        private static string CanonicalizeLocalCachePath(string projectNo, string csvPath, int erpId)
+        {
+            if (erpId <= 0 || string.IsNullOrWhiteSpace(csvPath) || !File.Exists(csvPath)) return csvPath ?? "";
+
+            try
+            {
+                string dir = Path.GetDirectoryName(csvPath);
+                if (string.IsNullOrWhiteSpace(dir)) return csvPath;
+
+                string canonical = Path.Combine(
+                    dir,
+                    "BarList_" + Safe(projectNo) + "_ERP_" + erpId.ToString(CultureInfo.InvariantCulture) + ".csv"
+                );
+
+                if (string.Equals(Path.GetFullPath(csvPath), Path.GetFullPath(canonical), StringComparison.OrdinalIgnoreCase))
+                    return canonical;
+
+                File.Copy(csvPath, canonical, true);
+                File.Delete(csvPath);
+                return canonical;
+            }
+            catch
+            {
+                return csvPath;
+            }
+        }
+
+        private static void CleanupUnreferencedShapeFiles(string barListDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(barListDirectory) || !Directory.Exists(barListDirectory)) return;
+
+            try
+            {
+                string shapeDirectory = Path.Combine(barListDirectory, "Shapes");
+                if (!Directory.Exists(shapeDirectory)) return;
+
+                HashSet<string> keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (string csv in Directory.GetFiles(barListDirectory, "BarList_*.csv"))
+                {
+                    try
+                    {
+                        List<List<string>> rows = ReadCsv(csv);
+                        if (rows.Count < 2) continue;
+                        List<string> headers = rows[0];
+                        for (int r = 1; r < rows.Count; r++)
+                        {
+                            string value = GetValue(rows[r], headers, ShapeHeader, "CAD_SHAPE_JSON");
+                            string path = ResolveShapePath(csv, value);
+                            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                            {
+                                keep.Add(Path.GetFullPath(path));
+                                AddOriginalSourceCompanion(path, keep);
+                            }
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                foreach (string shapeFile in Directory.GetFiles(shapeDirectory, "*.json", SearchOption.AllDirectories))
+                {
+                    try
+                    {
+                        if (!keep.Contains(Path.GetFullPath(shapeFile))) File.Delete(shapeFile);
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                // 빈 하위 폴더만 정리한다. Shapes 루트 자체는 유지한다.
+                string[] subDirectories = Directory.GetDirectories(shapeDirectory, "*", SearchOption.AllDirectories);
+                Array.Sort(subDirectories, delegate(string a, string b) { return b.Length.CompareTo(a.Length); });
+                for (int i = 0; i < subDirectories.Length; i++)
+                {
+                    try
+                    {
+                        if (Directory.GetFileSystemEntries(subDirectories[i]).Length == 0) Directory.Delete(subDirectories[i]);
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void AddOriginalSourceCompanion(string shapePath, HashSet<string> keep)
+        {
+            try
+            {
+                string json = File.ReadAllText(shapePath, Encoding.UTF8);
+                IDictionary<string, object> doc = AsDictionary(CreateSerializer().DeserializeObject(json));
+                string original = ReadString(doc, "originalSourcePath");
+                if (string.IsNullOrWhiteSpace(original)) return;
+
+                string originalPath = original;
+                if (!Path.IsPathRooted(originalPath))
+                {
+                    originalPath = Path.Combine(Path.GetDirectoryName(shapePath) ?? "", originalPath.Replace('/', Path.DirectorySeparatorChar));
+                }
+
+                if (File.Exists(originalPath)) keep.Add(Path.GetFullPath(originalPath));
+            }
+            catch
+            {
+            }
         }
 
         /// <summary>
@@ -853,6 +1002,16 @@ namespace OVIA.Desktop
             textPolicy["editableTextIds"] = true;
             root["textPolicy"] = textPolicy;
 
+            // ERP 공통 formatter가 지원하는 경우 사용할 수 있는 비파괴 표시 힌트입니다.
+            // 현재 제공된 ERP BarList 소스는 shape_json을 formatter에 전달만 하므로
+            // 지원하지 않는 formatter에서는 단순히 무시됩니다.
+            Dictionary<string, object> renderPolicy = new Dictionary<string, object>();
+            renderPolicy["strokeWidthPx"] = CadShapeVisualPolicy.GridStrokeWidthPx;
+            renderPolicy["nonScalingStroke"] = true;
+            renderPolicy["textScaleMin"] = CadShapeVisualPolicy.MinimumTextScale;
+            renderPolicy["textScaleMax"] = CadShapeVisualPolicy.MaximumTextScale;
+            root["renderPolicy"] = renderPolicy;
+
             root["rowNo"] = ReadInt(edited, "rowNo");
 
             Dictionary<string, object> cell = new Dictionary<string, object>();
@@ -922,45 +1081,25 @@ namespace OVIA.Desktop
                             ? ReadNumber(source, "y", 0D)
                             : ReadNumber(source, "y1", 0D);
 
-                        double height = Math.Max(ReadNumber(source, "height", 2.5D), 0.1D);
-                        double textScale = Math.Max(ReadNumber(source, "textScale", 1D), 0.25D);
-                        double effectiveHeight = height * textScale;
-
-                        // 철근형상 확인·수정에서 새로 추가한 TEXT의 기본 height=3은
-                        // 편집기 화면에서는 화면 폰트 최소값 때문에 충분히 크게 보이지만,
-                        // ERP SVG는 이 값을 viewBox 좌표의 font-size로 직접 사용하므로
-                        // 1px 미만으로 축소되어 사실상 보이지 않을 수 있습니다.
-                        // ERP 전송본에서만 같은 행의 기존 CAD 치수문자 높이를 기준으로
-                        // 최소 표시 높이를 보장합니다. 로컬 편집 JSON은 변경하지 않습니다.
-                        bool isDefaultManualTextSize = height >= 2.95D
-                            && height <= 3.05D;
-
-                        // 20260826_05:
-                        // ERP SVG는 고정 px 폰트가 아니라 viewBox 좌표의 font-size를 사용합니다.
-                        // 따라서 가로로 긴 SOURCE_CELL은 같은 height=70을 보내도 SVG가 가로폭에
-                        // 맞춰 축소되는 순간 문자가 다시 몇 px 수준으로 작아집니다.
-                        // 수동 추가 TEXT의 기본 height=3은 "기준 크기"로만 보고, ERP 전송본에서는
-                        // 현재 셀 가로/세로 비율로 계산한 표준 높이에 textScale을 다시 적용합니다.
-                        // 사용자가 OVIA에서 문자를 확대/축소한 비율도 ERP에서 그대로 유지됩니다.
-                        bool isLegacyErpAdjustedManualText = IsLegacyErpAdjustedManualText(
-                            edited,
-                            source,
-                            height,
-                            textScale,
-                            erpTextReferenceHeight
+                        // ERP SVG의 문자 크기는 원본 CAD height를 직접 사용하지 않습니다.
+                        // CAD 도면마다 문자 높이 단위가 달라 수정 후 특정 숫자만 지나치게 크거나
+                        // 작아지는 문제가 있었으므로, 현재 cell viewBox에서 계산한 표준 높이를 기준으로
+                        // 제한된 TextScale만 반영합니다. 회전/좌표는 기존 값을 그대로 유지합니다.
+                        double textScale = CadShapeVisualPolicy.ClampTextScale(
+                            ReadNumber(source, "textScale", 1D)
                         );
-
-                        if (UsesSourceCellTransportCoordinates(edited)
-                            && (isDefaultManualTextSize || isLegacyErpAdjustedManualText))
-                        {
-                            effectiveHeight = erpTextReferenceHeight * textScale;
-                        }
+                        double effectiveHeight = erpTextReferenceHeight * textScale;
 
                         output["x"] = RoundShapeNumber(x);
                         output["y"] = RoundShapeNumber(y);
                         output["height"] = RoundShapeNumber(effectiveHeight);
                         output["rotation"] = RoundShapeNumber(ReadNumber(source, "rotation", 0D));
                         output["align"] = "CENTER";
+
+                        // ERP renderer는 height를 실제 SVG font-size로 사용하므로 위 height는 표시용입니다.
+                        // OVIA가 다시 pull할 때 사용자가 편집창에서 조절한 비율을 정확히 복원할 수 있도록
+                        // 편집용 배율은 별도 메타로 함께 보관합니다. ERP 화면에는 영향을 주지 않습니다.
+                        output["oviaTextScale"] = RoundShapeNumber(textScale);
 
                         // ERP v3 bounds도 현재 문자 위치/크기 기준으로 다시 생성합니다.
                         string textValue = ReadString(source, "text");
@@ -1000,112 +1139,11 @@ namespace OVIA.Desktop
             double cellWidth,
             double cellHeight)
         {
-            List<double> heights = new List<double>();
-            object elementsValue;
-
-            if (document != null && TryGet(document, "elements", out elementsValue))
-            {
-                object[] elements = ToObjectArray(elementsValue);
-                for (int i = 0; i < elements.Length; i++)
-                {
-                    IDictionary<string, object> element = AsDictionary(elements[i]);
-                    if (element == null || !ReadString(element, "type").Equals("TEXT", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    double height = Math.Max(ReadNumber(element, "height", 0D), 0D);
-                    double textScale = Math.Max(ReadNumber(element, "textScale", 1D), 0.25D);
-                    double effective = height * textScale;
-
-                    // ERP 전송에서 이미 보정된 수동 TEXT(약 70 전후)나 편집기 기본값 3은
-                    // 기존 CAD 문자 대표값 계산에 섞지 않습니다. 원본 CAD의 실제 큰 높이가
-                    // 존재하는 경우에만 보조 기준으로 사용합니다.
-                    if (effective > 80D)
-                    {
-                        heights.Add(effective);
-                    }
-                }
-            }
-
-            // ERP DevTools 실측 기준:
-            // 정상 CAD 형상 viewBox width 약 771에서 font-size 약 71.263이 육안상 정상 크기입니다.
-            // 71.263 / 771.157 ~= 0.0924 입니다.
-            // ERP SVG는 셀 가로폭에 맞춰 축소되는 경우가 많으므로 고정 70만 사용하면
-            // 27번처럼 가로로 긴 형상에서 문자가 다시 지나치게 작아집니다.
-            // 따라서 가로폭 9.2%, 세로높이 14%를 동시에 계산하고 더 큰 값을 사용합니다.
-            const double erpStandardTextHeight = 70D;
-            const double erpTextWidthRatio = 0.092D;
-            const double erpTextHeightRatio = 0.14D;
-
-            double viewportReference = Math.Max(
-                erpStandardTextHeight,
-                Math.Max(
-                    Math.Max(cellWidth, 0D) * erpTextWidthRatio,
-                    Math.Max(cellHeight, 0D) * erpTextHeightRatio
-                )
-            );
-
-            double reference = viewportReference;
-
-            if (heights.Count > 0)
-            {
-                heights.Sort();
-                int middle = heights.Count / 2;
-                double cadReference = heights.Count % 2 == 1
-                    ? heights[middle]
-                    : (heights[middle - 1] + heights[middle]) / 2D;
-
-                // 실제 CAD TEXT가 viewport 기준보다 큰 경우에는 기존 CAD 비율을 우선합니다.
-                reference = Math.Max(reference, cadReference);
-            }
-
-            if (Double.IsNaN(reference) || Double.IsInfinity(reference) || reference <= 0D)
-            {
-                reference = erpStandardTextHeight;
-            }
-
-            return Math.Max(erpStandardTextHeight, reference);
-        }
-
-        private static bool IsLegacyErpAdjustedManualText(
-            IDictionary<string, object> document,
-            IDictionary<string, object> element,
-            double height,
-            double textScale,
-            double referenceHeight)
-        {
-            if (document == null || element == null) return false;
-
-            string sourceName = ReadString(document, "source");
-            if (!sourceName.Equals("OVIA_EDIT", StringComparison.OrdinalIgnoreCase)
-                && !sourceName.Equals("OVIA_MANUAL", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            double effective = Math.Max(height, 0D) * Math.Max(textScale, 0.25D);
-            if (effective <= 0D || effective >= referenceHeight * 0.75D)
-            {
-                return false;
-            }
-
-            // _02~_04에서 ERP pull된 수동 TEXT는 전송용 bounds가 height와 거의 같은 높이로
-            // 저장될 수 있습니다. 이 패턴만 다시 보정 대상으로 인정하여 원본 CAD TEXT를
-            // 무조건 확대하지 않습니다.
-            if (!HasNumber(element, "boundsMinY") || !HasNumber(element, "boundsMaxY"))
-            {
-                return height <= 80D;
-            }
-
-            double boundsHeight = Math.Abs(
-                ReadNumber(element, "boundsMaxY", 0D) - ReadNumber(element, "boundsMinY", 0D)
-            );
-
-            if (boundsHeight <= 0D) return height <= 80D;
-
-            double ratio = boundsHeight / Math.Max(effective, 0.0001D);
-            return height <= 80D && ratio >= 0.80D && ratio <= 1.25D;
+            // 원본 CAD TEXT height의 중앙값/최대값을 기준으로 삼지 않습니다.
+            // 도면별 CAD 문자 단위 편차가 ERP SVG font-size에 그대로 전파되면
+            // 동일한 철근형상 안에서도 160은 거의 안 보이고 2600은 과도하게 커지는 현상이 생깁니다.
+            // ERP 표시는 cell viewBox 비율만으로 결정하여 저장/재조회/재수정 반복에도 크기가 누적되지 않습니다.
+            return CadShapeVisualPolicy.ResolveErpReferenceTextHeight(cellWidth, cellHeight);
         }
 
         private static void AppendErpArcLineFallbacks(
@@ -1165,10 +1203,17 @@ namespace OVIA.Desktop
 
         private static string StripErpTransportFallbacks(string json)
         {
-            if (String.IsNullOrWhiteSpace(json)
-                || json.IndexOf("oviaErpFallback", StringComparison.OrdinalIgnoreCase) < 0)
+            if (String.IsNullOrWhiteSpace(json))
             {
                 return json == null ? "" : json;
+            }
+
+            bool hasFallback = json.IndexOf("oviaErpFallback", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool hasTextScaleMetadata = json.IndexOf("oviaTextScale", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (!hasFallback && !hasTextScaleMetadata)
+            {
+                return json;
             }
 
             try
@@ -1186,10 +1231,34 @@ namespace OVIA.Desktop
                 for (int i = 0; i < elements.Length; i++)
                 {
                     IDictionary<string, object> element = AsDictionary(elements[i]);
-                    if (element != null
-                        && !String.IsNullOrWhiteSpace(ReadString(element, "oviaErpFallback")))
+                    if (element == null)
+                    {
+                        clean.Add(elements[i]);
+                        continue;
+                    }
+
+                    if (!String.IsNullOrWhiteSpace(ReadString(element, "oviaErpFallback")))
                     {
                         continue;
+                    }
+
+                    if (ReadString(element, "type").Equals("TEXT", StringComparison.OrdinalIgnoreCase)
+                        && HasNumber(element, "oviaTextScale"))
+                    {
+                        double textScale = CadShapeVisualPolicy.ClampTextScale(
+                            ReadNumber(element, "oviaTextScale", 1D)
+                        );
+
+                        // ERP의 height는 SVG 표시용 viewBox 크기이므로 편집기로 그대로 되가져오면
+                        // 다음 저장에서 크기가 다시 커질 수 있습니다. 편집기 내부 기준 height로 복원하고
+                        // 사용자가 조절한 비율만 TextScale로 되돌립니다.
+                        element["height"] = CadShapeVisualPolicy.EditorCanonicalTextHeight;
+                        element["textScale"] = RoundShapeNumber(textScale);
+                        RemoveKeyIgnoreCase(element, "oviaTextScale");
+                        RemoveKeyIgnoreCase(element, "boundsMinX");
+                        RemoveKeyIgnoreCase(element, "boundsMinY");
+                        RemoveKeyIgnoreCase(element, "boundsMaxX");
+                        RemoveKeyIgnoreCase(element, "boundsMaxY");
                     }
 
                     clean.Add(elements[i]);

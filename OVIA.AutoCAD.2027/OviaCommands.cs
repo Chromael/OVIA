@@ -22679,7 +22679,7 @@ namespace OVIA.AutoCAD_2027
 
         private string CreateCsvFilePath(Database db, string prefix)
         {
-            string baseFolder = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            string baseFolder = ResolveOviaCadOutputDirectory();
             string drawingName = "unsaved";
 
             if (db != null && db.Filename != null && db.Filename.Trim() != "")
@@ -22692,6 +22692,35 @@ namespace OVIA.AutoCAD_2027
             string fileName = prefix + "_" + drawingName + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".csv";
 
             return Path.Combine(baseFolder, fileName);
+        }
+
+        private string ResolveOviaCadOutputDirectory()
+        {
+            // OVIA Desktop이 현재 ERP project_no에 대응하는 Temp 경로를 hand-off 파일로 전달합니다.
+            // 파일이 없거나 읽을 수 없는 독립 AutoCAD 실행은 기존 호환성을 위해 바탕화면으로 fallback합니다.
+            try
+            {
+                string localRoot = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "OVIA"
+                );
+                string hintPath = Path.Combine(localRoot, "cad_output_path.txt");
+
+                if (File.Exists(hintPath))
+                {
+                    string configured = File.ReadAllText(hintPath, Encoding.UTF8).Trim();
+                    if (configured != "")
+                    {
+                        Directory.CreateDirectory(configured);
+                        return configured;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
         }
 
         private void WriteCsv(string filePath, List<OviaTextRow> rows)

@@ -18,7 +18,7 @@ namespace OVIA.Desktop
         private const float RotatedTextTrackingPixels = 0.70F;
         private const float VisualScale = 0.90F;
         private const float StraightShapeMaxWidthRatio = 0.60F;
-        private const float MinimumCadTextFontSizePt = 3.0F;
+        private const float MinimumCadTextFontSizePt = CadShapeVisualPolicy.GridMinimumTextSizePt;
         private const float TextBoundsFitTolerance = 1.04F;
         private const string SourceCellLayoutPolicy = "SOURCE_CELL";
 
@@ -238,7 +238,8 @@ namespace OVIA.Desktop
                     + (float)((drawArea.Height - contentHeight * scale) / 2.0)
                     - (float)(contentMinY * scale);
 
-                float penWidth = Math.Max(1.15F, Math.Min(1.85F, inner.Height / 56F));
+                // 셀 높이/형상 수정 여부에 따라 선 굵기가 달라 보이지 않도록 고정 표시 두께를 사용합니다.
+                float penWidth = CadShapeVisualPolicy.GridStrokeWidthPx;
                 Dictionary<string, string> overrideValues = applyTextOverrides
                     ? BuildCadTextOverrideMap(dimensionText)
                     : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -451,28 +452,13 @@ namespace OVIA.Desktop
                 return baseFont == null ? CadTextFontSizePt : baseFont.SizeInPoints;
             }
 
-            double elementTextScale = Math.Max(0.25D, Math.Min(8D, element.TextScale));
-            float requestedSize = Math.Max(
-                MinimumCadTextFontSizePt,
-                Math.Min(72F, baseFont.SizeInPoints * (float)elementTextScale)
+            // CAD 원본 height/bounds는 도면별 문자단위 편차가 크므로 화면 폰트 크기의 하한을
+            // 결정하는 용도로 사용하지 않습니다. 1840은 보이는데 160/1550만 사라지는 현상은
+            // 이 원본 높이를 그대로 축소 배율에 반영하면서 발생했습니다.
+            double elementTextScale = CadShapeVisualPolicy.ClampTextScale(element.TextScale);
+            float requestedSize = CadShapeVisualPolicy.ClampGridFontSize(
+                baseFont.SizeInPoints * (float)elementTextScale
             );
-
-            if (useSourceCellLayout && useCadSourceTextMetrics && element.Height > 0.0001 && coordinateScale > 0.0001)
-            {
-                /*
-                 * CAD 문자 높이를 현재 SOURCE_CELL 단일 배율로 변환합니다.
-                 * 기존처럼 모든 문자를 무조건 8pt로 그리면 CAD에서 작게 배치된 설명문자가
-                 * 철근선보다 과도하게 커지고 셀 왼쪽으로 튀어나옵니다. 8pt는 최대 상한으로만
-                 * 유지하고, 원본 CAD 높이가 더 작을 때는 원본 비율을 우선합니다.
-                 */
-                float sourceHeightPoints = (float)(element.Height * coordinateScale * 72.0 / Math.Max(g.DpiY, 1F));
-                sourceHeightPoints *= (float)elementTextScale;
-
-                if (sourceHeightPoints > 0.1F)
-                {
-                    requestedSize = Math.Min(requestedSize, Math.Max(MinimumCadTextFontSizePt, sourceHeightPoints));
-                }
-            }
 
             if (!useCadSourceTextMetrics || !element.HasBounds || String.IsNullOrEmpty(text))
             {
@@ -505,8 +491,7 @@ namespace OVIA.Desktop
 
                 if (fitRatio < 0.999)
                 {
-                    requestedSize = Math.Max(
-                        MinimumCadTextFontSizePt,
+                    requestedSize = CadShapeVisualPolicy.ClampGridFontSize(
                         (float)(requestedSize * fitRatio)
                     );
                 }

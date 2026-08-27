@@ -94,14 +94,7 @@ namespace OVIA.Desktop
 
         public static string GetProjectDirectory(OviaProjectInfo project)
         {
-            string key = SanitizeFileName(project.ProjectNo + "_" + project.ProjectName);
-
-            if (key == "_")
-            {
-                key = "NoProject";
-            }
-
-            return Path.Combine(GetBaseDirectory(), "Projects", key);
+            return OviaProjectWorkspacePaths.GetProjectDirectory(project == null ? "" : project.ProjectNo);
         }
 
         public static string GetProjectBarListDirectory(OviaProjectInfo project)

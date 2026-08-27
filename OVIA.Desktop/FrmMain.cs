@@ -29,8 +29,8 @@ namespace OVIA.Desktop
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
-        private readonly string companyId;
-        private readonly string userId;
+        private string companyId;
+        private string userId;
 
         private Label lblAutoCadValue;
         private Label lblAutoCadNote;
@@ -131,6 +131,51 @@ namespace OVIA.Desktop
                 userId);
 
             BuildMainUI();
+        }
+
+        /// <summary>
+        /// 이미 실행 중인 OVIA와 ERP Launch 사용자가 다를 때 기존 메인 Form을 종료하지 않고
+        /// ERP Launch 사용자를 현재 세션으로 전환합니다. 기존 사용자 화면/탐색 기록은 재사용하지 않습니다.
+        /// </summary>
+        public void SwitchToErpLaunchUser(string newCompanyId, string newUserId)
+        {
+            newCompanyId = newCompanyId == null ? string.Empty : newCompanyId.Trim();
+            newUserId = newUserId == null ? string.Empty : newUserId.Trim();
+
+            if (newCompanyId == string.Empty || newUserId == string.Empty)
+            {
+                return;
+            }
+
+            CloseCurrentScreenForConfirmedClose();
+
+            // ERP Launch 사용자 전환은 새 사용자 세션이다. 이전 사용자의 로컬 Projects 캐시는 재사용하지 않는다.
+            OviaSessionCacheService.CleanupProjectsCache();
+
+            companyId = newCompanyId;
+            userId = newUserId;
+            dashboardUserInfo = OviaDashboardUserInfo.CreateForSession(companyId, userId, GetLocalIPAddress());
+
+            dashboardWebViewHost = null;
+            dashboardWorkspaceHeader = null;
+            currentNavigationEntry = null;
+            backHistory.Clear();
+            forwardHistory.Clear();
+            suppressNavigationHistory = false;
+            erpLaunchSessionEndedHandled = false;
+            logoutConfirmed = false;
+            systemExitConfirmed = false;
+            IsLogoutRequested = false;
+
+            OviaNotificationStore.AddWorkLog(
+                companyId,
+                userId,
+                "ERP 사용자 전환 로그인",
+                "메인",
+                userId);
+
+            NavigateToProjectManager();
+            Activate();
         }
 
         private void BuildMainUI()
@@ -1849,6 +1894,20 @@ NavigateToBarListMapping();
             );
         }
 
+        /// <summary>
+        /// ERP 외부 실행(딥링크)이 현재 업무화면의 로컬 캐시를 갱신하기 전에
+        /// 기존 화면의 미저장 여부를 먼저 판정하고 화면을 안전하게 닫습니다.
+        ///
+        /// 중요: ERP BarList Pull은 canonical CSV/Shapes 캐시를 재생성/정리할 수 있으므로
+        /// 열린 FrmBarList가 그 파일을 참조하는 동안 Pull을 먼저 실행하면 저장 완료 화면도
+        /// 형상 fingerprint가 바뀐 것으로 오판하거나 현재 Shape 파일이 정리될 수 있습니다.
+        /// 외부 launch는 반드시 이 메서드가 성공한 뒤에 ERP Pull을 수행해야 합니다.
+        /// </summary>
+        public bool PrepareForExternalLaunchNavigation()
+        {
+            return CloseCurrentScreenForNavigation();
+        }
+
         public void NavigateToBarList(string projectNo, string projectName, string clientName, string projectStatus, string initialFilePath)
         {
             string filePath = initialFilePath == null ? "" : initialFilePath;
@@ -2532,6 +2591,10 @@ ShowWorkspaceScreenWithHistory(
             {
                 OviaErpAuthenticationService.ClearSession();
             }
+
+            // 메인 사용자 세션이 끝나는 순간 Projects 작업 캐시를 비운다.
+            // 일반 종료뿐 아니라 로그아웃 후 로그인 화면으로 돌아가는 경우에도 이전 사용자 캐시를 남기지 않는다.
+            OviaSessionCacheService.CleanupProjectsCache();
 
             base.OnFormClosed(e);
         }

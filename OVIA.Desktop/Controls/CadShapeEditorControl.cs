@@ -26,8 +26,8 @@ namespace OVIA.Desktop
         private const float MaxZoom = 8F;
         private const float EndpointSnapThreshold = 12F;
         private const double MaxManualAngleSweep = 270D;
-        private const double MinTextScale = 0.25D;
-        private const double MaxTextScale = 8D;
+        private const double MinTextScale = CadShapeVisualPolicy.MinimumTextScale;
+        private const double MaxTextScale = CadShapeVisualPolicy.MaximumTextScale;
         private const int CadCurveObjectMinimumSegments = 3;
         private const double CadCurveObjectMinimumTurnDegrees = 5D;
         private const double CadCurveObjectMaximumJoinDegrees = 45D;
@@ -1572,7 +1572,10 @@ namespace OVIA.Desktop
             text.Text = "값";
             text.X1 = world.X;
             text.Y1 = world.Y;
-            text.Height = 3D;
+            // 새 문자는 현재 형상과 자연스럽게 맞는 표준 크기에서 시작합니다.
+            // 실제 확대/축소는 TextScale만 변경하며 아래 정책 범위를 벗어나지 않습니다.
+            text.Height = CadShapeVisualPolicy.EditorCanonicalTextHeight;
+            text.TextScale = 1D;
             text.Rotation = 0D;
             document.Elements.Add(text);
             document.EnsureTextIds();
@@ -4514,13 +4517,14 @@ namespace OVIA.Desktop
 
         private float GetTextFontSize(CadShapeEditElement element)
         {
-            double elementHeight = element == null ? 2.5D : Math.Max(element.Height, 0.1D);
-            double heightFactor = Math.Sqrt(Math.Max(0.55D, Math.Min(3D, elementHeight / 2.5D)));
+            // CAD 원본의 height 값은 도면/블록마다 단위 편차가 커서 화면 폰트 크기로 직접 쓰지 않습니다.
+            // 편집 화면에서는 동일한 기준 크기 + 제한된 TextScale만 사용하여
+            // 160/1550 같은 치수문자가 지나치게 작아지거나 한 문자만 과도하게 커지는 것을 막습니다.
             double textScale = element == null
                 ? 1D
-                : Math.Max(MinTextScale, Math.Min(MaxTextScale, element.TextScale));
+                : CadShapeVisualPolicy.ClampTextScale(element.TextScale);
             float zoomRatio = zoom / DefaultFitZoom;
-            float size = (float)(12F * zoomRatio * heightFactor * textScale);
+            float size = (float)(CadShapeVisualPolicy.EditorBaseTextSizePt * zoomRatio * textScale);
             return Math.Max(5F, Math.Min(180F, size));
         }
 

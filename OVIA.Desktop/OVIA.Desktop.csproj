@@ -80,6 +80,7 @@
     <Compile Include="Services\BarListExcelExporter.cs" />
     <Compile Include="Services\RebarShapeRenderer.cs" />
     <Compile Include="Services\CadShapeRenderer.cs" />
+    <Compile Include="Services\CadShapeVisualPolicy.cs" />
     <Compile Include="Services\CadShapeDisplayNormalizer.cs" />
     <Compile Include="Services\OviaEnvironmentChecker.cs" />
     <Compile Include="Services\OviaFontManager.cs" />
@@ -93,6 +94,8 @@
     <Compile Include="Services\OviaSingleInstanceService.cs" />
     <Compile Include="Services\OviaErpApiService.cs" />
     <Compile Include="Services\OviaErpBarListSyncService.cs" />
+    <Compile Include="Services\OviaProjectWorkspacePaths.cs" />
+    <Compile Include="Services\OviaSessionCacheService.cs" />
     <Compile Include="Services\OviaBackupRestoreService.cs" />
     <Compile Include="Services\OviaMasterRecoveryService.cs" />
     <Compile Include="Services\OviaWindowCaptionTheme.cs" />
