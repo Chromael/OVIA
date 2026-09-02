@@ -3488,20 +3488,769 @@ ShowWorkspaceScreenWithHistory(
         }
     }
 
+    public sealed class AutoCadRuntimeInfo
+    {
+        public int ProcessId { get; set; }
+        public int Year { get; set; }
+        public string BuildVersion { get; set; }
+        public string ProductName { get; set; }
+        public string ExecutablePath { get; set; }
+
+        public AutoCadRuntimeInfo()
+        {
+            BuildVersion = "";
+            ProductName = "";
+            ExecutablePath = "";
+        }
+
+        public string DisplayText
+        {
+            get
+            {
+                if (Year > 0 && !string.IsNullOrWhiteSpace(BuildVersion))
+                {
+                    return Year.ToString() + " · Build " + BuildVersion.Trim();
+                }
+
+                if (Year > 0)
+                {
+                    return Year.ToString();
+                }
+
+                if (!string.IsNullOrWhiteSpace(BuildVersion))
+                {
+                    return "Build " + BuildVersion.Trim();
+                }
+
+                return "실행 중";
+            }
+        }
+
+        public string PluginAssemblyName
+        {
+            get
+            {
+                if (Year > 0)
+                {
+                    return "OVIA.AutoCAD." + Year.ToString() + ".dll";
+                }
+
+                return "OVIA.AutoCAD.dll";
+            }
+        }
+    }
+
     public static class AutoCadRuntimeChecker
     {
+        private static readonly object AutoCadProcessWatchSync = new object();
+        private static readonly Dictionary<int, Process> AutoCadWatchedProcesses = new Dictionary<int, Process>();
+
+        public static event EventHandler AutoCadRuntimeStateChanged;
+
+        /// <summary>
+        /// 실행 중인 acad.exe에 Process.Exited를 연결합니다.
+        /// 기존 UI Timer는 AutoCAD 시작 감지/안전 보정용으로 유지하고,
+        /// 종료는 이 이벤트를 통해 즉시 전달합니다.
+        /// </summary>
+        public static void RefreshProcessExitMonitoring()
+        {
+            Process[] processes;
+
+            try
+            {
+                processes = Process.GetProcessesByName("acad");
+            }
+            catch
+            {
+                return;
+            }
+
+            if (processes == null)
+            {
+                return;
+            }
+
+            int i;
+
+            for (i = 0; i < processes.Length; i++)
+            {
+                Process process = processes[i];
+                bool keepProcess = false;
+
+                try
+                {
+                    int processId = process.Id;
+
+                    lock (AutoCadProcessWatchSync)
+                    {
+                        if (!AutoCadWatchedProcesses.ContainsKey(processId))
+                        {
+                            process.EnableRaisingEvents = true;
+                            process.Exited += AutoCadProcess_Exited;
+                            AutoCadWatchedProcesses.Add(processId, process);
+                            keepProcess = true;
+                        }
+                    }
+
+                    if (keepProcess)
+                    {
+                        bool alreadyExited = false;
+
+                        try
+                        {
+                            alreadyExited = process.HasExited;
+                        }
+                        catch
+                        {
+                        }
+
+                        if (alreadyExited)
+                        {
+                            AutoCadProcess_Exited(process, EventArgs.Empty);
+                        }
+                    }
+                }
+                catch
+                {
+                }
+                finally
+                {
+                    if (!keepProcess)
+                    {
+                        try
+                        {
+                            process.Dispose();
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+            }
+        }
+
+        private static void AutoCadProcess_Exited(object sender, EventArgs e)
+        {
+            Process process = sender as Process;
+
+            if (process != null)
+            {
+                int processId = -1;
+
+                try
+                {
+                    processId = process.Id;
+                }
+                catch
+                {
+                }
+
+                lock (AutoCadProcessWatchSync)
+                {
+                    if (processId >= 0 && AutoCadWatchedProcesses.ContainsKey(processId))
+                    {
+                        AutoCadWatchedProcesses.Remove(processId);
+                    }
+                    else
+                    {
+                        int foundId = -1;
+
+                        foreach (KeyValuePair<int, Process> pair in AutoCadWatchedProcesses)
+                        {
+                            if (Object.ReferenceEquals(pair.Value, process))
+                            {
+                                foundId = pair.Key;
+                                break;
+                            }
+                        }
+
+                        if (foundId >= 0)
+                        {
+                            AutoCadWatchedProcesses.Remove(foundId);
+                        }
+                    }
+                }
+
+                try
+                {
+                    process.Exited -= AutoCadProcess_Exited;
+                    process.Dispose();
+                }
+                catch
+                {
+                }
+            }
+
+            EventHandler handler = AutoCadRuntimeStateChanged;
+
+            if (handler != null)
+            {
+                try
+                {
+                    handler(null, EventArgs.Empty);
+                }
+                catch
+                {
+                }
+            }
+        }
+
         public static bool IsAutoCadRunning()
         {
             try
             {
                 Process[] processes = Process.GetProcessesByName("acad");
+                bool isRunning = processes != null && processes.Length > 0;
 
-                return processes != null && processes.Length > 0;
+                if (processes != null)
+                {
+                    int i;
+
+                    for (i = 0; i < processes.Length; i++)
+                    {
+                        try
+                        {
+                            processes[i].Dispose();
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+
+                return isRunning;
             }
             catch
             {
                 return false;
             }
+        }
+
+        public static bool TryGetRunningAutoCadVersionText(out string versionText)
+        {
+            versionText = "";
+            AutoCadRuntimeInfo runtimeInfo;
+            bool isRunning = TryGetRunningAutoCadRuntimeInfo(out runtimeInfo);
+
+            if (runtimeInfo != null && runtimeInfo.Year > 0)
+            {
+                versionText = runtimeInfo.Year.ToString();
+            }
+
+            return isRunning;
+        }
+
+        /// <summary>
+        /// 현재 실행 중인 AutoCAD 중 UI 대표값을 반환합니다.
+        /// 여러 버전이 동시에 실행 중이면 기존 정책과 동일하게 가장 높은 연도를 우선합니다.
+        /// </summary>
+        public static bool TryGetRunningAutoCadRuntimeInfo(out AutoCadRuntimeInfo runtimeInfo)
+        {
+            runtimeInfo = null;
+            List<AutoCadRuntimeInfo> runtimeInfos = GetRunningAutoCadRuntimeInfos();
+
+            if (runtimeInfos == null || runtimeInfos.Count == 0)
+            {
+                return false;
+            }
+
+            runtimeInfo = runtimeInfos[0];
+            return true;
+        }
+
+        /// <summary>
+        /// 실행 중인 acad.exe를 각각 조사하여 제품 연도와 실제 Product/File Build를 반환합니다.
+        /// 지원정보 복사에서는 이 목록을 사용해 여러 AutoCAD 버전이 동시에 실행 중이어도
+        /// 버전별 정보를 별도 행으로 남깁니다.
+        /// </summary>
+        public static List<AutoCadRuntimeInfo> GetRunningAutoCadRuntimeInfos()
+        {
+            List<AutoCadRuntimeInfo> results = new List<AutoCadRuntimeInfo>();
+            Process[] processes;
+
+            try
+            {
+                processes = Process.GetProcessesByName("acad");
+            }
+            catch
+            {
+                return results;
+            }
+
+            if (processes == null || processes.Length == 0)
+            {
+                return results;
+            }
+
+            int i;
+
+            for (i = 0; i < processes.Length; i++)
+            {
+                Process process = processes[i];
+
+                try
+                {
+                    AutoCadRuntimeInfo info = CreateAutoCadRuntimeInfo(process);
+
+                    if (info != null)
+                    {
+                        results.Add(info);
+                    }
+                }
+                catch
+                {
+                }
+                finally
+                {
+                    try
+                    {
+                        if (process != null)
+                        {
+                            process.Dispose();
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            results.Sort(delegate (AutoCadRuntimeInfo a, AutoCadRuntimeInfo b)
+            {
+                int yearCompare = b.Year.CompareTo(a.Year);
+
+                if (yearCompare != 0)
+                {
+                    return yearCompare;
+                }
+
+                int buildCompare = string.Compare(b.BuildVersion, a.BuildVersion, StringComparison.OrdinalIgnoreCase);
+
+                if (buildCompare != 0)
+                {
+                    return buildCompare;
+                }
+
+                return b.ProcessId.CompareTo(a.ProcessId);
+            });
+
+            return results;
+        }
+
+        private static AutoCadRuntimeInfo CreateAutoCadRuntimeInfo(Process process)
+        {
+            if (process == null)
+            {
+                return null;
+            }
+
+            AutoCadRuntimeInfo info = new AutoCadRuntimeInfo();
+
+            try
+            {
+                info.ProcessId = process.Id;
+            }
+            catch
+            {
+                info.ProcessId = 0;
+            }
+
+            string executablePath = TryGetProcessExecutablePath(process);
+            info.ExecutablePath = executablePath;
+
+            FileVersionInfo fileInfo = TryGetAutoCadFileVersionInfo(process, executablePath);
+
+            if (fileInfo != null)
+            {
+                info.ProductName = fileInfo.ProductName ?? "";
+                info.BuildVersion = ExtractAutoCadBuildVersion(fileInfo);
+                info.Year = ExtractAutoCadYear(
+                    (fileInfo.ProductName ?? "") + " "
+                    + (fileInfo.ProductVersion ?? "") + " "
+                    + (fileInfo.FileDescription ?? "") + " "
+                    + (fileInfo.FileVersion ?? "")
+                );
+
+                if (info.Year <= 0)
+                {
+                    info.Year = MapAutoCadReleaseToYear(fileInfo.FileMajorPart, fileInfo.FileMinorPart);
+                }
+            }
+
+            if (info.Year <= 0)
+            {
+                List<string> runningExecutablePaths = new List<string>();
+
+                if (!string.IsNullOrWhiteSpace(executablePath))
+                {
+                    runningExecutablePaths.Add(executablePath);
+                }
+
+                info.Year = DetectAutoCadYearFromInstalledProducts(runningExecutablePaths);
+            }
+
+            return info;
+        }
+
+        private static FileVersionInfo TryGetAutoCadFileVersionInfo(Process process, string executablePath)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(executablePath) && System.IO.File.Exists(executablePath))
+                {
+                    return FileVersionInfo.GetVersionInfo(executablePath);
+                }
+
+                if (process != null && process.MainModule != null)
+                {
+                    return process.MainModule.FileVersionInfo;
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private static string ExtractAutoCadBuildVersion(FileVersionInfo fileInfo)
+        {
+            if (fileInfo == null)
+            {
+                return "";
+            }
+
+            string productBuild = ExtractFourPartVersion(fileInfo.ProductVersion);
+            string fileBuild = ExtractFourPartVersion(fileInfo.FileVersion);
+            string build = ChooseMoreSpecificBuildVersion(productBuild, fileBuild);
+
+            if (build != "")
+            {
+                return build;
+            }
+
+            if (fileInfo.FileMajorPart > 0)
+            {
+                return fileInfo.FileMajorPart.ToString() + "."
+                    + fileInfo.FileMinorPart.ToString() + "."
+                    + fileInfo.FileBuildPart.ToString() + "."
+                    + fileInfo.FilePrivatePart.ToString();
+            }
+
+            return "";
+        }
+
+        private static string ChooseMoreSpecificBuildVersion(string productBuild, string fileBuild)
+        {
+            if (string.IsNullOrWhiteSpace(productBuild))
+            {
+                return fileBuild == null ? "" : fileBuild;
+            }
+
+            if (string.IsNullOrWhiteSpace(fileBuild))
+            {
+                return productBuild;
+            }
+
+            try
+            {
+                Version productVersion;
+                Version fileVersion;
+
+                if (Version.TryParse(productBuild, out productVersion) && Version.TryParse(fileBuild, out fileVersion))
+                {
+                    if (productVersion.Major == fileVersion.Major && productVersion.Minor == fileVersion.Minor)
+                    {
+                        return fileVersion.CompareTo(productVersion) > 0 ? fileBuild : productBuild;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return !string.IsNullOrWhiteSpace(fileBuild) ? fileBuild : productBuild;
+        }
+
+        private static string ExtractFourPartVersion(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return "";
+            }
+
+            Match match = Regex.Match(text, @"(?<!\d)(\d{2,3}\.\d+\.\d+\.\d+)(?!\d)");
+            return match.Success ? match.Groups[1].Value : "";
+        }
+
+        public static bool TryGetInstalledOviaPluginFileInfo(int year, out string fileVersion, out string pluginPath)
+        {
+            fileVersion = "";
+            pluginPath = "";
+
+            if (year <= 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+
+                if (string.IsNullOrWhiteSpace(programFiles))
+                {
+                    return false;
+                }
+
+                pluginPath = System.IO.Path.Combine(
+                    programFiles,
+                    "Autodesk",
+                    "ApplicationPlugins",
+                    "OVIA.bundle",
+                    "Contents",
+                    year.ToString(),
+                    "OVIA.AutoCAD." + year.ToString() + ".dll"
+                );
+
+                if (!System.IO.File.Exists(pluginPath))
+                {
+                    return false;
+                }
+
+                FileVersionInfo pluginFileInfo = FileVersionInfo.GetVersionInfo(pluginPath);
+                fileVersion = pluginFileInfo.FileVersion ?? "";
+
+                if (string.IsNullOrWhiteSpace(fileVersion))
+                {
+                    fileVersion = pluginFileInfo.ProductVersion ?? "";
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string TryGetProcessExecutablePath(Process process)
+        {
+            if (process == null)
+            {
+                return "";
+            }
+
+            try
+            {
+                if (process.MainModule != null)
+                {
+                    return process.MainModule.FileName ?? "";
+                }
+            }
+            catch
+            {
+            }
+
+            return "";
+        }
+
+        private static int DetectAutoCadYearFromProcess(Process process, string executablePath)
+        {
+            FileVersionInfo fileInfo = null;
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(executablePath) && System.IO.File.Exists(executablePath))
+                {
+                    fileInfo = FileVersionInfo.GetVersionInfo(executablePath);
+                }
+                else if (process != null && process.MainModule != null)
+                {
+                    fileInfo = process.MainModule.FileVersionInfo;
+                }
+            }
+            catch
+            {
+                fileInfo = null;
+            }
+
+            if (fileInfo == null)
+            {
+                return 0;
+            }
+
+            int year = ExtractAutoCadYear(
+                (fileInfo.ProductName ?? "") + " "
+                + (fileInfo.ProductVersion ?? "") + " "
+                + (fileInfo.FileDescription ?? "") + " "
+                + (fileInfo.FileVersion ?? "")
+            );
+
+            if (year > 0)
+            {
+                return year;
+            }
+
+            return MapAutoCadReleaseToYear(fileInfo.FileMajorPart, fileInfo.FileMinorPart);
+        }
+
+        private static int DetectAutoCadYearFromInstalledProducts(List<string> runningExecutablePaths)
+        {
+            try
+            {
+                List<AutoCadInstallInfo> installs = AutoCadDetector.FindInstalledAutoCad();
+
+                if (installs == null || installs.Count == 0)
+                {
+                    return 0;
+                }
+
+                int validInstallCount = 0;
+                int onlyInstalledYear = 0;
+                int i;
+
+                for (i = 0; i < installs.Count; i++)
+                {
+                    AutoCadInstallInfo install = installs[i];
+
+                    if (install == null || install.IsLT || install.Year <= 0)
+                    {
+                        continue;
+                    }
+
+                    validInstallCount++;
+                    onlyInstalledYear = install.Year;
+
+                    if (IsRunningPathInsideInstall(runningExecutablePaths, install.InstallPath))
+                    {
+                        return install.Year;
+                    }
+                }
+
+                if (validInstallCount == 1)
+                {
+                    return onlyInstalledYear;
+                }
+            }
+            catch
+            {
+            }
+
+            return 0;
+        }
+
+        private static bool IsRunningPathInsideInstall(List<string> runningExecutablePaths, string installPath)
+        {
+            if (runningExecutablePaths == null || runningExecutablePaths.Count == 0 || string.IsNullOrWhiteSpace(installPath))
+            {
+                return false;
+            }
+
+            string normalizedInstallPath;
+
+            try
+            {
+                normalizedInstallPath = System.IO.Path.GetFullPath(installPath.Trim().Trim('"')).TrimEnd('\\', '/');
+            }
+            catch
+            {
+                normalizedInstallPath = installPath.Trim().Trim('"').TrimEnd('\\', '/');
+            }
+
+            if (normalizedInstallPath == "")
+            {
+                return false;
+            }
+
+            int i;
+
+            for (i = 0; i < runningExecutablePaths.Count; i++)
+            {
+                string runningPath = runningExecutablePaths[i];
+
+                if (string.IsNullOrWhiteSpace(runningPath))
+                {
+                    continue;
+                }
+
+                string normalizedRunningPath;
+
+                try
+                {
+                    normalizedRunningPath = System.IO.Path.GetFullPath(runningPath);
+                }
+                catch
+                {
+                    normalizedRunningPath = runningPath;
+                }
+
+                if (normalizedRunningPath.StartsWith(normalizedInstallPath + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(System.IO.Path.GetDirectoryName(normalizedRunningPath), normalizedInstallPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static int ExtractAutoCadYear(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return 0;
+            }
+
+            Match match = Regex.Match(text, @"(?<!\d)(20\d{2})(?!\d)");
+
+            if (!match.Success)
+            {
+                return 0;
+            }
+
+            int year;
+
+            if (!int.TryParse(match.Groups[1].Value, out year))
+            {
+                return 0;
+            }
+
+            return year >= 2010 && year <= 2099 ? year : 0;
+        }
+
+        private static int MapAutoCadReleaseToYear(int major, int minor)
+        {
+            if (major == 23 && minor == 0)
+            {
+                return 2019;
+            }
+
+            if (major == 23 && minor == 1)
+            {
+                return 2020;
+            }
+
+            if (major == 24 && minor >= 0 && minor <= 3)
+            {
+                return 2021 + minor;
+            }
+
+            if (major == 25 && minor == 0)
+            {
+                return 2025;
+            }
+
+            if (major == 25 && minor == 1)
+            {
+                return 2026;
+            }
+
+            if (major == 26 && minor == 0)
+            {
+                return 2027;
+            }
+
+            return 0;
         }
     }
 

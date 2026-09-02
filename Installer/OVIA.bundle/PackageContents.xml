@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ApplicationPackage SchemaVersion="1.0" AppVersion="1.0.0.0" ProductCode="{D89A9637-139E-46B1-9A47-96C453E78573}" Name="OVIA AutoCAD Plugin" Description="OVIA CAD extraction commands" Author="CELMON">
+  <CompanyDetails Name="CELMON" />
+  <Components Description="AutoCAD 2024">
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R24.3" SeriesMax="R24.3" />
+    <ComponentEntry AppName="OVIA AutoCAD 2024" ModuleName="./Contents/2024/OVIA.AutoCAD.2024.dll" PerDocument="False" LoadReasons="LoadOnCommandInvocation">
+      <Commands GroupName="OVIA">
+        <Command Global="OVIABOX" Local="OVIABOX" />
+        <Command Global="OVIABOXBOTTOM" Local="OVIABOXBOTTOM" />
+        <Command Global="OVIABOXCSV" Local="OVIABOXCSV" />
+        <Command Global="OVIABOXDEBUG" Local="OVIABOXDEBUG" />
+        <Command Global="OVIABOXDEL" Local="OVIABOXDEL" />
+        <Command Global="OVIABOXFIX" Local="OVIABOXFIX" />
+        <Command Global="OVIABOXLEFT" Local="OVIABOXLEFT" />
+        <Command Global="OVIABOXMOVE" Local="OVIABOXMOVE" />
+        <Command Global="OVIABOXRIGHT" Local="OVIABOXRIGHT" />
+        <Command Global="OVIABOXTABLE" Local="OVIABOXTABLE" />
+        <Command Global="OVIABOXTOP" Local="OVIABOXTOP" />
+        <Command Global="OVIADWGINFO" Local="OVIADWGINFO" />
+        <Command Global="OVIAGRIDTABLE" Local="OVIAGRIDTABLE" />
+        <Command Global="OVIAHELLO" Local="OVIAHELLO" />
+        <Command Global="OVIATEXTCSV" Local="OVIATEXTCSV" />
+        <Command Global="OVIATEXTSCAN" Local="OVIATEXTSCAN" />
+        <Command Global="OVIATITLETEXT" Local="OVIATITLETEXT" />
+      </Commands>
+    </ComponentEntry>
+  </Components>
+  <Components Description="AutoCAD 2027">
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R26.0" SeriesMax="R26.0" />
+    <ComponentEntry AppName="OVIA AutoCAD 2027" ModuleName="./Contents/2027/OVIA.AutoCAD.2027.dll" PerDocument="False" LoadReasons="LoadOnCommandInvocation">
+      <Commands GroupName="OVIA">
+        <Command Global="OVIABOX" Local="OVIABOX" />
+        <Command Global="OVIABOXBOTTOM" Local="OVIABOXBOTTOM" />
+        <Command Global="OVIABOXCSV" Local="OVIABOXCSV" />
+        <Command Global="OVIABOXDEBUG" Local="OVIABOXDEBUG" />
+        <Command Global="OVIABOXDEL" Local="OVIABOXDEL" />
+        <Command Global="OVIABOXFIX" Local="OVIABOXFIX" />
+        <Command Global="OVIABOXLEFT" Local="OVIABOXLEFT" />
+        <Command Global="OVIABOXMOVE" Local="OVIABOXMOVE" />
+        <Command Global="OVIABOXRIGHT" Local="OVIABOXRIGHT" />
+        <Command Global="OVIABOXTABLE" Local="OVIABOXTABLE" />
+        <Command Global="OVIABOXTOP" Local="OVIABOXTOP" />
+        <Command Global="OVIADWGINFO" Local="OVIADWGINFO" />
+        <Command Global="OVIAGRIDTABLE" Local="OVIAGRIDTABLE" />
+        <Command Global="OVIAHELLO" Local="OVIAHELLO" />
+        <Command Global="OVIATEXTCSV" Local="OVIATEXTCSV" />
+        <Command Global="OVIATEXTSCAN" Local="OVIATEXTSCAN" />
+        <Command Global="OVIATITLETEXT" Local="OVIATITLETEXT" />
+      </Commands>
+    </ComponentEntry>
+  </Components>
+</ApplicationPackage>

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Text;
 using System.Windows.Forms;
 using OVIA.Desktop.Controls;
 
@@ -17,9 +18,19 @@ namespace OVIA.Desktop
         private OviaCheckBox chkIncludeDone;
         private DataGridView grid;
         private Label lblStatus;
+        private Panel sessionInfoPanel;
         private Label lblSessionInfo;
+        private Label lblAutoCadInfo;
+        private AutoCadRuntimeInfo currentAutoCadRuntimeInfo;
+        private OviaWorkspaceHeader workspaceHeader;
         private Panel pagerPanel;
         private ToolTip windowToolTip;
+        private ContextMenuStrip supportInfoContextMenu;
+
+        private string currentSessionCompanyId = "";
+        private string currentSessionUserId = "";
+        private string currentSessionUserName = "";
+        private string currentSessionIpAddress = "";
 
         private readonly Color BrandIndigo = OviaFluentTheme.AccentHover;
         private readonly Color BrandViolet = OviaFluentTheme.Accent;
@@ -49,6 +60,8 @@ namespace OVIA.Desktop
         {
             this.companyId = companyId;
             this.userId = userId;
+            currentSessionCompanyId = companyId == null ? "" : companyId.Trim();
+            currentSessionUserId = userId == null ? "" : userId.Trim();
 
             BuildUI();
             this.Shown += FrmProjectManager_Shown;
@@ -232,7 +245,7 @@ namespace OVIA.Desktop
 
         private void BuildExplorerHeader(Control parent, string pathText)
         {
-            OviaWorkspaceHeader.AddTo(
+            workspaceHeader = OviaWorkspaceHeader.AddTo(
                 parent,
                 pathText,
                 delegate { NavigateToMain(); },
@@ -246,6 +259,17 @@ namespace OVIA.Desktop
                     NavigateByWorkspacePath(target);
                 }
             );
+
+            if (workspaceHeader != null)
+            {
+                workspaceHeader.AutoCadRuntimeStatusChanged += WorkspaceHeader_AutoCadRuntimeStatusChanged;
+            }
+        }
+
+        private void WorkspaceHeader_AutoCadRuntimeStatusChanged(object sender, OviaAutoCadRuntimeStatusChangedEventArgs e)
+        {
+            AutoCadRuntimeInfo runtimeInfo = e != null && e.IsRunning ? e.RuntimeInfo : null;
+            RefreshSessionInfoLabel(runtimeInfo);
         }
 
         private async void FrmProjectManager_Shown(object sender, EventArgs e)
@@ -836,33 +860,118 @@ namespace OVIA.Desktop
                 692
             );
 
+            sessionInfoPanel = new Panel();
+            sessionInfoPanel.Location = new Point(420, 692);
+            sessionInfoPanel.Size = new Size(720, 24);
+            sessionInfoPanel.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            sessionInfoPanel.BackColor = Color.Transparent;
+            sessionInfoPanel.Resize += delegate { ApplySessionInfoLayout(); };
+
             lblSessionInfo = new Label();
-            lblSessionInfo.Location = new Point(660, 692);
-            lblSessionInfo.Size = new Size(480, 24);
-            lblSessionInfo.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            lblSessionInfo.Location = new Point(0, 0);
+            lblSessionInfo.Size = new Size(sessionInfoPanel.Width, 24);
             lblSessionInfo.BackColor = Color.Transparent;
             lblSessionInfo.ForeColor = OviaFluentTheme.TextSecondary;
-            lblSessionInfo.Font = OviaFluentTheme.FontKorean(9F, FontStyle.Regular);
+            lblSessionInfo.Font = OviaFluentTheme.FontKorean(8.8F, FontStyle.Regular);
             lblSessionInfo.TextAlign = ContentAlignment.MiddleRight;
             lblSessionInfo.AutoEllipsis = true;
-            lblSessionInfo.Text = BuildSessionInfoText(companyId, userId, "", "");
-            parent.Controls.Add(lblSessionInfo);
-            lblSessionInfo.BringToFront();
+            lblSessionInfo.Cursor = Cursors.Default;
+
+            lblAutoCadInfo = new Label();
+            lblAutoCadInfo.Location = new Point(sessionInfoPanel.Width, 0);
+            lblAutoCadInfo.Size = new Size(0, 24);
+            lblAutoCadInfo.BackColor = Color.Transparent;
+            lblAutoCadInfo.ForeColor = OviaFluentTheme.TextSecondary;
+            lblAutoCadInfo.Font = OviaFluentTheme.FontKorean(8.8F, FontStyle.Regular);
+            lblAutoCadInfo.TextAlign = ContentAlignment.MiddleRight;
+            lblAutoCadInfo.AutoEllipsis = false;
+            lblAutoCadInfo.Cursor = Cursors.Hand;
+            lblAutoCadInfo.Visible = false;
+
+            supportInfoContextMenu = OviaGridContextMenuFactory.CreateMenu(
+                OviaGridContextMenuFactory.CreateItem("지원정보 복사", delegate { CopySupportInfoToClipboard(); })
+            );
+            lblAutoCadInfo.ContextMenuStrip = supportInfoContextMenu;
+
+            if (windowToolTip != null)
+            {
+                windowToolTip.SetToolTip(lblAutoCadInfo, "우클릭하면 지원정보 복사");
+            }
+
+            sessionInfoPanel.Controls.Add(lblSessionInfo);
+            sessionInfoPanel.Controls.Add(lblAutoCadInfo);
+            parent.Controls.Add(sessionInfoPanel);
+            sessionInfoPanel.BringToFront();
+
+            AutoCadRuntimeInfo initialAutoCadRuntimeInfo;
+            bool isAutoCadRunning = AutoCadRuntimeChecker.TryGetRunningAutoCadRuntimeInfo(out initialAutoCadRuntimeInfo);
+            RefreshSessionInfoLabel(isAutoCadRunning ? initialAutoCadRuntimeInfo : null);
         }
 
         private void UpdateSessionInfo(string sessionCompanyId, string sessionUserId, string sessionUserName, string sessionIpAddress)
         {
+            currentSessionCompanyId = string.IsNullOrWhiteSpace(sessionCompanyId) ? companyId : sessionCompanyId.Trim();
+            currentSessionUserId = string.IsNullOrWhiteSpace(sessionUserId) ? userId : sessionUserId.Trim();
+            currentSessionUserName = sessionUserName == null ? "" : sessionUserName.Trim();
+            currentSessionIpAddress = sessionIpAddress == null ? "" : sessionIpAddress.Trim();
+
+            AutoCadRuntimeInfo runtimeInfo;
+            bool isAutoCadRunning = AutoCadRuntimeChecker.TryGetRunningAutoCadRuntimeInfo(out runtimeInfo);
+            RefreshSessionInfoLabel(isAutoCadRunning ? runtimeInfo : null);
+        }
+
+        private void RefreshSessionInfoLabel(AutoCadRuntimeInfo runtimeInfo)
+        {
+            currentAutoCadRuntimeInfo = runtimeInfo;
+
             if (lblSessionInfo == null || lblSessionInfo.IsDisposed)
             {
                 return;
             }
 
-            string company = string.IsNullOrWhiteSpace(sessionCompanyId) ? companyId : sessionCompanyId.Trim();
-            string user = string.IsNullOrWhiteSpace(sessionUserId) ? userId : sessionUserId.Trim();
-            string name = sessionUserName == null ? "" : sessionUserName.Trim();
-            string ip = sessionIpAddress == null ? "" : sessionIpAddress.Trim();
+            lblSessionInfo.Text = BuildSessionInfoText(
+                currentSessionCompanyId,
+                currentSessionUserId,
+                currentSessionUserName,
+                currentSessionIpAddress
+            );
 
-            lblSessionInfo.Text = BuildSessionInfoText(company, user, name, ip);
+            if (lblAutoCadInfo != null && !lblAutoCadInfo.IsDisposed)
+            {
+                lblAutoCadInfo.Text = runtimeInfo == null ? "" : "  |  AutoCAD " + runtimeInfo.DisplayText;
+            }
+
+            ApplySessionInfoLayout();
+        }
+
+        private void ApplySessionInfoLayout()
+        {
+            if (sessionInfoPanel == null || sessionInfoPanel.IsDisposed
+                || lblSessionInfo == null || lblSessionInfo.IsDisposed
+                || lblAutoCadInfo == null || lblAutoCadInfo.IsDisposed)
+            {
+                return;
+            }
+
+            int panelWidth = Math.Max(0, sessionInfoPanel.ClientSize.Width);
+            int panelHeight = Math.Max(1, sessionInfoPanel.ClientSize.Height);
+            bool showAutoCad = currentAutoCadRuntimeInfo != null && !string.IsNullOrWhiteSpace(lblAutoCadInfo.Text);
+            int autoCadWidth = 0;
+
+            if (showAutoCad)
+            {
+                Size measured = TextRenderer.MeasureText(
+                    lblAutoCadInfo.Text,
+                    lblAutoCadInfo.Font,
+                    new Size(int.MaxValue, panelHeight),
+                    TextFormatFlags.SingleLine | TextFormatFlags.NoPadding
+                );
+                autoCadWidth = Math.Min(panelWidth, Math.Max(1, measured.Width + 4));
+            }
+
+            lblAutoCadInfo.Visible = showAutoCad;
+            lblAutoCadInfo.SetBounds(panelWidth - autoCadWidth, 0, autoCadWidth, panelHeight);
+            lblSessionInfo.SetBounds(0, 0, Math.Max(0, panelWidth - autoCadWidth), panelHeight);
         }
 
         private string BuildSessionInfoText(string sessionCompanyId, string sessionUserId, string sessionUserName, string sessionIpAddress)
@@ -881,6 +990,167 @@ namespace OVIA.Desktop
             return "Biz ID : " + company
                 + "  |  ID : " + userText
                 + "  |  IP : " + ip;
+        }
+
+        private void CopySupportInfoToClipboard()
+        {
+            string supportInfo = BuildSupportInfoText();
+
+            try
+            {
+                Clipboard.SetText(supportInfo);
+                ShowSupportInfoMessage(
+                    "지원정보가 클립보드에 복사되었습니다.\r\n시스템관리자에게 전달해 주세요.",
+                    MessageBoxIcon.Information
+                );
+            }
+            catch (Exception ex)
+            {
+                ShowSupportInfoMessage(
+                    "지원정보를 복사하지 못했습니다.\r\n" + ex.Message,
+                    MessageBoxIcon.Warning
+                );
+            }
+        }
+
+        private void ShowSupportInfoMessage(string message, MessageBoxIcon icon)
+        {
+            if (!IsDisposed && !Disposing && IsHandleCreated)
+            {
+                MessageBox.Show(
+                    this,
+                    message,
+                    "OVIA 지원정보",
+                    MessageBoxButtons.OK,
+                    icon
+                );
+                return;
+            }
+
+            MessageBox.Show(
+                message,
+                "OVIA 지원정보",
+                MessageBoxButtons.OK,
+                icon
+            );
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (lblAutoCadInfo != null && !lblAutoCadInfo.IsDisposed)
+                {
+                    lblAutoCadInfo.ContextMenuStrip = null;
+                }
+
+                if (supportInfoContextMenu != null)
+                {
+                    supportInfoContextMenu.Dispose();
+                    supportInfoContextMenu = null;
+                }
+            }
+
+            base.Dispose(disposing);
+        }
+
+        private string BuildSupportInfoText()
+        {
+            StringBuilder builder = new StringBuilder();
+            string company = string.IsNullOrWhiteSpace(currentSessionCompanyId) ? "-" : currentSessionCompanyId.Trim();
+            string user = string.IsNullOrWhiteSpace(currentSessionUserId) ? "-" : currentSessionUserId.Trim();
+            string name = currentSessionUserName == null ? "" : currentSessionUserName.Trim();
+            string ip = string.IsNullOrWhiteSpace(currentSessionIpAddress) ? "-" : currentSessionIpAddress.Trim();
+            string userText = user;
+
+            if (name != "")
+            {
+                userText += " (" + name + ")";
+            }
+
+            builder.AppendLine("OVIA 지원정보");
+            builder.AppendLine("생성일시 : " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            builder.AppendLine("OVIA Version : " + (string.IsNullOrWhiteSpace(Application.ProductVersion) ? "-" : Application.ProductVersion));
+            builder.AppendLine("Biz ID : " + company);
+            builder.AppendLine("ID : " + userText);
+            builder.AppendLine("IP : " + ip);
+            builder.AppendLine("Windows : " + Environment.OSVersion.VersionString + (Environment.Is64BitOperatingSystem ? " / x64" : " / x86"));
+            builder.AppendLine();
+
+            List<AutoCadRuntimeInfo> runtimeInfos = AutoCadRuntimeChecker.GetRunningAutoCadRuntimeInfos();
+
+            if (runtimeInfos == null || runtimeInfos.Count == 0)
+            {
+                builder.AppendLine("실행 중 AutoCAD : 없음");
+            }
+            else
+            {
+                builder.AppendLine("실행 중 AutoCAD");
+                HashSet<string> emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                int displayIndex = 1;
+                int i;
+
+                for (i = 0; i < runtimeInfos.Count; i++)
+                {
+                    AutoCadRuntimeInfo info = runtimeInfos[i];
+
+                    if (info == null)
+                    {
+                        continue;
+                    }
+
+                    string key = info.Year.ToString() + "|" + (info.BuildVersion ?? "");
+
+                    if (emitted.Contains(key))
+                    {
+                        continue;
+                    }
+
+                    emitted.Add(key);
+                    builder.AppendLine("  AutoCAD #" + displayIndex.ToString() + " : " + info.DisplayText);
+
+                    if (!string.IsNullOrWhiteSpace(info.ProductName))
+                    {
+                        builder.AppendLine("  Product #" + displayIndex.ToString() + " : " + info.ProductName.Trim());
+                    }
+
+                    builder.AppendLine("  CAD Plugin #" + displayIndex.ToString() + " : " + info.PluginAssemblyName);
+                    displayIndex++;
+                }
+            }
+
+            builder.AppendLine();
+            builder.AppendLine("OVIA CAD Plugin 설치정보");
+
+            int[] supportedYears = new int[] { 2024, 2025, 2026, 2027 };
+            int yearIndex;
+
+            for (yearIndex = 0; yearIndex < supportedYears.Length; yearIndex++)
+            {
+                int year = supportedYears[yearIndex];
+                string pluginFileVersion;
+                string pluginPath;
+                bool installed = AutoCadRuntimeChecker.TryGetInstalledOviaPluginFileInfo(year, out pluginFileVersion, out pluginPath);
+                string pluginName = "OVIA.AutoCAD." + year.ToString() + ".dll";
+
+                if (installed)
+                {
+                    builder.Append("  " + year.ToString() + " : " + pluginName + " / 설치됨");
+
+                    if (!string.IsNullOrWhiteSpace(pluginFileVersion))
+                    {
+                        builder.Append(" / File Version " + pluginFileVersion.Trim());
+                    }
+
+                    builder.AppendLine();
+                }
+                else
+                {
+                    builder.AppendLine("  " + year.ToString() + " : " + pluginName + " / 찾을 수 없음");
+                }
+            }
+
+            return builder.ToString().TrimEnd();
         }
 
 

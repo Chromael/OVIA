@@ -1,8 +1,17 @@
-<Solution>
+﻿<Solution>
   <Configurations>
     <Platform Name="Any CPU" />
     <Platform Name="x64" />
   </Configurations>
+  <Project Path="OVIA.AutoCAD.2024/OVIA.AutoCAD.2024.csproj">
+    <Platform Solution="*|x64" Project="x64" />
+  </Project>
+  <Project Path="OVIA.AutoCAD.2025/OVIA.AutoCAD.2025.csproj">
+    <Platform Solution="*|x64" Project="x64" />
+  </Project>
+  <Project Path="OVIA.AutoCAD.2026/OVIA.AutoCAD.2026.csproj">
+    <Platform Solution="*|x64" Project="x64" />
+  </Project>
   <Project Path="OVIA.AutoCAD.2027/OVIA.AutoCAD.2027.csproj">
     <Platform Solution="*|x64" Project="x64" />
   </Project>

@@ -16,6 +16,24 @@ namespace OVIA.Desktop.Controls
         public bool Handled { get; set; }
     }
 
+    public sealed class OviaAutoCadRuntimeStatusChangedEventArgs : EventArgs
+    {
+        public OviaAutoCadRuntimeStatusChangedEventArgs(bool isRunning, OVIA.Desktop.AutoCadRuntimeInfo runtimeInfo)
+        {
+            IsRunning = isRunning;
+            RuntimeInfo = runtimeInfo;
+            VersionText = runtimeInfo != null && runtimeInfo.Year > 0 ? runtimeInfo.Year.ToString() : string.Empty;
+            BuildVersion = runtimeInfo == null || runtimeInfo.BuildVersion == null ? string.Empty : runtimeInfo.BuildVersion;
+            DisplayText = runtimeInfo == null || !isRunning ? string.Empty : runtimeInfo.DisplayText;
+        }
+
+        public bool IsRunning { get; private set; }
+        public string VersionText { get; private set; }
+        public string BuildVersion { get; private set; }
+        public string DisplayText { get; private set; }
+        public OVIA.Desktop.AutoCadRuntimeInfo RuntimeInfo { get; private set; }
+    }
+
     public sealed class OviaWorkspaceHeader : UserControl, IMessageFilter
     {
         private const int HeaderLeft = 34;
@@ -51,6 +69,7 @@ namespace OVIA.Desktop.Controls
         private Label autoCadStatusIcon;
         private Label autoCadStatusLabel;
         private Timer autoCadStatusRefreshTimer;
+        private bool autoCadRuntimeMonitorSubscribed;
         private OviaRoundedPanel addressBar;
         private OviaBreadcrumbLabel breadcrumbLabel;
         private TextBox pathTextBox;
@@ -63,6 +82,7 @@ namespace OVIA.Desktop.Controls
         public event EventHandler RefreshClicked;
         public event EventHandler MainPathClicked;
         public event EventHandler<OviaWorkspacePathClickedEventArgs> PathSegmentClicked;
+        public event EventHandler<OviaAutoCadRuntimeStatusChangedEventArgs> AutoCadRuntimeStatusChanged;
 
         public OviaWorkspaceHeader()
         {
@@ -553,16 +573,33 @@ namespace OVIA.Desktop.Controls
                 return;
             }
 
+            if (!autoCadRuntimeMonitorSubscribed)
+            {
+                OVIA.Desktop.AutoCadRuntimeChecker.AutoCadRuntimeStateChanged += AutoCadRuntimeChecker_AutoCadRuntimeStateChanged;
+                autoCadRuntimeMonitorSubscribed = true;
+            }
+
+            OVIA.Desktop.AutoCadRuntimeChecker.RefreshProcessExitMonitoring();
             RefreshAutoCadStatus();
 
             autoCadStatusRefreshTimer = new Timer();
             autoCadStatusRefreshTimer.Interval = 2000;
-            autoCadStatusRefreshTimer.Tick += delegate { RefreshAutoCadStatus(); };
+            autoCadStatusRefreshTimer.Tick += delegate
+            {
+                OVIA.Desktop.AutoCadRuntimeChecker.RefreshProcessExitMonitoring();
+                RefreshAutoCadStatus();
+            };
             autoCadStatusRefreshTimer.Start();
         }
 
         private void StopAutoCadStatusRefreshTimer()
         {
+            if (autoCadRuntimeMonitorSubscribed)
+            {
+                OVIA.Desktop.AutoCadRuntimeChecker.AutoCadRuntimeStateChanged -= AutoCadRuntimeChecker_AutoCadRuntimeStateChanged;
+                autoCadRuntimeMonitorSubscribed = false;
+            }
+
             if (autoCadStatusRefreshTimer == null)
             {
                 return;
@@ -571,6 +608,29 @@ namespace OVIA.Desktop.Controls
             autoCadStatusRefreshTimer.Stop();
             autoCadStatusRefreshTimer.Dispose();
             autoCadStatusRefreshTimer = null;
+        }
+
+        private void AutoCadRuntimeChecker_AutoCadRuntimeStateChanged(object sender, EventArgs e)
+        {
+            if (IsDisposed || Disposing || !IsHandleCreated)
+            {
+                return;
+            }
+
+            if (InvokeRequired)
+            {
+                try
+                {
+                    BeginInvoke((MethodInvoker)delegate { RefreshAutoCadStatus(); });
+                }
+                catch
+                {
+                }
+
+                return;
+            }
+
+            RefreshAutoCadStatus();
         }
 
         public void RefreshAutoCadStatus()
@@ -582,34 +642,27 @@ namespace OVIA.Desktop.Controls
                 return;
             }
 
-            OVIA.Desktop.OviaEnvironmentReport report = OVIA.Desktop.OviaEnvironmentChecker.CheckForUi();
-            bool isReady = report != null && report.IsCurrentDevelopmentAutoCadReady();
-            Color statusColor;
-
-            if (isReady)
-            {
-                statusColor = OviaFluentTheme.Success;
-            }
-            else if (report != null
-                && report.OverallStatus == OVIA.Desktop.OviaEnvironmentStatus.Warning
-                && report.RecommendedAutoCad != null
-                && report.RecommendedAutoCad.Year != 2027)
-            {
-                statusColor = Color.FromArgb(176, 111, 0);
-            }
-            else
-            {
-                statusColor = OviaFluentTheme.Danger;
-            }
+            OVIA.Desktop.AutoCadRuntimeInfo runningInfo;
+            bool isRunning = OVIA.Desktop.AutoCadRuntimeChecker.TryGetRunningAutoCadRuntimeInfo(out runningInfo);
+            Color statusColor = isRunning ? OviaFluentTheme.Success : OviaFluentTheme.Danger;
 
             autoCadStatusIcon.Text = "\uE7E8";
             autoCadStatusIcon.ForeColor = statusColor;
-            autoCadStatusLabel.Text = isReady ? "AutoCAD ON" : "AutoCAD OFF";
+            autoCadStatusLabel.Text = isRunning ? "AutoCAD ON" : "AutoCAD OFF";
             autoCadStatusLabel.ForeColor = statusColor;
 
-            string detailText = report == null
-                ? "AutoCAD 상태를 확인할 수 없습니다."
-                : report.GetDesktopAutoCadDetailText();
+            string detailText;
+
+            if (isRunning)
+            {
+                detailText = runningInfo == null
+                    ? "AutoCAD가 실행 중입니다."
+                    : "AutoCAD " + runningInfo.DisplayText + "가 실행 중입니다.";
+            }
+            else
+            {
+                detailText = "AutoCAD가 실행 중이 아닙니다.";
+            }
 
             if (toolTip != null)
             {
@@ -621,6 +674,13 @@ namespace OVIA.Desktop.Controls
             autoCadStatusPanel.Invalidate();
             autoCadStatusIcon.Invalidate();
             autoCadStatusLabel.Invalidate();
+
+            EventHandler<OviaAutoCadRuntimeStatusChangedEventArgs> statusChanged = AutoCadRuntimeStatusChanged;
+
+            if (statusChanged != null)
+            {
+                statusChanged(this, new OviaAutoCadRuntimeStatusChangedEventArgs(isRunning, runningInfo));
+            }
         }
 
         private void RefreshErpMenuState()

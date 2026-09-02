@@ -1,52 +1,48 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
-    <AssemblyName>OVIA.AutoCAD.2027</AssemblyName>
-    <RootNamespace>OVIA.AutoCAD._2027</RootNamespace>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>OVIA.AutoCAD.2024</AssemblyName>
+    <RootNamespace>OVIA.AutoCAD._2024</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <Platforms>AnyCPU;x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <AutoCadApiPackageVersion>26.0.0</AutoCadApiPackageVersion>
+    <AutoCadApiPackageVersion>24.3.0</AutoCadApiPackageVersion>
     <!-- Autodesk API는 빌드 시 공식 NuGet 참조만 사용하고 고객 배포물에는 복사하지 않습니다. -->
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
   </PropertyGroup>
-
-  <ItemGroup>
-    <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
-  </ItemGroup>
 
   <!--
     지원 AutoCAD 설치 여부와 무관하게 네 버전 플러그인을 항상 빌드합니다.
     CAD 추출 핵심 소스는 검증된 단일 기준 파일을 링크하여 버전별 fork를 금지합니다.
   -->
   <ItemGroup>
-    <Compile Include="OviaCommands.cs" />
-    <Compile Include="OviaTitleTextCommands.cs" />
+    <Compile Include="..\OVIA.AutoCAD.2027\OviaCommands.cs" Link="OviaCommands.cs" />
+    <Compile Include="..\OVIA.AutoCAD.2027\OviaTitleTextCommands.cs" Link="OviaTitleTextCommands.cs" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="AutoCAD.NET" Version="$(AutoCadApiPackageVersion)" PrivateAssets="all" ExcludeAssets="runtime" />
   </ItemGroup>
 
-  <Target Name="ReportAutoCad2027BuildState" BeforeTargets="CoreCompile">
-    <Message Importance="High" Text="OVIA AutoCAD 2027: Autodesk AutoCAD.NET $(AutoCadApiPackageVersion) API로 빌드합니다. AutoCAD 설치 여부와 무관합니다." />
+  <Target Name="ReportAutoCad2024BuildState" BeforeTargets="CoreCompile">
+    <Message Importance="High" Text="OVIA AutoCAD 2024: Autodesk AutoCAD.NET $(AutoCadApiPackageVersion) API로 빌드합니다. AutoCAD 설치 여부와 무관합니다." />
   </Target>
 
   <!-- Clean 시 과거 stage DLL도 제거하여 실패한 빌드의 오래된 DLL이 Installer에 섞이지 않게 합니다. -->
-  <Target Name="CleanOviaAutoCad2027Bundle" AfterTargets="Clean">
-    <Delete Files="$(MSBuildThisFileDirectory)..\Installer\AutoCADBundle\Contents\2027\OVIA.AutoCAD.2027.dll" />
+  <Target Name="CleanOviaAutoCad2024Bundle" AfterTargets="Clean">
+    <Delete Files="$(MSBuildThisFileDirectory)..\Installer\AutoCADBundle\Contents\2024\OVIA.AutoCAD.2024.dll" />
   </Target>
 
   <!-- Release 성공본만 최종 설치 bundle 준비 폴더에 stage합니다. -->
-  <Target Name="StageOviaAutoCad2027Bundle" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+  <Target Name="StageOviaAutoCad2024Bundle" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
     <PropertyGroup>
-      <OviaBundleStageDir>$(MSBuildThisFileDirectory)..\Installer\AutoCADBundle\Contents\2027</OviaBundleStageDir>
+      <OviaBundleStageDir>$(MSBuildThisFileDirectory)..\Installer\AutoCADBundle\Contents\2024</OviaBundleStageDir>
     </PropertyGroup>
     <MakeDir Directories="$(OviaBundleStageDir)" />
-    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(OviaBundleStageDir)\OVIA.AutoCAD.2027.dll" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(OviaBundleStageDir)\OVIA.AutoCAD.2024.dll" SkipUnchangedFiles="true" />
   </Target>
 
 </Project>

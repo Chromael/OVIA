@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -63,6 +63,13 @@ namespace OVIA.Desktop
             }
         }
 
+        public static bool IsOviaExtractionPluginSupportedYear(int year)
+        {
+            // 현재 실제 빌드/배포 프로젝트가 준비된 버전만 추출 가능으로 판정합니다.
+            // 상단 AutoCAD ON/OFF UI는 이 목록과 무관하게 모든 acad.exe에 공통 적용합니다.
+            return year == 2024 || year == 2027;
+        }
+
         public string GetShortAutoCadText()
         {
             if (RecommendedAutoCad == null)
@@ -95,9 +102,9 @@ namespace OVIA.Desktop
                 return "AutoCAD LT 미지원";
             }
 
-            if (RecommendedAutoCad.Year != 2027)
+            if (!IsOviaExtractionPluginSupportedYear(RecommendedAutoCad.Year))
             {
-                return "버전 확인 필요";
+                return "플러그인 준비 필요";
             }
 
             return IsAutoCadRunning ? "AutoCAD 활성" : "AutoCAD 비활성";
@@ -117,7 +124,7 @@ namespace OVIA.Desktop
 
             if (RecommendedAutoCad == null)
             {
-                return "AutoCAD 정식 버전이 감지되지 않았습니다.";
+                return "AutoCAD가 아직 설치되지 않았습니다. OVIA는 먼저 설치할 수 있으며 AutoCAD 설치 후 플러그인 번들이 자동 감지됩니다.";
             }
 
             if (RecommendedAutoCad.IsLT)
@@ -125,17 +132,17 @@ namespace OVIA.Desktop
                 return "AutoCAD LT는 OVIA 플러그인 연동 대상이 아닙니다.";
             }
 
-            if (RecommendedAutoCad.Year != 2027)
+            if (!IsOviaExtractionPluginSupportedYear(RecommendedAutoCad.Year))
             {
-                return RecommendedAutoCad.ProductName + "\r\n" + RecommendedAutoCad.PluginGroup + "\r\n현재 개발 버전은 AutoCAD 2027용 OVIA 모듈을 우선 사용합니다.";
+                return RecommendedAutoCad.ProductName + "\r\n" + RecommendedAutoCad.PluginGroup + "\r\n현재 배포본에는 이 버전용 OVIA 추출 플러그인이 아직 포함되지 않았습니다.";
             }
 
             if (IsAutoCadRunning)
             {
-                return "AutoCAD 2027이 실행 중입니다. NETLOAD 후 OVIABOX / OVIABOXTABLE 명령어를 사용할 수 있습니다.";
+                return RecommendedAutoCad.ProductName + "이(가) 실행 중입니다. OVIA ApplicationPlugins 번들에서 해당 버전 플러그인을 자동 로드합니다.";
             }
 
-            return "AutoCAD 2027은 감지되었지만 현재 실행 중이 아닙니다.";
+            return RecommendedAutoCad.ProductName + "은(는) 감지되었지만 현재 실행 중이 아닙니다.";
         }
 
         public bool IsCurrentDevelopmentAutoCadReady()
@@ -143,7 +150,7 @@ namespace OVIA.Desktop
             return OverallStatus != OviaEnvironmentStatus.Blocked
                 && RecommendedAutoCad != null
                 && !RecommendedAutoCad.IsLT
-                && RecommendedAutoCad.Year == 2027
+                && IsOviaExtractionPluginSupportedYear(RecommendedAutoCad.Year)
                 && IsAutoCadRunning;
         }
 
@@ -164,9 +171,9 @@ namespace OVIA.Desktop
                 return "현재 감지된 AutoCAD는 LT 버전입니다. OVIA는 AutoCAD 정식 버전에서만 사용할 수 있습니다.";
             }
 
-            if (RecommendedAutoCad.Year != 2027)
+            if (!IsOviaExtractionPluginSupportedYear(RecommendedAutoCad.Year))
             {
-                return "현재 개발 버전은 AutoCAD 2027 기준 OVIA 플러그인으로 우선 테스트합니다.";
+                return "AutoCAD " + RecommendedAutoCad.YearText + "은(는) 감지되었지만 현재 OVIA 설치본에 해당 버전용 추출 플러그인이 포함되어 있지 않습니다.";
             }
 
             if (!IsAutoCadRunning)
@@ -184,7 +191,7 @@ namespace OVIA.Desktop
                 return "AutoCAD 감지 정보가 없습니다.";
             }
 
-            return RecommendedAutoCad.ProductName + " 활성 상태입니다.\r\n\r\nAutoCAD에서 OVIA 플러그인 DLL을 NETLOAD로 로드한 뒤 OVIABOX / OVIABOXTABLE 명령어를 사용할 수 있습니다.";
+            return RecommendedAutoCad.ProductName + " 활성 상태입니다.\r\n\r\nOVIA 설치 프로그램이 ApplicationPlugins 번들에 배치한 해당 버전 플러그인이 자동 로드되며 OVIABOX / OVIABOXTABLE 명령어를 사용할 수 있습니다.";
         }
 
         public string GetDisplayText()
@@ -330,7 +337,16 @@ namespace OVIA.Desktop
         {
             if (cachedReport != null && (DateTime.Now - cachedAt).TotalSeconds < 15)
             {
-                cachedReport.IsAutoCadRunning = AutoCadRuntimeChecker.IsAutoCadRunning();
+                bool isAutoCadRunning = AutoCadRuntimeChecker.IsAutoCadRunning();
+
+                // OVIA를 먼저 실행/설치한 뒤 AutoCAD를 나중에 설치한 경우에도
+                // 기존 "미감지" 캐시가 15초 동안 추출을 막지 않도록 즉시 재탐색합니다.
+                if (isAutoCadRunning && cachedReport.RecommendedAutoCad == null)
+                {
+                    return Check();
+                }
+
+                cachedReport.IsAutoCadRunning = isAutoCadRunning;
                 return cachedReport;
             }
 
@@ -540,10 +556,10 @@ namespace OVIA.Desktop
             {
                 AddIssue(
                     report,
-                    OviaEnvironmentStatus.Blocked,
-                    "AutoCAD 정식 버전이 감지되지 않았습니다.",
-                    "OVIA는 AutoCAD .NET 플러그인 연동을 사용합니다.",
-                    "AutoCAD 2021~2027 정식 버전을 설치한 뒤 다시 시도해 주세요. AutoCAD LT는 지원하지 않습니다."
+                    OviaEnvironmentStatus.Warning,
+                    "AutoCAD 정식 버전이 아직 감지되지 않았습니다.",
+                    "OVIA Desktop은 먼저 설치할 수 있습니다. CAD 추출 기능만 AutoCAD 설치 전까지 사용할 수 없습니다.",
+                    "AutoCAD를 나중에 설치해도 OVIA ApplicationPlugins 번들이 시작 시 자동 감지됩니다. AutoCAD LT는 지원하지 않습니다."
                 );
                 return;
             }
@@ -552,7 +568,7 @@ namespace OVIA.Desktop
             {
                 AddIssue(
                     report,
-                    OviaEnvironmentStatus.Blocked,
+                    OviaEnvironmentStatus.Warning,
                     "지원 가능한 AutoCAD 정식 버전을 찾지 못했습니다.",
                     "AutoCAD LT 또는 지원 정책 밖의 버전만 감지되었습니다.",
                     "AutoCAD 2021~2027 정식 버전 사용을 권장합니다."
@@ -564,7 +580,7 @@ namespace OVIA.Desktop
             {
                 AddIssue(
                     report,
-                    OviaEnvironmentStatus.Blocked,
+                    OviaEnvironmentStatus.Warning,
                     "AutoCAD LT는 지원하지 않습니다.",
                     "OVIA는 AutoCAD .NET API 기반 플러그인 로드가 필요합니다.",
                     "AutoCAD 정식 버전을 사용해 주세요."
@@ -588,33 +604,39 @@ namespace OVIA.Desktop
                 return;
             }
 
+            if (report.RecommendedAutoCad.Year == 2024)
+            {
+                // AutoCAD 2024용 .NET Framework 4.8 OVIA 플러그인 프로젝트/번들 배포가 준비되어 있습니다.
+                return;
+            }
+
             if (report.RecommendedAutoCad.Year >= 2025 && report.RecommendedAutoCad.Year <= 2026)
             {
                 AddIssue(
                     report,
                     OviaEnvironmentStatus.Warning,
                     "AutoCAD 2025~2026 전용 OVIA 플러그인이 필요합니다.",
-                    "현재 개발 기준은 AutoCAD 2027용 OVIA 플러그인입니다.",
-                    "향후 OVIA.AutoCAD.2025_2026.dll을 분리 제공해야 합니다."
+                    "AutoCAD 2025~2026은 .NET 8 계열의 별도 OVIA 플러그인이 필요합니다.",
+                    "해당 버전용 플러그인 프로젝트를 추가한 뒤 같은 ApplicationPlugins 번들에 배포해야 합니다."
                 );
                 return;
             }
 
-            if (report.RecommendedAutoCad.Year >= 2021 && report.RecommendedAutoCad.Year <= 2024)
+            if (report.RecommendedAutoCad.Year >= 2021 && report.RecommendedAutoCad.Year <= 2023)
             {
                 AddIssue(
                     report,
                     OviaEnvironmentStatus.Warning,
-                    "AutoCAD 2021~2024 전용 OVIA 플러그인이 필요합니다.",
-                    "현재 개발 기준은 AutoCAD 2027용 OVIA 플러그인입니다.",
-                    "향후 OVIA.AutoCAD.2021_2024.dll을 분리 제공해야 합니다."
+                    "AutoCAD 2021~2023용 OVIA 플러그인이 아직 필요합니다.",
+                    "현재 실제 배포 준비가 완료된 .NET Framework 4.8 플러그인은 AutoCAD 2024 대상입니다.",
+                    "2021~2023 지원 시 해당 릴리즈 API 기준 프로젝트를 같은 공유 추출소스에서 추가해야 합니다."
                 );
                 return;
             }
 
             AddIssue(
                 report,
-                OviaEnvironmentStatus.Blocked,
+                OviaEnvironmentStatus.Warning,
                 "지원 정책 밖의 AutoCAD 버전입니다.",
                 "감지된 AutoCAD 버전에 대한 OVIA 플러그인 정책이 아직 확정되지 않았습니다.",
                 "AutoCAD 2021~2027 정식 버전 사용을 권장합니다."

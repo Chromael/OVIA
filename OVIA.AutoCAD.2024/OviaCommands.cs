@@ -11,9 +11,9 @@ using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.Runtime;
 
-[assembly: CommandClass(typeof(OVIA.AutoCAD_2027.OviaCommands))]
+[assembly: CommandClass(typeof(OVIA.AutoCAD_2024.OviaCommands))]
 
-namespace OVIA.AutoCAD_2027
+namespace OVIA.AutoCAD_2024
 {
     public class OviaCommands
     {
@@ -140,7 +140,7 @@ namespace OVIA.AutoCAD_2027
 
             ed.WriteMessage("\n");
             ed.WriteMessage("====================================\n");
-            ed.WriteMessage("OVIA AutoCAD 플러그인 로드 성공\n");
+            ed.WriteMessage("OVIA AutoCAD 2024 플러그인 로드 성공\n");
             ed.WriteMessage("명령어 OVIAHELLO가 정상 실행되었습니다.\n");
             ed.WriteMessage("====================================\n");
         }

@@ -3947,7 +3947,7 @@ namespace OVIA.Desktop
                     ? ex.InnerException
                     : ex;
 
-                errorMessage = "AutoCAD 제목 추출 명령을 실행하지 못했습니다. 최신 OVIA AutoCAD 플러그인을 NETLOAD했는지 확인해 주세요.\r\n\r\n상세: " + detail.Message;
+                errorMessage = "AutoCAD 제목 추출 명령을 실행하지 못했습니다. OVIA AutoCAD 플러그인이 자동 로드되었는지 확인해 주세요. 개발 테스트에서는 해당 버전 OVIA.AutoCAD DLL을 NETLOAD할 수 있습니다.\r\n\r\n상세: " + detail.Message;
                 return false;
             }
         }

@@ -4,6 +4,10 @@
 #define MyAppExeName "OVIA.Desktop.exe"
 #define SourceRoot ".."
 #define ReleaseDir SourceRoot + "\OVIA.Desktop\bin\x64\Release"
+#define AutoCad2024ReleaseDir SourceRoot + "\OVIA.AutoCAD.2024\bin\x64\Release\net48"
+#define AutoCad2025ReleaseDir SourceRoot + "\OVIA.AutoCAD.2025\bin\x64\Release\net8.0-windows"
+#define AutoCad2026ReleaseDir SourceRoot + "\OVIA.AutoCAD.2026\bin\x64\Release\net8.0-windows"
+#define AutoCad2027ReleaseDir SourceRoot + "\OVIA.AutoCAD.2027\bin\x64\Release\net10.0-windows"
 
 [Setup]
 AppId={{B22D4E7E-9D42-49B9-8F05-6E31D8262D36}
@@ -15,7 +19,7 @@ DefaultDirName={autopf}\OVIA
 DefaultGroupName=OVIA
 DisableProgramGroupPage=yes
 OutputDir=Output
-OutputBaseFilename=OVIA_Test_Setup_20260710
+OutputBaseFilename=OVIA_Test_Setup_20260902_MultiCAD
 SetupIconFile={#SourceRoot}\OVIA.Desktop\Assets\Icons\ovia_symbol.ico
 UninstallDisplayIcon={app}\Assets\Icons\ovia_symbol.ico
 Compression=lzma2/max
@@ -45,6 +49,16 @@ Name: "{app}\Data\Rebar"
 Name: "{app}\Data\Shapes\source_jpg"
 Name: "{app}\Data\Version"
 
+; AutoCAD 플러그인 자동 로더 번들. AutoCAD가 아직 없어도 먼저 설치해 둡니다.
+; Autodesk 권장 일반 설치 위치 %PROGRAMFILES%\Autodesk\ApplicationPlugins를 사용합니다.
+; 이후 AutoCAD 2024/2025/2026/2027 중 어느 버전을 설치/실행해도 해당 Component가 자동 선택됩니다.
+Name: "{autopf}\Autodesk\ApplicationPlugins\OVIA.bundle"; Flags: uninsalwaysuninstall
+Name: "{autopf}\Autodesk\ApplicationPlugins\OVIA.bundle\Contents"; Flags: uninsalwaysuninstall
+Name: "{autopf}\Autodesk\ApplicationPlugins\OVIA.bundle\Contents\2024"; Flags: uninsalwaysuninstall
+Name: "{autopf}\Autodesk\ApplicationPlugins\OVIA.bundle\Contents\2025"; Flags: uninsalwaysuninstall
+Name: "{autopf}\Autodesk\ApplicationPlugins\OVIA.bundle\Contents\2026"; Flags: uninsalwaysuninstall
+Name: "{autopf}\Autodesk\ApplicationPlugins\OVIA.bundle\Contents\2027"; Flags: uninsalwaysuninstall
+
 [Files]
 ; Release 빌드의 실행 파일과 런타임 DLL만 포함합니다.
 Source: "{#ReleaseDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
@@ -68,8 +82,18 @@ Source: "{#SourceRoot}\OVIA.Desktop\Data\Mapping\barlist_mapping.json"; DestDir:
 Source: "{#SourceRoot}\OVIA.Desktop\Data\Rebar\rebar_unit_weight.csv"; DestDir: "{app}\Data\Rebar"; Flags: ignoreversion
 Source: "{#SourceRoot}\OVIA.Desktop\Data\Shapes\shape_index.csv"; DestDir: "{app}\Data\Shapes"; Flags: ignoreversion
 Source: "{#SourceRoot}\OVIA.Desktop\Data\Shapes\shape_field_overrides.csv"; DestDir: "{app}\Data\Shapes"; Flags: ignoreversion
-Source: "{#SourceRoot}\OVIA.Desktop\Data\Shapes\source_jpg\*"; DestDir: "{app}\Data\Shapes\source_jpg"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourceRoot}\OVIA.Desktop\Data\Shapes\source_jpg\*"; DestDir: "{app}\Data\Shapes\source_jpg"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 Source: "{#SourceRoot}\OVIA.Desktop\Data\Version\ovia_version_history.ovia"; DestDir: "{app}\Data\Version"; Flags: ignoreversion
+
+; AutoCAD ApplicationPlugins 자동 로더 패키지
+; 중요: 설치파일은 stage 폴더의 오래된 파일이 아니라 방금 Release 빌드된 실제 DLL을 직접 사용합니다.
+; 네 버전 DLL 중 하나라도 없으면 Inno Setup Source 검증에서 컴파일이 실패해야 하며, 누락된 설치파일을 만들지 않습니다.
+; Autodesk accoremgd/acdbmgd/acmgd는 AutoCAD 런타임이 제공하므로 배포하지 않습니다.
+Source: "{#SourceRoot}\Installer\AutoCADBundle\PackageContents.xml"; DestDir: "{autopf}\Autodesk\ApplicationPlugins\OVIA.bundle"; Flags: ignoreversion
+Source: "{#AutoCad2024ReleaseDir}\OVIA.AutoCAD.2024.dll"; DestDir: "{autopf}\Autodesk\ApplicationPlugins\OVIA.bundle\Contents\2024"; Flags: ignoreversion
+Source: "{#AutoCad2025ReleaseDir}\OVIA.AutoCAD.2025.dll"; DestDir: "{autopf}\Autodesk\ApplicationPlugins\OVIA.bundle\Contents\2025"; Flags: ignoreversion
+Source: "{#AutoCad2026ReleaseDir}\OVIA.AutoCAD.2026.dll"; DestDir: "{autopf}\Autodesk\ApplicationPlugins\OVIA.bundle\Contents\2026"; Flags: ignoreversion
+Source: "{#AutoCad2027ReleaseDir}\OVIA.AutoCAD.2027.dll"; DestDir: "{autopf}\Autodesk\ApplicationPlugins\OVIA.bundle\Contents\2027"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\OVIA"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Icons\ovia_symbol.ico"
@@ -81,7 +105,7 @@ Name: "{autodesktop}\OVIA"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app
 Root: HKCR; Subkey: "ovia"; ValueType: string; ValueData: "URL:OVIA Protocol"; Flags: uninsdeletekey
 Root: HKCR; Subkey: "ovia"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
 Root: HKCR; Subkey: "ovia\DefaultIcon"; ValueType: string; ValueData: "{app}\Assets\Icons\ovia_symbol.ico"
-Root: HKCR; Subkey: "ovia\shell\open\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}" "%1"""
+Root: HKCR; Subkey: "ovia\shell\open\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "OVIA 실행"; Flags: nowait postinstall skipifsilent

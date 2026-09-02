@@ -1,0 +1,127 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ApplicationPackage
+  SchemaVersion="1.0"
+  AppVersion="0.1.0"
+  ProductCode="{D3341C3A-94C8-4F78-9E10-7E8E7293B5B2}"
+  UpgradeCode="{2F92C436-6632-4D71-94B5-59BFD1C5F2D4}"
+  Name="OVIA AutoCAD Integration"
+  Description="OVIA 철근 BarList CAD 추출 플러그인">
+  <CompanyDetails Name="CELMON" />
+
+  <Components Description="OVIA AutoCAD 2024">
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R24.3" SeriesMax="R24.3" />
+    <ComponentEntry
+      AppName="OVIA.AutoCAD.2024"
+      AppDescription="OVIA AutoCAD 2024 철근 BarList 추출"
+      ModuleName="./Contents/2024/OVIA.AutoCAD.2024.dll"
+      LoadReasons="LoadOnCommandInvocation">
+      <Commands GroupName="OVIA.Commands">
+        <Command Global="OVIABOX" Local="OVIABOX" />
+        <Command Global="OVIABOXBOTTOM" Local="OVIABOXBOTTOM" />
+        <Command Global="OVIABOXCSV" Local="OVIABOXCSV" />
+        <Command Global="OVIABOXDEBUG" Local="OVIABOXDEBUG" />
+        <Command Global="OVIABOXDEL" Local="OVIABOXDEL" />
+        <Command Global="OVIABOXFIX" Local="OVIABOXFIX" />
+        <Command Global="OVIABOXLEFT" Local="OVIABOXLEFT" />
+        <Command Global="OVIABOXMOVE" Local="OVIABOXMOVE" />
+        <Command Global="OVIABOXRIGHT" Local="OVIABOXRIGHT" />
+        <Command Global="OVIABOXTABLE" Local="OVIABOXTABLE" />
+        <Command Global="OVIABOXTOP" Local="OVIABOXTOP" />
+        <Command Global="OVIADWGINFO" Local="OVIADWGINFO" />
+        <Command Global="OVIAGRIDTABLE" Local="OVIAGRIDTABLE" />
+        <Command Global="OVIAHELLO" Local="OVIAHELLO" />
+        <Command Global="OVIATEXTCSV" Local="OVIATEXTCSV" />
+        <Command Global="OVIATEXTSCAN" Local="OVIATEXTSCAN" />
+        <Command Global="OVIATITLETEXT" Local="OVIATITLETEXT" />
+      </Commands>
+    </ComponentEntry>
+  </Components>
+
+  <Components Description="OVIA AutoCAD 2025">
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R25.0" SeriesMax="R25.0" />
+    <ComponentEntry
+      AppName="OVIA.AutoCAD.2025"
+      AppDescription="OVIA AutoCAD 2025 철근 BarList 추출"
+      ModuleName="./Contents/2025/OVIA.AutoCAD.2025.dll"
+      LoadReasons="LoadOnCommandInvocation">
+      <Commands GroupName="OVIA.Commands">
+        <Command Global="OVIABOX" Local="OVIABOX" />
+        <Command Global="OVIABOXBOTTOM" Local="OVIABOXBOTTOM" />
+        <Command Global="OVIABOXCSV" Local="OVIABOXCSV" />
+        <Command Global="OVIABOXDEBUG" Local="OVIABOXDEBUG" />
+        <Command Global="OVIABOXDEL" Local="OVIABOXDEL" />
+        <Command Global="OVIABOXFIX" Local="OVIABOXFIX" />
+        <Command Global="OVIABOXLEFT" Local="OVIABOXLEFT" />
+        <Command Global="OVIABOXMOVE" Local="OVIABOXMOVE" />
+        <Command Global="OVIABOXRIGHT" Local="OVIABOXRIGHT" />
+        <Command Global="OVIABOXTABLE" Local="OVIABOXTABLE" />
+        <Command Global="OVIABOXTOP" Local="OVIABOXTOP" />
+        <Command Global="OVIADWGINFO" Local="OVIADWGINFO" />
+        <Command Global="OVIAGRIDTABLE" Local="OVIAGRIDTABLE" />
+        <Command Global="OVIAHELLO" Local="OVIAHELLO" />
+        <Command Global="OVIATEXTCSV" Local="OVIATEXTCSV" />
+        <Command Global="OVIATEXTSCAN" Local="OVIATEXTSCAN" />
+        <Command Global="OVIATITLETEXT" Local="OVIATITLETEXT" />
+      </Commands>
+    </ComponentEntry>
+  </Components>
+
+  <Components Description="OVIA AutoCAD 2026">
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R25.1" SeriesMax="R25.1" />
+    <ComponentEntry
+      AppName="OVIA.AutoCAD.2026"
+      AppDescription="OVIA AutoCAD 2026 철근 BarList 추출"
+      ModuleName="./Contents/2026/OVIA.AutoCAD.2026.dll"
+      LoadReasons="LoadOnCommandInvocation">
+      <Commands GroupName="OVIA.Commands">
+        <Command Global="OVIABOX" Local="OVIABOX" />
+        <Command Global="OVIABOXBOTTOM" Local="OVIABOXBOTTOM" />
+        <Command Global="OVIABOXCSV" Local="OVIABOXCSV" />
+        <Command Global="OVIABOXDEBUG" Local="OVIABOXDEBUG" />
+        <Command Global="OVIABOXDEL" Local="OVIABOXDEL" />
+        <Command Global="OVIABOXFIX" Local="OVIABOXFIX" />
+        <Command Global="OVIABOXLEFT" Local="OVIABOXLEFT" />
+        <Command Global="OVIABOXMOVE" Local="OVIABOXMOVE" />
+        <Command Global="OVIABOXRIGHT" Local="OVIABOXRIGHT" />
+        <Command Global="OVIABOXTABLE" Local="OVIABOXTABLE" />
+        <Command Global="OVIABOXTOP" Local="OVIABOXTOP" />
+        <Command Global="OVIADWGINFO" Local="OVIADWGINFO" />
+        <Command Global="OVIAGRIDTABLE" Local="OVIAGRIDTABLE" />
+        <Command Global="OVIAHELLO" Local="OVIAHELLO" />
+        <Command Global="OVIATEXTCSV" Local="OVIATEXTCSV" />
+        <Command Global="OVIATEXTSCAN" Local="OVIATEXTSCAN" />
+        <Command Global="OVIATITLETEXT" Local="OVIATITLETEXT" />
+      </Commands>
+    </ComponentEntry>
+  </Components>
+
+  <Components Description="OVIA AutoCAD 2027">
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R26.0" SeriesMax="R26.0" />
+    <ComponentEntry
+      AppName="OVIA.AutoCAD.2027"
+      AppDescription="OVIA AutoCAD 2027 철근 BarList 추출"
+      ModuleName="./Contents/2027/OVIA.AutoCAD.2027.dll"
+      LoadReasons="LoadOnCommandInvocation">
+      <Commands GroupName="OVIA.Commands">
+        <Command Global="OVIABOX" Local="OVIABOX" />
+        <Command Global="OVIABOXBOTTOM" Local="OVIABOXBOTTOM" />
+        <Command Global="OVIABOXCSV" Local="OVIABOXCSV" />
+        <Command Global="OVIABOXDEBUG" Local="OVIABOXDEBUG" />
+        <Command Global="OVIABOXDEL" Local="OVIABOXDEL" />
+        <Command Global="OVIABOXFIX" Local="OVIABOXFIX" />
+        <Command Global="OVIABOXLEFT" Local="OVIABOXLEFT" />
+        <Command Global="OVIABOXMOVE" Local="OVIABOXMOVE" />
+        <Command Global="OVIABOXRIGHT" Local="OVIABOXRIGHT" />
+        <Command Global="OVIABOXTABLE" Local="OVIABOXTABLE" />
+        <Command Global="OVIABOXTOP" Local="OVIABOXTOP" />
+        <Command Global="OVIADWGINFO" Local="OVIADWGINFO" />
+        <Command Global="OVIAGRIDTABLE" Local="OVIAGRIDTABLE" />
+        <Command Global="OVIAHELLO" Local="OVIAHELLO" />
+        <Command Global="OVIATEXTCSV" Local="OVIATEXTCSV" />
+        <Command Global="OVIATEXTSCAN" Local="OVIATEXTSCAN" />
+        <Command Global="OVIATITLETEXT" Local="OVIATITLETEXT" />
+      </Commands>
+    </ComponentEntry>
+  </Components>
+
+</ApplicationPackage>
