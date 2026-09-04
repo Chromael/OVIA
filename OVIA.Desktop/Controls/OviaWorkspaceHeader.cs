@@ -1547,6 +1547,7 @@ namespace OVIA.Desktop.Controls
         private string barListTitleText = string.Empty;
         private string clientNameText = string.Empty;
         private string projectStatusText = string.Empty;
+        private string projectToolTipOverride = string.Empty;
         private bool hasBarListContext;
         private bool hasOrderOrDueContext;
 
@@ -1620,7 +1621,7 @@ namespace OVIA.Desktop.Controls
             secondSeparatorLabel.Visible = hasOrderOrDueContext && barListTitleText != string.Empty;
             barListTitleLabel.Visible = barListTitleText != string.Empty;
 
-            toolTip.SetToolTip(projectLabel, projectText);
+            toolTip.SetToolTip(projectLabel, projectToolTipOverride == string.Empty ? projectText : projectToolTipOverride);
             toolTip.SetToolTip(orderNumberLabel, orderNumberText);
             toolTip.SetToolTip(dueDateLabel, dueDateText == string.Empty ? string.Empty : "납기일 : " + dueDateText);
             toolTip.SetToolTip(barListTitleLabel, barListTitleText);
@@ -1628,6 +1629,12 @@ namespace OVIA.Desktop.Controls
 
             LayoutContextLabels();
             this.Invalidate();
+        }
+
+        public void SetProjectToolTip(string text)
+        {
+            projectToolTipOverride = NormalizeDisplayText(text);
+            toolTip.SetToolTip(projectLabel, projectToolTipOverride == string.Empty ? projectText : projectToolTipOverride);
         }
 
         protected override void OnPaint(PaintEventArgs e)

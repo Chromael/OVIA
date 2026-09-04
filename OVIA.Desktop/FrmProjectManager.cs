@@ -14,7 +14,6 @@ namespace OVIA.Desktop
         private readonly string userId;
 
         private OviaSearchBox txtSearch;
-        private OviaSelectBox cboSort;
         private OviaCheckBox chkIncludeDone;
         private DataGridView grid;
         private Label lblStatus;
@@ -704,26 +703,13 @@ namespace OVIA.Desktop
             txtSearch.TextChanged += Filter_Changed;
             card.Controls.Add(txtSearch);
 
-            cboSort = new OviaSelectBox();
-            cboSort.Font = OviaFluentTheme.FontInput(9.5F, FontStyle.Regular);
-            cboSort.DropDownStyle = ComboBoxStyle.DropDownList;
-            cboSort.Items.Add("최근작업순");
-            cboSort.Items.Add("생성순");
-            cboSort.Items.Add("명칭순");
-            cboSort.Items.Add("번호순");
-            cboSort.SelectedIndex = 0;
-            cboSort.Location = new Point(426, 36);
-            cboSort.Size = new Size(150, OviaFluentTheme.CommonInputHeight);
-            cboSort.SelectedIndexChanged += Filter_Changed;
-            card.Controls.Add(cboSort);
-
             chkIncludeDone = new OviaCheckBox();
             chkIncludeDone.Text = "완료공사 포함";
             chkIncludeDone.AutoSize = false;
             chkIncludeDone.Font = OviaFluentTheme.FontInput(9.6F, FontStyle.Regular);
             chkIncludeDone.ForeColor = TextDark;
             chkIncludeDone.BackColor = Color.Transparent;
-            chkIncludeDone.Location = new Point(604, 42);
+            chkIncludeDone.Location = new Point(426, 42);
             chkIncludeDone.Size = new Size(128, 24);
             chkIncludeDone.CheckedChanged += Filter_Changed;
             card.Controls.Add(chkIncludeDone);
@@ -1410,36 +1396,36 @@ namespace OVIA.Desktop
                 return list;
             }
 
-            string sort = cboSort.SelectedItem == null ? "최근작업순" : cboSort.SelectedItem.ToString();
-
+            // 공사목록의 기본 순서는 ERP project_list가 반환한 project_no 기준 내림차순이다.
+            // 숫자형 공사번호는 숫자값으로 비교하고, 숫자가 아닌 값은 문자열 비교로 안전하게 정렬한다.
             list.Sort(delegate (OviaProjectRow a, OviaProjectRow b)
             {
-                if (sort == "명칭순")
-                {
-                    return string.Compare(a.ProjectName, b.ProjectName, StringComparison.CurrentCultureIgnoreCase);
-                }
-
-                if (sort == "번호순")
-                {
-                    return string.Compare(a.ProjectNo, b.ProjectNo, StringComparison.CurrentCultureIgnoreCase);
-                }
-
-                if (sort == "생성순")
-                {
-                    return CompareDateText(b.CreatedDate, a.CreatedDate);
-                }
-
-                return CompareDateText(b.LastWorkDate, a.LastWorkDate);
+                return CompareProjectNo(b.ProjectNo, a.ProjectNo);
             });
 
             return list;
+        }
+
+        private static int CompareProjectNo(string left, string right)
+        {
+            long leftNumber;
+            long rightNumber;
+            bool leftIsNumber = long.TryParse(left == null ? "" : left.Trim(), out leftNumber);
+            bool rightIsNumber = long.TryParse(right == null ? "" : right.Trim(), out rightNumber);
+
+            if (leftIsNumber && rightIsNumber)
+            {
+                return leftNumber.CompareTo(rightNumber);
+            }
+
+            return string.Compare(left, right, StringComparison.CurrentCultureIgnoreCase);
         }
 
         private int CompareProjectRows(OviaProjectRow a, OviaProjectRow b, string columnName)
         {
             if (columnName == "공사번호")
             {
-                return string.Compare(a.ProjectNo, b.ProjectNo, StringComparison.CurrentCultureIgnoreCase);
+                return CompareProjectNo(a.ProjectNo, b.ProjectNo);
             }
 
             if (columnName == "공사명")
@@ -1543,12 +1529,6 @@ namespace OVIA.Desktop
 
         private void Filter_Changed(object sender, EventArgs e)
         {
-            if (sender == cboSort)
-            {
-                headerSortColumn = "";
-                headerSortAscending = true;
-            }
-
             currentPage = 1;
             BindProjects();
         }

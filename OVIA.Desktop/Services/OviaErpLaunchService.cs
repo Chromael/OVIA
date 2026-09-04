@@ -277,8 +277,25 @@ namespace OVIA.Desktop
                 if (target == null) target = data;
 
                 string targetType = ReadString(target, "type", ReadString(target, "target_type", "")).Trim().ToLowerInvariant();
-                int barListId = ReadInt(target, "barlist_idx");
-                if (targetType == "" && barListId > 0) targetType = "barlist";
+
+                // ERP BarList 상세 철근행 더블클릭은 반드시 부모 barlist.idx로 OVIA를 연다.
+                // ERP 화면/레거시 JS가 barlist_idx 외 barlist_id/bar_idx/idx/barlist_no 명칭을
+                // 사용하는 경우도 있으므로 Launch 교환 응답에서 모두 수용한다.
+                // 신규등록은 BarList 식별자가 없으므로 이 fallback의 영향을 받지 않는다.
+                int barListId = ReadFirstPositiveInt(target, new string[]
+                {
+                    "barlist_idx", "barlist_id", "bar_idx", "idx", "barlist_no"
+                });
+
+                // 상세 철근형상 더블클릭용 ERP 구현에서 target type을 shape/rebar 계열로
+                // 구분해도 Desktop의 목적지는 동일 부모 BarList 상세 화면이다.
+                if (barListId > 0 && !string.Equals(targetType, "new_barlist", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 실제 BarList 식별자가 있으면 target type 표기보다 영구키를 우선한다.
+                    // ERP 상세 철근행/형상 더블클릭은 부모 BarList 상세로 이동해야 한다.
+                    targetType = "barlist";
+                }
+
                 string projectStatus = ReadString(target, "project_status", ReadString(target, "status", ""));
                 if (projectStatus == "")
                 {
@@ -380,6 +397,17 @@ namespace OVIA.Desktop
         {
             int value;
             return int.TryParse(ReadString(data, key, "0"), NumberStyles.Integer, CultureInfo.InvariantCulture, out value) ? value : 0;
+        }
+
+        private static int ReadFirstPositiveInt(IDictionary<string, object> data, string[] keys)
+        {
+            if (data == null || keys == null) return 0;
+            for (int i = 0; i < keys.Length; i++)
+            {
+                int value = ReadInt(data, keys[i]);
+                if (value > 0) return value;
+            }
+            return 0;
         }
 
         private static int ReadLevel(IDictionary<string, object> data, IDictionary<string, object> root)

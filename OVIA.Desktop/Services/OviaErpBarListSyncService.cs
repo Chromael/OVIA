@@ -31,11 +31,12 @@ namespace OVIA.Desktop
         private const string ErpIdHeader = "OVIA_ERP_BARLIST_IDX";
         private const string ShapeHeader = "OVIA_CAD_SHAPE_JSON";
         private const string SyncPendingHeader = "OVIA_ERP_SYNC_PENDING";
+        private const string ErpListOrderHeader = "OVIA_ERP_LIST_ORDER";
+        private const string FinalLengthHeader = "OVIA_FINAL_LENGTH";
 
         /// <summary>
-        /// 신규등록 팝업 확인 시 ERP barlist 헤더만 먼저 생성합니다.
-        /// 철근 상세(items)는 만들지 않으며, 반환된 ERP idx는 Registration Draft에 보관한 뒤
-        /// 첫 검토 후 저장에서 barlist_sync_push가 같은 idx를 UPDATE하도록 사용합니다.
+        /// 신규 BarList 상세 화면에서 사용자가 '저장완료'를 확정한 시점에 ERP 헤더만 생성합니다.
+        /// 신규등록 팝업 저장 시에는 호출하지 않으며, CAD 철근 items가 0건인 최초 저장 전용입니다.
         /// </summary>
         public static async Task<OviaErpBarListSyncResult> RegisterNewBarListAsync(
             string companyId,
@@ -58,6 +59,47 @@ namespace OVIA.Desktop
         }
 
         public static async Task<OviaErpBarListSyncResult> PushSavedBarListAsync(string companyId, string projectNo, string csvPath)
+        {
+            return await PushSavedBarListInternalAsync(companyId, projectNo, csvPath, false);
+        }
+
+        /// <summary>
+        /// 공사별 BarList 목록의 우클릭 '수정' 전용 저장.
+        /// 철근 상세행과 ERP 진행상태를 건드리지 않고 제목/기본정보만 즉시 UPDATE한다.
+        /// 서버의 barlist_sync_push는 items 1건 이상을 요구하므로 빈 BarList 제목 수정에는 사용할 수 없다.
+        /// </summary>
+        public static async Task<OviaErpBarListSyncResult> PushSavedBarListMetadataAsync(string companyId, string projectNo, string csvPath)
+        {
+            if (string.IsNullOrWhiteSpace(csvPath) || !File.Exists(csvPath))
+                return Fail("저장된 BarList 파일을 찾을 수 없습니다.");
+
+            try
+            {
+                List<List<string>> rows = ReadCsv(csvPath);
+                if (rows.Count < 2) return Fail("ERP로 전송할 BarList 메타정보가 없습니다.");
+
+                List<string> headers = rows[0];
+                int erpId = ParseInt(GetFirstValue(rows, headers, ErpIdHeader));
+                if (erpId <= 0) return Fail("ERP BarList 식별자를 찾을 수 없습니다.");
+
+                // PATCH 13: 목록 제목/기본정보 수정은 상세 items 전체 교체 API와 분리한다.
+                // barlist_sync_meta_update는 기존 barlist_idx의 헤더 메타만 UPDATE하고
+                // progress_status와 items를 요청/갱신하지 않는다.
+                Dictionary<string, object> payload = BuildMetadataOnlyPushPayload(projectNo, erpId, rows, headers);
+                OviaErpBarListSyncResult result = await PostAsync(companyId, "barlist_sync_meta_update", payload);
+
+                // 메타 수정 실패를 CAD 철근데이터 미저장 상태로 취급하지 않는다.
+                // OVIA_ERP_SYNC_PENDING은 검토 후 저장(CAD 데이터 push) 보호용이며,
+                // 목록 제목 수정 실패 때문에 상세 화면의 '검토 후 저장' 버튼을 활성화하면 안 된다.
+                return result;
+            }
+            catch (Exception ex)
+            {
+                return Fail("ERP BarList 메타정보 전송 중 오류가 발생했습니다. " + ex.Message);
+            }
+        }
+
+        private static async Task<OviaErpBarListSyncResult> PushSavedBarListInternalAsync(string companyId, string projectNo, string csvPath, bool unusedPreserveErpProgress)
         {
             if (string.IsNullOrWhiteSpace(csvPath) || !File.Exists(csvPath))
                 return Fail("저장된 BarList 파일을 찾을 수 없습니다.");
@@ -133,7 +175,7 @@ namespace OVIA.Desktop
                     int id = ReadInt(barlist, "barlist_idx");
                     if (id <= 0) continue;
                     serverIds.Add(id);
-                    MaterializeBarList(localDirectory, projectNo, id, barlist);
+                    MaterializeBarList(localDirectory, projectNo, id, barlist, i);
                 }
 
                 RemoveServerDeletedLocalCaches(localDirectory, serverIds);
@@ -143,6 +185,82 @@ namespace OVIA.Desktop
             catch (Exception ex)
             {
                 return Fail("ERP BarList 조회 중 오류가 발생했습니다. " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 현재 BarList의 철근행/형상 파일은 건드리지 않고 ERP 헤더 메타만 다시 수신한다.
+        /// 저장 직후 ERP의 진행상태(대기/진행중/완료)를 로컬 canonical CSV에 반영하기 위한 경량 Pull이다.
+        /// </summary>
+        public static async Task<OviaErpBarListSyncResult> RefreshBarListMetadataFromErpAsync(
+            string companyId,
+            string projectNo,
+            string csvPath)
+        {
+            if (string.IsNullOrWhiteSpace(csvPath) || !File.Exists(csvPath))
+                return Fail("ERP 메타정보를 반영할 BarList 파일을 찾을 수 없습니다.");
+
+            try
+            {
+                List<List<string>> localRows = ReadCsv(csvPath);
+                if (localRows.Count < 2) return Fail("BarList 로컬 메타정보가 없습니다.");
+
+                List<string> headers = localRows[0];
+                int erpId = ParseInt(GetFirstValue(localRows, headers, ErpIdHeader));
+                if (erpId <= 0) return Fail("ERP BarList 식별자를 찾을 수 없습니다.");
+
+                Dictionary<string, object> payload = new Dictionary<string, object>();
+                payload["project_no"] = projectNo == null ? "" : projectNo.Trim();
+                OviaErpBarListSyncResult call = await PostRawAsync(companyId, "barlist_sync_pull", payload);
+                if (!call.IsSuccess) return call;
+
+                JavaScriptSerializer serializer = CreateSerializer();
+                IDictionary<string, object> root = AsDictionary(serializer.DeserializeObject(ExtractJsonObject(call.RawResponse)));
+                object dataValue;
+                if (root == null || !TryGet(root, "data", out dataValue))
+                    return Fail("ERP BarList 메타 재조회 응답에 data가 없습니다.");
+
+                object[] barlists = dataValue as object[];
+                if (barlists == null)
+                {
+                    ArrayList arrayList = dataValue as ArrayList;
+                    if (arrayList != null) barlists = arrayList.ToArray();
+                }
+                if (barlists == null) barlists = new object[0];
+
+                IDictionary<string, object> matched = null;
+                for (int i = 0; i < barlists.Length; i++)
+                {
+                    IDictionary<string, object> candidate = AsDictionary(barlists[i]);
+                    if (candidate != null && ReadInt(candidate, "barlist_idx") == erpId)
+                    {
+                        matched = candidate;
+                        break;
+                    }
+                }
+
+                if (matched == null)
+                    return Fail("ERP에서 현재 BarList를 찾을 수 없습니다.");
+
+                IDictionary<string, object> meta = null;
+                object metaValue;
+                if (TryGet(matched, "meta", out metaValue)) meta = AsDictionary(metaValue);
+                if (meta == null) meta = matched;
+
+                string[] headerArray = headers.ToArray();
+                for (int r = 1; r < localRows.Count; r++)
+                {
+                    while (localRows[r].Count < headers.Count) localRows[r].Add("");
+                    ApplyMeta(localRows[r], headerArray, meta, matched);
+                    Set(localRows[r], headerArray, ErpIdHeader, erpId.ToString(CultureInfo.InvariantCulture));
+                }
+
+                WriteCsvIfChanged(csvPath, localRows);
+                return Ok("ERP BarList 메타정보 갱신 완료", erpId);
+            }
+            catch (Exception ex)
+            {
+                return Fail("ERP BarList 메타정보 재조회 중 오류가 발생했습니다. " + ex.Message);
             }
         }
 
@@ -193,6 +311,24 @@ namespace OVIA.Desktop
             PersistErpId(csvPath, rows, rows[0], erpId);
         }
 
+        /// <summary>
+        /// barlist_sync_register 성공 후 빈 BarList 로컬 CSV에 ERP idx를 연결하고
+        /// project_no + ERP idx canonical 파일명으로 확정합니다. 서버 재호출은 하지 않습니다.
+        /// </summary>
+        public static string FinalizeRegisteredEmptyBarListLocalCache(string projectNo, string csvPath, int erpId)
+        {
+            if (erpId <= 0 || string.IsNullOrWhiteSpace(csvPath) || !File.Exists(csvPath)) return csvPath ?? "";
+
+            List<List<string>> rows = ReadCsv(csvPath);
+            if (rows.Count == 0) return csvPath;
+
+            PersistErpId(csvPath, rows, rows[0], erpId);
+            SetSyncPending(csvPath, false);
+            string canonical = CanonicalizeLocalCachePath(projectNo, csvPath, erpId);
+            CleanupUnreferencedShapeFiles(Path.GetDirectoryName(canonical));
+            return canonical;
+        }
+
         public static bool IsSynchronizationPending(string csvPath)
         {
             return IsSyncPending(csvPath);
@@ -237,7 +373,8 @@ namespace OVIA.Desktop
             meta["building"] = registration.Building ?? "";
             meta["floor"] = registration.Floor ?? "";
             meta["work_type"] = registration.WorkType ?? "";
-            meta["progress_status"] = "";
+            // 진행상태는 ERP 단독 원장이다. 신규등록을 포함해 OVIA에서는 progress_status를 전송하지 않는다.
+            // ERP가 신규 BarList의 초기 상태(예: 대기)를 결정하고 OVIA는 Pull로만 수신한다.
             meta["title"] = registration.Title ?? "";
             meta["tags"] = registration.Tags ?? "";
             meta["color_code"] = registration.Color ?? "";
@@ -249,9 +386,45 @@ namespace OVIA.Desktop
             meta["bending_status"] = "";
             meta["shipment_qty"] = "";
             meta["unshipment_qty"] = "";
-            // 신규등록 당시 최초 작성자. ERP API는 기존 writer_user_id에 저장한다.
             meta["writer_user_id"] = registration.Writer ?? "";
             meta["remark"] = registration.Memo ?? "";
+            payload["meta"] = meta;
+            return payload;
+        }
+
+
+        private static Dictionary<string, object> BuildMetadataOnlyPushPayload(string projectNo, int erpId, List<List<string>> rows, List<string> headers)
+        {
+            Dictionary<string, object> payload = new Dictionary<string, object>();
+            payload["project_no"] = projectNo == null ? "" : projectNo.Trim();
+            payload["barlist_idx"] = erpId;
+
+            Dictionary<string, object> meta = new Dictionary<string, object>();
+            AddMeta(meta, "barlist_status", rows, headers, "상태");
+            AddMeta(meta, "write_location", rows, headers, "작성");
+            AddMeta(meta, "order_number", rows, headers, "발주번호");
+            AddMeta(meta, "order_date", rows, headers, "발주일");
+            AddMeta(meta, "registered_date", rows, headers, "등록일");
+            AddMeta(meta, "due_date", rows, headers, "납기일");
+            AddMeta(meta, "building", rows, headers, "동");
+            AddMeta(meta, "floor", rows, headers, "층");
+            AddMeta(meta, "work_type", rows, headers, "공종");
+            AddMeta(meta, "title", rows, headers, "제목");
+            AddMeta(meta, "tags", rows, headers, "태그");
+            AddMeta(meta, "color_code", rows, headers, "색상");
+            meta["order_qty"] = ResolveOrderQtyForErp(rows, headers);
+            AddMeta(meta, "tag_issue_status", rows, headers, "태그발행");
+            AddMeta(meta, "etc_status", rows, headers, "기타");
+            AddMeta(meta, "long_bar_status", rows, headers, "장대");
+            AddMeta(meta, "cutting_status", rows, headers, "절단");
+            AddMeta(meta, "bending_status", rows, headers, "절곡");
+            AddMeta(meta, "shipment_qty", rows, headers, "출하");
+            AddMeta(meta, "unshipment_qty", rows, headers, "미출하");
+            AddMeta(meta, "writer_user_id", rows, headers, "작성자");
+            AddMeta(meta, "remark", rows, headers, "OVIA_BARLIST_MEMO", "BARLIST_MEMO");
+
+            // 중요: progress_status는 ERP 단독 원장이므로 포함하지 않는다.
+            // 중요: items 키 자체도 포함하지 않는다. 우클릭 수정은 철근 상세를 건드리지 않는다.
             payload["meta"] = meta;
             return payload;
         }
@@ -272,7 +445,9 @@ namespace OVIA.Desktop
             AddMeta(meta, "building", rows, headers, "동");
             AddMeta(meta, "floor", rows, headers, "층");
             AddMeta(meta, "work_type", rows, headers, "공종");
-            AddMeta(meta, "progress_status", rows, headers, "진행");
+            // 진행상태는 ERP 단독 원장이다.
+            // 신규등록, 제목/기본정보 수정, CAD 검토 후 저장을 포함해 어떤 OVIA 저장 경로에서도
+            // progress_status를 ERP로 전송하지 않는다. ERP에서 결정된 상태는 Pull로만 수신한다.
             AddMeta(meta, "title", rows, headers, "제목");
             AddMeta(meta, "tags", rows, headers, "태그");
             AddMeta(meta, "color_code", rows, headers, "색상");
@@ -284,18 +459,28 @@ namespace OVIA.Desktop
             AddMeta(meta, "bending_status", rows, headers, "절곡");
             AddMeta(meta, "shipment_qty", rows, headers, "출하");
             AddMeta(meta, "unshipment_qty", rows, headers, "미출하");
+            // 신규등록 팝업에서 확정한 최초 작성자는 첫 barlist_sync_push INSERT에서 ERP에 함께 저장한다.
+            AddMeta(meta, "writer_user_id", rows, headers, "작성자");
             AddMeta(meta, "remark", rows, headers, "OVIA_BARLIST_MEMO", "BARLIST_MEMO");
             payload["meta"] = meta;
 
             List<object> items = new List<object>();
             for (int r = 1; r < rows.Count; r++)
             {
+                // 신규 BarList를 기본정보만으로 저장할 때 생성되는 메타 전용 로컬 1행은
+                // ERP 철근 items로 전송하지 않는다. 따라서 CAD 미추출 저장은 items=[]로 생성된다.
+                if (IsMetadataOnlyBarListRow(rows[r], headers))
+                {
+                    continue;
+                }
+
                 Dictionary<string, object> item = new Dictionary<string, object>();
                 item["part"] = GetValue(rows[r], headers, "부위");
                 item["source_row_no"] = GetValue(rows[r], headers, "번호");
                 item["dia"] = GetValue(rows[r], headers, "철근규격", "규격");
                 item["shape_json"] = ReadErpTransportShapeJson(csvPath, GetValue(rows[r], headers, ShapeHeader, "CAD_SHAPE_JSON"));
                 item["length_mm"] = GetValue(rows[r], headers, "길이(mm)", "길이");
+                item["final_length"] = GetValue(rows[r], headers, FinalLengthHeader, "final_length");
                 item["qty_ea"] = GetValue(rows[r], headers, "수량(EA)", "수량");
                 item["total_length_m"] = GetValue(rows[r], headers, "총길이(M)", "총길이");
                 item["weight_ton"] = GetValue(rows[r], headers, "중량(Ton)", "중량");
@@ -305,6 +490,23 @@ namespace OVIA.Desktop
             }
             payload["items"] = items;
             return payload;
+        }
+
+        private static bool IsMetadataOnlyBarListRow(List<string> row, List<string> headers)
+        {
+            if (row == null || headers == null) return true;
+
+            return string.IsNullOrWhiteSpace(GetValue(row, headers, "부위"))
+                && string.IsNullOrWhiteSpace(GetValue(row, headers, "번호"))
+                && string.IsNullOrWhiteSpace(GetValue(row, headers, "철근규격", "규격"))
+                && string.IsNullOrWhiteSpace(GetValue(row, headers, ShapeHeader, "CAD_SHAPE_JSON"))
+                && string.IsNullOrWhiteSpace(GetValue(row, headers, "길이(mm)", "길이"))
+                && string.IsNullOrWhiteSpace(GetValue(row, headers, FinalLengthHeader, "final_length"))
+                && string.IsNullOrWhiteSpace(GetValue(row, headers, "수량(EA)", "수량"))
+                && string.IsNullOrWhiteSpace(GetValue(row, headers, "총길이(M)", "총길이"))
+                && string.IsNullOrWhiteSpace(GetValue(row, headers, "중량(Ton)", "중량"))
+                && string.IsNullOrWhiteSpace(GetValue(row, headers, "비고"))
+                && string.IsNullOrWhiteSpace(GetValue(row, headers, "원본 도면", "원본도면"));
         }
 
         private static async Task<OviaErpBarListSyncResult> PostAsync(string companyId, string mode, Dictionary<string, object> payload)
@@ -377,7 +579,7 @@ namespace OVIA.Desktop
             }
         }
 
-        private static void MaterializeBarList(string dir, string projectNo, int id, IDictionary<string, object> barlist)
+        private static void MaterializeBarList(string dir, string projectNo, int id, IDictionary<string, object> barlist, int erpListOrder)
         {
             IDictionary<string, object> meta = null;
             object metaValue;
@@ -403,9 +605,21 @@ namespace OVIA.Desktop
             string shapeDir = Path.Combine(dir, "Shapes");
             Directory.CreateDirectory(shapeDir);
 
-            string[] headers = new string[] { "부위", "번호", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(Ton)", "비고", "원본 도면", ShapeHeader, "OVIA_SHAPE_SOURCE", "OVIA_SHAPE_STATUS", ErpIdHeader, "상태", "작성", "발주번호", "발주일", "등록일", "납기일", "동", "층", "공종", "진행", "제목", "태그", "색상", "주문량", "태그발행", "기타", "장대", "절단", "절곡", "출하", "미출하", "작성자", "OVIA_BARLIST_MEMO" };
+            string[] headers = new string[] { "부위", "번호", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(Ton)", "비고", "원본 도면", ShapeHeader, "OVIA_SHAPE_SOURCE", "OVIA_SHAPE_STATUS", FinalLengthHeader, ErpIdHeader, ErpListOrderHeader, "상태", "작성", "발주번호", "발주일", "등록일", "납기일", "동", "층", "공종", "진행", "제목", "태그", "색상", "주문량", "태그발행", "기타", "장대", "절단", "절곡", "출하", "미출하", "작성자", "OVIA_WRITER_USER_NAME", "OVIA_BARLIST_MEMO" };
             List<List<string>> rows = new List<List<string>>();
             rows.Add(new List<string>(headers));
+
+            // ERP에 헤더만 존재하고 철근 items가 0건이어도 OVIA 목록에서 반드시 보여야 한다.
+            // 메타 전용 1행을 생성해 공사별 BarList 목록/수정/후속 CAD 추출의 연결점을 보존한다.
+            if (items.Length == 0)
+            {
+                List<string> metaOnlyRow = new List<string>();
+                for (int h = 0; h < headers.Length; h++) metaOnlyRow.Add("");
+                Set(metaOnlyRow, headers, ErpIdHeader, id.ToString(CultureInfo.InvariantCulture));
+                Set(metaOnlyRow, headers, ErpListOrderHeader, erpListOrder.ToString(CultureInfo.InvariantCulture));
+                ApplyMeta(metaOnlyRow, headers, meta, barlist);
+                rows.Add(metaOnlyRow);
+            }
 
             for (int i = 0; i < items.Length; i++)
             {
@@ -430,13 +644,15 @@ namespace OVIA.Desktop
                     Set(row, headers, "OVIA_SHAPE_STATUS", "CAD_CAPTURED");
                 }
                 Set(row, headers, "길이(mm)", ReadString(item, "length_mm"));
+                Set(row, headers, FinalLengthHeader, ReadString(item, "final_length"));
                 Set(row, headers, "수량(EA)", ReadString(item, "qty_ea"));
                 Set(row, headers, "총길이(M)", ReadString(item, "total_length_m"));
                 Set(row, headers, "중량(Ton)", ReadString(item, "weight_ton"));
                 Set(row, headers, "비고", ReadString(item, "remark"));
                 Set(row, headers, "원본 도면", ReadString(item, "source_drawing_name"));
                 Set(row, headers, ErpIdHeader, id.ToString(CultureInfo.InvariantCulture));
-                ApplyMeta(row, headers, meta);
+                Set(row, headers, ErpListOrderHeader, erpListOrder.ToString(CultureInfo.InvariantCulture));
+                ApplyMeta(row, headers, meta, barlist);
                 rows.Add(row);
             }
             // ERP pull은 공사 전체 BarList를 반환한다.
@@ -459,19 +675,52 @@ namespace OVIA.Desktop
             }
         }
 
-        private static void ApplyMeta(List<string> row, string[] headers, IDictionary<string, object> meta)
+        private static void ApplyMeta(List<string> row, string[] headers, IDictionary<string, object> meta, IDictionary<string, object> root)
         {
-            Set(row, headers, "상태", ReadString(meta, "barlist_status")); Set(row, headers, "작성", ReadString(meta, "write_location"));
-            Set(row, headers, "발주번호", ReadString(meta, "order_number")); Set(row, headers, "발주일", ReadString(meta, "order_date"));
-            Set(row, headers, "등록일", ReadString(meta, "registered_date")); Set(row, headers, "납기일", ReadString(meta, "due_date"));
-            Set(row, headers, "동", ReadString(meta, "building")); Set(row, headers, "층", ReadString(meta, "floor"));
-            Set(row, headers, "공종", ReadString(meta, "work_type")); Set(row, headers, "진행", ReadString(meta, "progress_status"));
-            Set(row, headers, "제목", ReadString(meta, "title")); Set(row, headers, "태그", ReadString(meta, "tags")); Set(row, headers, "색상", ReadString(meta, "color_code"));
-            Set(row, headers, "주문량", ReadString(meta, "order_qty")); Set(row, headers, "태그발행", ReadString(meta, "tag_issue_status"));
-            Set(row, headers, "기타", ReadString(meta, "etc_status")); Set(row, headers, "장대", ReadString(meta, "long_bar_status")); Set(row, headers, "절단", ReadString(meta, "cutting_status"));
-            Set(row, headers, "절곡", ReadString(meta, "bending_status")); Set(row, headers, "출하", ReadString(meta, "shipment_qty")); Set(row, headers, "미출하", ReadString(meta, "unshipment_qty"));
-            Set(row, headers, "작성자", ReadString(meta, "writer_user_id"));
-            Set(row, headers, "OVIA_BARLIST_MEMO", ReadString(meta, "remark"));
+            Set(row, headers, "상태", ReadFirstMetaString(meta, root, "barlist_status", "status"));
+            Set(row, headers, "작성", ReadFirstMetaString(meta, root, "write_location", "write_status"));
+            Set(row, headers, "발주번호", ReadFirstMetaString(meta, root, "order_number", "order_no"));
+            Set(row, headers, "발주일", ReadFirstMetaString(meta, root, "order_date"));
+            Set(row, headers, "등록일", ReadFirstMetaString(meta, root, "registered_date", "created_date", "created_at"));
+            Set(row, headers, "납기일", ReadFirstMetaString(meta, root, "due_date", "delivery_date"));
+            Set(row, headers, "동", ReadFirstMetaString(meta, root, "building"));
+            Set(row, headers, "층", ReadFirstMetaString(meta, root, "floor"));
+            Set(row, headers, "공종", ReadFirstMetaString(meta, root, "work_type"));
+            // ERP 구현 버전에 따라 진행상태 필드가 meta.progress_status 또는 root.progress/status_progress 등으로
+            // 반환될 수 있으므로 모두 수용한다. OVIA 목록의 '진행'은 ERP 값을 그대로 표시한다.
+            Set(row, headers, "진행", ReadFirstMetaString(meta, root, "progress_status", "progress", "progress_state", "process_status", "work_progress", "status_progress", "work_status", "work_state", "process", "process_state", "process_name", "progress_name", "progress_text", "barlist_progress", "barlist_progress_status", "production_status"));
+            Set(row, headers, "제목", ReadFirstMetaString(meta, root, "title", "barlist_title"));
+            Set(row, headers, "태그", ReadFirstMetaString(meta, root, "tags", "tag"));
+            Set(row, headers, "색상", ReadFirstMetaString(meta, root, "color_code", "color"));
+            Set(row, headers, "주문량", ReadFirstMetaString(meta, root, "order_qty", "order_quantity"));
+            Set(row, headers, "태그발행", ReadFirstMetaString(meta, root, "tag_issue_status"));
+            Set(row, headers, "기타", ReadFirstMetaString(meta, root, "etc_status"));
+            Set(row, headers, "장대", ReadFirstMetaString(meta, root, "long_bar_status"));
+            Set(row, headers, "절단", ReadFirstMetaString(meta, root, "cutting_status"));
+            Set(row, headers, "절곡", ReadFirstMetaString(meta, root, "bending_status"));
+            Set(row, headers, "출하", ReadFirstMetaString(meta, root, "shipment_qty"));
+            Set(row, headers, "미출하", ReadFirstMetaString(meta, root, "unshipment_qty"));
+            // 저장 계약은 writer_user_id(아이디)를 그대로 유지한다. 목록 표시용 사용자명은 별도 숨김 메타에 저장한다.
+            Set(row, headers, "작성자", ReadFirstMetaString(meta, root, "writer_user_id", "writer_id", "mb_id"));
+            Set(row, headers, "OVIA_WRITER_USER_NAME", ReadFirstMetaString(meta, root,
+                "writer_user_name", "writer_name", "writer_display_name", "user_name", "mb_name", "author_name"));
+            Set(row, headers, "OVIA_BARLIST_MEMO", ReadFirstMetaString(meta, root, "remark", "memo"));
+        }
+
+        private static string ReadFirstMetaString(IDictionary<string, object> meta, IDictionary<string, object> root, params string[] names)
+        {
+            if (names == null) return "";
+            for (int i = 0; i < names.Length; i++)
+            {
+                string value = meta == null ? "" : ReadString(meta, names[i]);
+                if (!string.IsNullOrWhiteSpace(value)) return value.Trim();
+            }
+            for (int i = 0; i < names.Length; i++)
+            {
+                string value = root == null ? "" : ReadString(root, names[i]);
+                if (!string.IsNullOrWhiteSpace(value)) return value.Trim();
+            }
+            return "";
         }
 
         private static void RemoveServerDeletedLocalCaches(string dir, HashSet<int> serverIds)

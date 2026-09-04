@@ -3151,14 +3151,14 @@ namespace OVIA.AutoCAD_2027
                 return 0;
             }
 
-            OviaHeaderColumn authoritativeShapeColumn;
+            List<OviaHeaderColumn> authoritativeShapeColumns;
 
-            if (!TryBuildAuthoritativePhysicalShapeColumn(
+            if (!TryBuildAuthoritativePhysicalShapeColumns(
                 tableTextRows,
                 gridLines,
                 selectedMinPoint,
                 selectedMaxPoint,
-                out authoritativeShapeColumn))
+                out authoritativeShapeColumns))
             {
                 return 0;
             }
@@ -3195,12 +3195,18 @@ namespace OVIA.AutoCAD_2027
                     continue;
                 }
 
+                OviaHeaderColumn authoritativeShapeColumn = SelectAuthoritativePhysicalShapeColumnForRow(
+                    row,
+                    authoritativeShapeColumns
+                );
+
                 double previousMinX = row.ShapeCellMinX;
                 double previousMaxX = row.ShapeCellMaxX;
                 double previousMinY = row.ShapeCellMinY;
                 double previousMaxY = row.ShapeCellMaxY;
                 string previousSource = row.ShapeCellBoundsSource;
-                bool replaceX = ShouldReplaceShapeCellXWithAuthoritativeGrid(row, authoritativeShapeColumn);
+                bool replaceX = authoritativeShapeColumn != null
+                    && ShouldReplaceShapeCellXWithAuthoritativeGrid(row, authoritativeShapeColumn);
                 bool replacedY = false;
 
                 if (replaceX)
@@ -3226,16 +3232,91 @@ namespace OVIA.AutoCAD_2027
 
                 if (changed)
                 {
-                    row.ShapeCellBoundsSource = "GRID_HEADER_AUTH";
+                    row.ShapeCellBoundsSource = authoritativeShapeColumns.Count > 1
+                        ? "GRID_HEADER_AUTH_MULTI"
+                        : "GRID_HEADER_AUTH";
                     updatedCount++;
                 }
                 else if ((replaceX || replacedY) && previousSource == "")
                 {
-                    row.ShapeCellBoundsSource = "GRID_HEADER_AUTH";
+                    row.ShapeCellBoundsSource = authoritativeShapeColumns.Count > 1
+                        ? "GRID_HEADER_AUTH_MULTI"
+                        : "GRID_HEADER_AUTH";
                 }
             }
 
             return updatedCount;
+        }
+
+        private OviaHeaderColumn SelectAuthoritativePhysicalShapeColumnForRow(
+            OviaBarTableRow row,
+            List<OviaHeaderColumn> authoritativeShapeColumns)
+        {
+            if (row == null || authoritativeShapeColumns == null || authoritativeShapeColumns.Count == 0)
+            {
+                return null;
+            }
+
+            if (authoritativeShapeColumns.Count == 1)
+            {
+                return authoritativeShapeColumns[0];
+            }
+
+            /*
+             * 복수 집계표가 좌우로 나란히 있을 때 전체 선택영역에 대해 SHAPE 열 하나를 강제로
+             * 사용하면 다른 표의 DATA 행이 잘못된 X 범위로 덮어써집니다. 각 행이 이미 확보한
+             * 물리 ShapeCell X 범위를 앵커로 삼아 가장 많이 겹치는 SHAPE 열을 선택합니다.
+             *
+             * 중요: X 범위가 전혀 없는 행에는 임의의 첫 번째 열을 배정하지 않습니다. 객체 열거
+             * 순서에 따라 결과가 달라지는 비결정성을 피하기 위해 null을 반환하고 후속 복구 로직이
+             * 처리하도록 둡니다.
+             */
+            double currentLeft = Math.Min(row.ShapeCellMinX, row.ShapeCellMaxX);
+            double currentRight = Math.Max(row.ShapeCellMinX, row.ShapeCellMaxX);
+            double currentWidth = currentRight - currentLeft;
+
+            if (currentWidth <= 0.0001)
+            {
+                return null;
+            }
+
+            double currentCenter = (currentLeft + currentRight) / 2.0;
+            OviaHeaderColumn best = null;
+            double bestOverlap = -1.0;
+            double bestCenterDistance = Double.MaxValue;
+            int i;
+
+            for (i = 0; i < authoritativeShapeColumns.Count; i++)
+            {
+                OviaHeaderColumn candidate = authoritativeShapeColumns[i];
+
+                if (candidate == null || candidate.RightX <= candidate.LeftX)
+                {
+                    continue;
+                }
+
+                double overlap = Math.Max(
+                    0.0,
+                    Math.Min(currentRight, candidate.RightX) - Math.Max(currentLeft, candidate.LeftX)
+                );
+                double candidateCenter = (candidate.LeftX + candidate.RightX) / 2.0;
+                double centerDistance = Math.Abs(currentCenter - candidateCenter);
+
+                if (best == null
+                    || overlap > bestOverlap + 0.0001
+                    || (Math.Abs(overlap - bestOverlap) <= 0.0001
+                        && centerDistance < bestCenterDistance - 0.0001)
+                    || (Math.Abs(overlap - bestOverlap) <= 0.0001
+                        && Math.Abs(centerDistance - bestCenterDistance) <= 0.0001
+                        && candidate.LeftX < best.LeftX))
+                {
+                    best = candidate;
+                    bestOverlap = overlap;
+                    bestCenterDistance = centerDistance;
+                }
+            }
+
+            return best;
         }
 
         private bool ShouldReplaceShapeCellXWithAuthoritativeGrid(
@@ -3268,7 +3349,7 @@ namespace OVIA.AutoCAD_2027
             /*
              * 정상 GRID 경계는 물리 헤더 셀과 거의 같은 폭/중심을 가집니다. 현재 셀이 헤더 셀보다
              * 30% 이상 넓거나, 중심이 헤더 셀 폭의 20% 이상 이동했거나, 좌우 경계가 12% 이상
-             * 다르면 다른 데이터 열까지 포함한 것으로 보고 헤더 행의 실제 GRID로 교체합니다.
+             * 다르면 다른 데이터 열까지 포함한 것으로 보고 해당 행이 속한 표의 실제 GRID로 교체합니다.
              */
             return currentWidth > authoritativeWidth * 1.30
                 || currentWidth < authoritativeWidth * 0.70
@@ -3277,14 +3358,14 @@ namespace OVIA.AutoCAD_2027
                 || Math.Abs(currentRight - authoritativeShapeColumn.RightX) > authoritativeWidth * 0.12;
         }
 
-        private bool TryBuildAuthoritativePhysicalShapeColumn(
+        private bool TryBuildAuthoritativePhysicalShapeColumns(
             List<OviaTextRow> tableTextRows,
             List<OviaGridLineSegment> gridLines,
             Point3d selectedMinPoint,
             Point3d selectedMaxPoint,
-            out OviaHeaderColumn shapeColumn)
+            out List<OviaHeaderColumn> shapeColumns)
         {
-            shapeColumn = null;
+            shapeColumns = new List<OviaHeaderColumn>();
 
             if (tableTextRows == null || tableTextRows.Count == 0 || gridLines == null || gridLines.Count == 0)
             {
@@ -3304,9 +3385,8 @@ namespace OVIA.AutoCAD_2027
                 averageTextHeight = Math.Max(tableHeight * 0.02, 1.0);
             }
 
-            OviaTextRow shapeHeaderText = null;
-            double nearestHeaderDistance = Double.MaxValue;
             double xMargin = Math.Max(tableWidth * 0.025, 0.5);
+            List<OviaTextRow> shapeHeaders = new List<OviaTextRow>();
             int i;
 
             for (i = 0; i < tableTextRows.Count; i++)
@@ -3323,29 +3403,129 @@ namespace OVIA.AutoCAD_2027
                 string title = CleanHeaderText(textRow.TextValue);
                 string key = ClassifyHeaderTitle(title);
 
-                if (!String.Equals(key, "SHAPE", StringComparison.OrdinalIgnoreCase))
+                if (String.Equals(key, "SHAPE", StringComparison.OrdinalIgnoreCase))
                 {
-                    continue;
-                }
-
-                double distance = Math.Abs(textRow.Y - selectedMaxY);
-
-                if (distance < nearestHeaderDistance)
-                {
-                    nearestHeaderDistance = distance;
-                    shapeHeaderText = textRow;
+                    shapeHeaders.Add(textRow);
                 }
             }
 
-            if (shapeHeaderText == null)
+            if (shapeHeaders.Count == 0)
             {
                 return false;
             }
 
+            // AutoCAD 객체 열거 순서와 무관하게 항상 동일한 후보 순서를 사용합니다.
+            shapeHeaders.Sort(delegate(OviaTextRow a, OviaTextRow b)
+            {
+                double da = Math.Abs(a.Y - selectedMaxY);
+                double db = Math.Abs(b.Y - selectedMaxY);
+                int byDistance = da.CompareTo(db);
+
+                if (byDistance != 0)
+                {
+                    return byDistance;
+                }
+
+                int byY = b.Y.CompareTo(a.Y);
+
+                if (byY != 0)
+                {
+                    return byY;
+                }
+
+                int byX = a.X.CompareTo(b.X);
+
+                if (byX != 0)
+                {
+                    return byX;
+                }
+
+                return String.Compare(a.Handle, b.Handle, StringComparison.OrdinalIgnoreCase);
+            });
+
+            for (i = 0; i < shapeHeaders.Count; i++)
+            {
+                OviaHeaderColumn candidate;
+
+                if (!TryBuildAuthoritativePhysicalShapeColumnForHeader(
+                    shapeHeaders[i],
+                    tableTextRows,
+                    gridLines,
+                    selectedMinPoint,
+                    selectedMaxPoint,
+                    averageTextHeight,
+                    out candidate))
+                {
+                    continue;
+                }
+
+                bool duplicate = false;
+                int j;
+
+                for (j = 0; j < shapeColumns.Count; j++)
+                {
+                    OviaHeaderColumn existing = shapeColumns[j];
+                    double existingWidth = existing.RightX - existing.LeftX;
+                    double candidateWidth = candidate.RightX - candidate.LeftX;
+                    double tolerance = Math.Max(Math.Min(existingWidth, candidateWidth) * 0.10, 0.05);
+
+                    if (Math.Abs(existing.LeftX - candidate.LeftX) <= tolerance
+                        && Math.Abs(existing.RightX - candidate.RightX) <= tolerance)
+                    {
+                        duplicate = true;
+                        break;
+                    }
+                }
+
+                if (!duplicate)
+                {
+                    shapeColumns.Add(candidate);
+                }
+            }
+
+            shapeColumns.Sort(delegate(OviaHeaderColumn a, OviaHeaderColumn b)
+            {
+                int byLeft = a.LeftX.CompareTo(b.LeftX);
+
+                if (byLeft != 0)
+                {
+                    return byLeft;
+                }
+
+                return a.RightX.CompareTo(b.RightX);
+            });
+
+            return shapeColumns.Count > 0;
+        }
+
+        private bool TryBuildAuthoritativePhysicalShapeColumnForHeader(
+            OviaTextRow shapeHeaderText,
+            List<OviaTextRow> tableTextRows,
+            List<OviaGridLineSegment> gridLines,
+            Point3d selectedMinPoint,
+            Point3d selectedMaxPoint,
+            double averageTextHeight,
+            out OviaHeaderColumn shapeColumn)
+        {
+            shapeColumn = null;
+
+            if (shapeHeaderText == null || tableTextRows == null || gridLines == null)
+            {
+                return false;
+            }
+
+            double selectedMinX = Math.Min(selectedMinPoint.X, selectedMaxPoint.X);
+            double selectedMaxX = Math.Max(selectedMinPoint.X, selectedMaxPoint.X);
+            double selectedMinY = Math.Min(selectedMinPoint.Y, selectedMaxPoint.Y);
+            double selectedMaxY = Math.Max(selectedMinPoint.Y, selectedMaxPoint.Y);
+            double tableWidth = Math.Max(selectedMaxX - selectedMinX, 0.0001);
+            double tableHeight = Math.Max(selectedMaxY - selectedMinY, 0.0001);
+            double xMargin = Math.Max(tableWidth * 0.025, 0.5);
             double axisTolerance = Math.Max(Math.Max(averageTextHeight * 0.10, tableWidth * 0.00025), 0.03);
             double mergeTolerance = Math.Max(Math.Max(averageTextHeight * 0.20, tableWidth * 0.00045), 0.05);
             double headerBandMargin = Math.Max(averageTextHeight * 0.45, 0.12);
             List<double> verticalXs = new List<double>();
+            int i;
 
             for (i = 0; i < gridLines.Count; i++)
             {
@@ -3385,11 +3565,6 @@ namespace OVIA.AutoCAD_2027
 
             if (verticalXs.Count < 3)
             {
-                /*
-                 * 셀 단위 세로선이 문자 기준 Y에서 아주 조금 끊긴 도면은 선택 DATA 높이의 72%를
-                 * 실제로 관통하는 세로선으로 한 번 더 복구합니다. 형상 내부선은 각 행 안에서만
-                 * 존재하므로 이 커버리지를 만족하지 않습니다.
-                 */
                 verticalXs = ExtractCoveredGridCoordinates(
                     gridLines,
                     true,
@@ -3453,15 +3628,11 @@ namespace OVIA.AutoCAD_2027
 
             double shapeWidth = rightX - leftX;
 
-            if (shapeWidth < tableWidth * 0.03 || shapeWidth > tableWidth * 0.35)
+            if (shapeWidth < tableWidth * 0.02 || shapeWidth > tableWidth * 0.35)
             {
                 return false;
             }
 
-            /*
-             * 동일 헤더 밴드의 규격·길이·수량 등 다른 헤더 중심이 후보 셀 안에 있으면 경계 하나가
-             * 누락되어 여러 데이터 열이 합쳐진 상태입니다. 이 후보는 authoritative로 사용하지 않습니다.
-             */
             double headerYTolerance = Math.Max(averageTextHeight * 5.0, 2.0);
 
             for (i = 0; i < tableTextRows.Count; i++)

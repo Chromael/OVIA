@@ -33,6 +33,12 @@ namespace OVIA.Desktop
     {
         private const string ProjectListRelativePath = "api/ovia_api.php?mode=project_list";
 
+        // project_list 응답의 현재 ERP 세션 사용자 정보를 메모리에만 보관한다.
+        // BarList 작성자 ID가 현재 로그인 사용자와 같고 pull 응답에 표시명이 없을 때
+        // ID 대신 세션 사용자명을 표시하기 위한 안전한 fallback 용도다.
+        public static string CurrentSessionUserId { get; private set; } = "";
+        public static string CurrentSessionUserName { get; private set; } = "";
+
         public static async Task<OviaErpProjectListResult> GetProjectListAsync(string companyId)
         {
             companyId = companyId == null ? "" : companyId.Trim();
@@ -291,6 +297,9 @@ namespace OVIA.Desktop
                         sessionIpAddress = ReadString(session, "ip");
                     }
                 }
+
+                CurrentSessionUserId = sessionUserId == null ? "" : sessionUserId.Trim();
+                CurrentSessionUserName = sessionUserName == null ? "" : sessionUserName.Trim();
 
                 return new OviaErpProjectListResult
                 {

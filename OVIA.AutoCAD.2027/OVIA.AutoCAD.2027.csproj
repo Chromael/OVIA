@@ -20,11 +20,11 @@
 
   <!--
     지원 AutoCAD 설치 여부와 무관하게 네 버전 플러그인을 항상 빌드합니다.
-    CAD 추출 핵심 소스는 검증된 단일 기준 파일을 링크하여 버전별 fork를 금지합니다.
+    CAD 추출 핵심 소스는 OVIA.AutoCAD.Common의 검증된 단일 기준 파일을 링크하여 버전별 fork를 금지합니다.
   -->
   <ItemGroup>
-    <Compile Include="OviaCommands.cs" />
-    <Compile Include="OviaTitleTextCommands.cs" />
+    <Compile Include="..\OVIA.AutoCAD.Common\OviaCommands.cs" Link="OviaCommands.cs" />
+    <Compile Include="..\OVIA.AutoCAD.Common\OviaTitleTextCommands.cs" Link="OviaTitleTextCommands.cs" />
   </ItemGroup>
 
   <ItemGroup>

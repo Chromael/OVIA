@@ -50,6 +50,7 @@ namespace OVIA.Desktop
         private readonly string projectStatus;
 
         private DataGridView grid;
+        private OviaContentLoadingOverlay contentLoadingOverlay;
         private ContextMenuStrip gridContextMenu;
         private ToolStripMenuItem undoMenuItem;
         private ToolStripMenuItem redoMenuItem;
@@ -77,9 +78,13 @@ namespace OVIA.Desktop
         private bool gridSortAscending = true;
         private const int MaxUndoCount = 30;
         private bool allowExtractEditMenu = false;
-        private const string ReferenceFilePrefix = "참고용 : ";
+        private const string TemporarySaveLocationPrefix = "임시저장위치 : ";
+        private const string FinalLengthHeader = "OVIA_FINAL_LENGTH";
         private Panel actionPanel;
-        private TextBox txtFilePath;
+        private string referenceFilePath = "";
+        // ERP/로컬에 이미 확정된 BarList 헤더 메타데이터를 철근 행과 분리해 보존한다.
+        // 빈 BarList는 화면 Grid에 가짜 1행을 표시하지 않되, 이후 CAD 추출 시 제목/발주정보/ERP idx가 유지되어야 한다.
+        private Dictionary<string, string> persistedBarListMeta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private Label lblRowCount;
         private Label lblTotalQty;
         private Label lblTotalLength;
@@ -118,6 +123,9 @@ namespace OVIA.Desktop
         private const int SummaryDrawerWidth = 430;
         private const int SummaryDrawerGap = 10;
         private ToolTip windowToolTip;
+        private ToolStripDropDown finalLengthBubble;
+        private Timer finalLengthBubbleTimer;
+        private DateTime suppressFinalLengthBubbleUntilUtc = DateTime.MinValue;
         private OviaBarListMappingStore mappingStore;
         private RebarShapeRepository shapeRepository;
         private RebarShapeRenderer shapeRenderer = new RebarShapeRenderer();
@@ -263,17 +271,44 @@ namespace OVIA.Desktop
             BuildCommandBar(contentPanel);
             BuildActionBar(contentPanel);
             BuildProjectInfo(contentPanel);
-            BuildReferenceBar(contentPanel);
             BuildSummary(contentPanel);
             BuildGrid(contentPanel);
             BuildSummaryDrawer(contentPanel);
             BuildSelectionSummaryOverlay(contentPanel);
+            BuildContentLoadingOverlay();
             contentPanel.Resize += ContentPanel_Resize;
             UpdateScrollableContentSize();
             LayoutBarListFloatingPanels();
             ResetScrollToTopLeft();
 
             this.ResumeLayout(false);
+        }
+
+        private void BuildContentLoadingOverlay()
+        {
+            contentLoadingOverlay = new OviaContentLoadingOverlay();
+            this.Controls.Add(contentLoadingOverlay);
+            contentLoadingOverlay.BringToFront();
+        }
+
+        private void BeginContentLoadingImmediate()
+        {
+            if (contentLoadingOverlay == null)
+            {
+                return;
+            }
+
+            contentLoadingOverlay.BeginLoading();
+            contentLoadingOverlay.ShowOverlayNow();
+            contentLoadingOverlay.BringToFront();
+        }
+
+        private void EndContentLoading()
+        {
+            if (contentLoadingOverlay != null)
+            {
+                contentLoadingOverlay.EndLoading();
+            }
         }
 
         private void ScrollPanel_Resize(object sender, EventArgs e)
@@ -1012,64 +1047,35 @@ namespace OVIA.Desktop
                 projectContextHeader.SetContext(projectNo, projectName, "", "", "", clientName, projectStatus);
             }
             parent.Controls.Add(projectContextHeader);
-        }
-
-        private void BuildReferenceBar(Control parent)
-        {
-            txtFilePath = new TextBox();
-            txtFilePath.Location = new Point(34, 228);
-            txtFilePath.Size = new Size(1168, 25);
-            txtFilePath.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            txtFilePath.Font = new Font("맑은 고딕", 9F, FontStyle.Regular);
-            OviaFluentTheme.ApplyTextBox(txtFilePath);
-            txtFilePath.ReadOnly = true;
-            txtFilePath.TabStop = false;
-            txtFilePath.BackColor = Color.White;
-            SetReferenceFilePath("");
-            parent.Controls.Add(txtFilePath);
+            UpdateProjectTitleTemporarySaveToolTip();
         }
 
         private void SetReferenceFilePath(string filePath)
         {
-            if (txtFilePath == null || txtFilePath.IsDisposed)
-            {
-                return;
-            }
-
-            string normalizedPath = filePath == null ? "" : filePath.Trim();
-            txtFilePath.Tag = normalizedPath;
-            txtFilePath.Text = ReferenceFilePrefix + normalizedPath;
-            txtFilePath.SelectionStart = 0;
-            txtFilePath.SelectionLength = 0;
+            referenceFilePath = filePath == null ? "" : filePath.Trim();
+            UpdateProjectTitleTemporarySaveToolTip();
         }
 
         private string GetReferenceFilePath()
         {
-            if (txtFilePath == null || txtFilePath.IsDisposed)
+            return referenceFilePath == null ? "" : referenceFilePath.Trim();
+        }
+
+        private void UpdateProjectTitleTemporarySaveToolTip()
+        {
+            if (projectContextHeader == null || projectContextHeader.IsDisposed)
             {
-                return "";
+                return;
             }
 
-            string taggedPath = txtFilePath.Tag as string;
-
-            if (taggedPath != null)
-            {
-                return taggedPath.Trim();
-            }
-
-            string text = txtFilePath.Text == null ? "" : txtFilePath.Text.Trim();
-
-            if (text.StartsWith(ReferenceFilePrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return text.Substring(ReferenceFilePrefix.Length).Trim();
-            }
-
-            return text;
+            string path = GetReferenceFilePath();
+            string tooltipText = path == "" ? "" : TemporarySaveLocationPrefix + path;
+            projectContextHeader.SetProjectToolTip(tooltipText);
         }
 
         private void BuildSummary(Control parent)
         {
-            int y = 267;
+            int y = 228;
             AddCompactSummaryCard(parent, "행", "0", "", new Point(34, y), new Size(165, 50), out lblRowCount);
             AddCompactSummaryCard(parent, "수량", "0", "EA", new Point(209, y), new Size(210, 50), out lblTotalQty);
             AddCompactSummaryCard(parent, "총길이", "0.00", "M", new Point(429, y), new Size(240, 50), out lblTotalLength);
@@ -1142,8 +1148,8 @@ namespace OVIA.Desktop
         {
             grid = new DataGridView();
             EnableGridDoubleBuffering(grid);
-            grid.Location = new Point(34, 329);
-            grid.Size = new Size(1168, 397);
+            grid.Location = new Point(34, 290);
+            grid.Size = new Size(1168, 436);
             grid.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             grid.BackgroundColor = Color.White;
             grid.BorderStyle = BorderStyle.None;
@@ -1166,6 +1172,7 @@ namespace OVIA.Desktop
             grid.CellBeginEdit += Grid_CellBeginEdit;
             grid.CellEndEdit += Grid_CellEndEdit;
             grid.CellMouseDown += Grid_CellMouseDown;
+            grid.CellMouseClick += Grid_CellMouseClick;
             grid.CellDoubleClick += Grid_CellDoubleClick;
             grid.MouseDown += Grid_MouseDown;
             grid.MouseMove += Grid_MouseMove;
@@ -3416,7 +3423,11 @@ namespace OVIA.Desktop
             // 이렇게 해야 저장 후 뒤로가기 시 늦게 발생한 CellEndEdit가 저장 상태를 다시 dirty로 만들지 않는다.
             CommitPendingGridEdit();
 
-            if (grid.Columns.Count == 0 || grid.Rows.Count == 0)
+            // 신규 BarList는 CAD 철근집계표를 아직 추출하지 않았더라도
+            // 신규등록 팝업의 기본정보만으로 저장할 수 있어야 한다.
+            // 기존 BarList에는 빈 데이터 저장을 허용하지 않아 기존 보호 규칙을 유지한다.
+            bool registrationOnlySave = registrationDraft != null && grid.Rows.Count == 0;
+            if ((grid.Columns.Count == 0 || grid.Rows.Count == 0) && !registrationOnlySave)
             {
                 MessageBox.Show(
                     "저장할 BarList 데이터가 없습니다.",
@@ -3426,6 +3437,21 @@ namespace OVIA.Desktop
                 );
 
                 return;
+            }
+
+            if (registrationOnlySave)
+            {
+                DialogResult emptySaveResult = MessageBox.Show(
+                    "입력된 BarList 데이터가 없습니다. 그래도 저장하시겠습니까? 해당 BarList에 추후에 다시 입력할 수 있습니다.",
+                    "OVIA BarList 저장 확인",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning
+                );
+
+                if (emptySaveResult != DialogResult.Yes)
+                {
+                    return;
+                }
             }
 
             RefreshSaveStateFromCurrentGrid();
@@ -3477,21 +3503,87 @@ namespace OVIA.Desktop
                 // SaveGridToCsv가 파일을 다시 쓸 때 이 메타데이터가 사라지면 다음 저장이 신규 INSERT로 처리되므로
                 // 저장 직전 idx를 보관하고 CSV 재작성 직후 반드시 복원한다.
                 int persistedErpBarListId = OviaErpBarListSyncService.GetPersistedErpBarListId(filePath);
-                if (persistedErpBarListId <= 0 && registrationDraft != null && registrationDraft.ErpBarListId > 0)
-                {
-                    // 신규등록 팝업에서 이미 ERP barlist 헤더를 생성했다.
-                    // 첫 상세 저장은 반드시 그 idx를 재사용하여 중복 INSERT가 발생하지 않게 한다.
-                    persistedErpBarListId = registrationDraft.ErpBarListId;
-                }
-
                 NormalizeCadShapeJsonFilesForSave(filePath);
-                SaveGridToCsv(filePath);
+                if (registrationOnlySave)
+                {
+                    SaveRegistrationDraftOnlyCsv(filePath);
+                }
+                else
+                {
+                    SaveGridToCsv(filePath);
+                }
                 OviaErpBarListSyncService.RestorePersistedErpBarListId(filePath, persistedErpBarListId);
 
-                OviaErpBarListSyncResult erpSync = await OviaErpBarListSyncService.PushSavedBarListAsync(
-                    companyId,
-                    projectNo,
-                    filePath);
+                OviaErpBarListSyncResult erpSync;
+                if (registrationOnlySave)
+                {
+                    // CAD 철근데이터가 없는 신규 BarList의 최초 확정은 barlist_sync_push가 아니라
+                    // ERP의 헤더 등록 API를 사용한다. 팝업 저장 시점이 아니라 이 '저장완료' 시점에만 생성한다.
+                    erpSync = await OviaErpBarListSyncService.RegisterNewBarListAsync(
+                        companyId,
+                        projectNo,
+                        registrationDraft);
+
+                    if (erpSync.IsSuccess && erpSync.BarListId > 0)
+                    {
+                        filePath = OviaErpBarListSyncService.FinalizeRegisteredEmptyBarListLocalCache(
+                            projectNo,
+                            filePath,
+                            erpSync.BarListId);
+                        erpSync.LocalCachePath = filePath;
+
+                        // 진행상태는 ERP 단독 원장이다. 신규등록 성공 직후 현재 BarList의 ERP 메타만
+                        // 경량 Pull하여 로컬 canonical CSV에 반영한다. 철근행/Shapes는 건드리지 않는다.
+                        OviaErpBarListSyncResult progressRefresh = await OviaErpBarListSyncService.RefreshBarListMetadataFromErpAsync(
+                            companyId,
+                            projectNo,
+                            filePath);
+                        if (!progressRefresh.IsSuccess)
+                        {
+                            erpSync = new OviaErpBarListSyncResult
+                            {
+                                IsSuccess = false,
+                                BarListId = erpSync.BarListId,
+                                LocalCachePath = filePath,
+                                Message = "ERP 신규 BarList 등록은 완료했지만 진행상태 재조회에 실패했습니다: " + progressRefresh.Message
+                            };
+                        }
+                    }
+                }
+                else
+                {
+                    erpSync = await OviaErpBarListSyncService.PushSavedBarListAsync(
+                        companyId,
+                        projectNo,
+                        filePath);
+
+                    if (erpSync.IsSuccess)
+                    {
+                        // CAD 검토 후 저장이 성공해도 진행상태는 OVIA가 결정하지 않는다.
+                        // ERP가 보유한 최신 진행상태만 현재 canonical CSV 메타에 다시 수신한다.
+                        string metadataPath = string.IsNullOrWhiteSpace(erpSync.LocalCachePath)
+                            ? filePath
+                            : erpSync.LocalCachePath;
+                        OviaErpBarListSyncResult metadataRefresh = await OviaErpBarListSyncService.RefreshBarListMetadataFromErpAsync(
+                            companyId,
+                            projectNo,
+                            metadataPath);
+                        if (!metadataRefresh.IsSuccess)
+                        {
+                            erpSync = new OviaErpBarListSyncResult
+                            {
+                                IsSuccess = false,
+                                BarListId = erpSync.BarListId,
+                                LocalCachePath = metadataPath,
+                                Message = "ERP BarList 저장은 완료했지만 진행상태 재조회에 실패했습니다: " + metadataRefresh.Message
+                            };
+                        }
+                        else
+                        {
+                            filePath = metadataPath;
+                        }
+                    }
+                }
 
                 ResetAllRowOriginalValuesToCurrent();
 
@@ -3506,10 +3598,11 @@ namespace OVIA.Desktop
 
                 if (!erpSync.IsSuccess)
                 {
+                    string retryAction = registrationOnlySave ? "저장완료" : "검토 후 저장";
                     MessageBox.Show(
                         "BarList는 OVIA 로컬에 저장되었습니다.\r\n\r\nERP에는 아직 반영되지 않았습니다.\r\n"
                         + erpSync.Message
-                        + "\r\n\r\n서버/API 상태를 확인한 뒤 '검토 후 저장'을 다시 눌러주세요.",
+                        + "\r\n\r\n서버/API 상태를 확인한 뒤 '" + retryAction + "'을 다시 눌러주세요.",
                         "OVIA ERP 동기화",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning
@@ -3531,6 +3624,7 @@ namespace OVIA.Desktop
                 // 신규 BarList 첫 저장에서 baseline을 먼저 잡으면 lastLoadedFilePath(CAD 추출 CSV)의
                 // ERP pending 상태를 잘못 참조하여 실제 저장 성공 후에도 isSaved=false가 남을 수 있다.
                 SetReferenceFilePath(filePath);
+                ApplyRebarElongationForAllRows();
                 lastLoadedFilePath = filePath;
                 savedProjectFilePath = filePath;
 
@@ -3544,7 +3638,10 @@ namespace OVIA.Desktop
                     RefreshSaveStateFromCurrentGrid();
                 }
 
-                OviaBarListRegistrationDraftStore.Clear(companyId, projectNo);
+                if (erpSync.IsSuccess)
+                {
+                    OviaBarListRegistrationDraftStore.Clear(companyId, projectNo);
+                }
                 RefreshProjectContextHeaderFromGrid();
                 WriteBarListWorkLogs(workLogDescriptions);
             }
@@ -5843,6 +5940,13 @@ namespace OVIA.Desktop
                     return false;
                 }
 
+                // 다른 BarList 가져오기는 철근 행 데이터만 복사하는 기능이다.
+                // 원본 BarList의 제목/ERP idx/발주정보/진행상태/작성자 등 헤더 메타가
+                // 현재 열려 있는 BarList의 메타를 덮어쓰면 안 된다.
+                // 현재 BarList에서 이미 보존 중인 canonical 메타를 선택 행에 다시 주입한 뒤 Bind/Append한다.
+                ApplyPersistedBarListMetaToCsvRows(selectedRows);
+                ApplyRegistrationDraftToCsvRows(selectedRows);
+
                 if (hasActiveSummaryFilter)
                 {
                     hasActiveSummaryFilter = false;
@@ -5873,6 +5977,7 @@ namespace OVIA.Desktop
 
                 rebarMismatchWarningShown = false;
                 ApplyRebarCalculationAndValidation(true);
+                ApplyRebarElongationForAllRows();
                 allowExtractEditMenu = true;
                 ClearUndoRedoStates();
                 RecalculateSummary();
@@ -5927,7 +6032,7 @@ namespace OVIA.Desktop
             row.DefaultCellStyle.BackColor = OviaFluentTheme.SuccessLight;
         }
 
-        private void DeleteRows_Click(object sender, EventArgs e)
+        private async void DeleteRows_Click(object sender, EventArgs e)
         {
             List<int> selectedIndexes = GetSelectedRowIndexes(false);
 
@@ -5946,20 +6051,57 @@ namespace OVIA.Desktop
             GridUndoSnapshot undoState = CaptureGridState();
             PushUndoState(undoState);
 
-            int i;
+            BeginContentLoadingImmediate();
+            if (grid != null) grid.Enabled = false;
 
-            for (i = 0; i < selectedIndexes.Count; i++)
+            try
             {
-                if (selectedIndexes[i] >= 0 && selectedIndexes[i] < grid.Rows.Count && !grid.Rows[selectedIndexes[i]].IsNewRow)
-                {
-                    grid.Rows.RemoveAt(selectedIndexes[i]);
-                }
-            }
+                // 로딩 심볼이 실제로 한 프레임 그려진 뒤 대량 삭제를 시작합니다.
+                await System.Threading.Tasks.Task.Yield();
 
-            ApplyRebarCalculationAndValidation(false);
-            MarkUnsaved();
-            RecalculateSummary();
-            grid.Invalidate();
+                int dataRowCount = 0;
+                int rowIndex;
+                for (rowIndex = 0; rowIndex < grid.Rows.Count; rowIndex++)
+                {
+                    if (!grid.Rows[rowIndex].IsNewRow) dataRowCount++;
+                }
+
+                if (selectedIndexes.Count >= dataRowCount && dataRowCount > 0)
+                {
+                    // 전체 선택 삭제는 행을 하나씩 제거하지 않고 한 번에 비워 대량 데이터에서도 UI 정지를 최소화합니다.
+                    grid.Rows.Clear();
+                }
+                else
+                {
+                    int i;
+                    for (i = 0; i < selectedIndexes.Count; i++)
+                    {
+                        int selectedIndex = selectedIndexes[i];
+                        if (selectedIndex >= 0 && selectedIndex < grid.Rows.Count && !grid.Rows[selectedIndex].IsNewRow)
+                        {
+                            grid.Rows.RemoveAt(selectedIndex);
+                        }
+
+                        // 부분 대량 삭제도 주기적으로 메시지 루프에 제어를 돌려 로딩 애니메이션이 멈추지 않게 합니다.
+                        if (i > 0 && (i % 100) == 0)
+                        {
+                            await System.Threading.Tasks.Task.Yield();
+                        }
+                    }
+                }
+
+                await System.Threading.Tasks.Task.Yield();
+                ApplyRebarCalculationAndValidation(false);
+                ApplyRebarElongationForAllRows();
+                MarkUnsaved();
+                RecalculateSummary();
+                grid.Invalidate();
+            }
+            finally
+            {
+                if (grid != null && !grid.IsDisposed) grid.Enabled = true;
+                EndContentLoading();
+            }
         }
 
         private void Grid_CellBeginEdit(object sender, DataGridViewCellCancelEventArgs e)
@@ -5995,12 +6137,16 @@ namespace OVIA.Desktop
             RefreshModifiedCellVisual(e.RowIndex, e.ColumnIndex);
             UpdateImportedTotalMetaFromUserEdit(e.RowIndex, e.ColumnIndex);
             ApplyRebarCalculationAndValidation(false);
+            ApplyRebarElongationForRow(e.RowIndex);
             MarkUnsaved();
             RecalculateSummary();
         }
 
         private void Grid_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
         {
+            suppressFinalLengthBubbleUntilUtc = DateTime.UtcNow.AddMilliseconds(Math.Max(350, SystemInformation.DoubleClickTime));
+            HideFinalLengthBubble();
+
             if (!CanUseExtractEditMenu())
             {
                 return;
@@ -6035,6 +6181,274 @@ namespace OVIA.Desktop
 
             grid.CurrentCell = grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
             grid.BeginEdit(true);
+        }
+
+        private void Grid_CellMouseClick(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (grid == null || e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            HideFinalLengthBubble();
+
+            if (DateTime.UtcNow < suppressFinalLengthBubbleUntilUtc)
+            {
+                return;
+            }
+
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 || e.RowIndex >= grid.Rows.Count || e.ColumnIndex >= grid.Columns.Count)
+            {
+                return;
+            }
+
+            if (grid.Rows[e.RowIndex].IsNewRow || !grid.Columns[e.ColumnIndex].Visible)
+            {
+                return;
+            }
+
+            int lengthCol = FindSingleLengthColumnIndex();
+            if (lengthCol < 0 || e.ColumnIndex != lengthCol)
+            {
+                return;
+            }
+
+            int finalLengthCol = EnsureFinalLengthColumn();
+            if (finalLengthCol < 0)
+            {
+                return;
+            }
+
+            string finalLengthText = GetCellText(e.RowIndex, finalLengthCol);
+            double finalLengthMm;
+            if (!TryParseNumber(finalLengthText, out finalLengthMm) || finalLengthMm < 0D)
+            {
+                return;
+            }
+
+            ShowFinalLengthBubble(e.RowIndex, e.ColumnIndex, "L = " + FormatFinalLengthMm(finalLengthMm));
+        }
+
+        private void ShowFinalLengthBubble(int rowIndex, int columnIndex, string message)
+        {
+            if (grid == null || String.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            HideFinalLengthBubble();
+
+            FinalLengthBubbleControl bubbleControl = new FinalLengthBubbleControl(message);
+            ToolStripControlHost host = new ToolStripControlHost(bubbleControl);
+            host.AutoSize = false;
+            host.Size = bubbleControl.Size;
+            host.Margin = Padding.Empty;
+            host.Padding = Padding.Empty;
+
+            finalLengthBubble = new ToolStripDropDown();
+            finalLengthBubble.AutoSize = false;
+            finalLengthBubble.Padding = Padding.Empty;
+            finalLengthBubble.Margin = Padding.Empty;
+            finalLengthBubble.BackColor = Color.Black;
+            finalLengthBubble.DropShadowEnabled = true;
+            finalLengthBubble.Items.Add(host);
+            finalLengthBubble.Size = bubbleControl.Size;
+
+            Rectangle cellRect = grid.GetCellDisplayRectangle(columnIndex, rowIndex, true);
+            Point screenCellTopLeft = grid.PointToScreen(new Point(cellRect.Left, cellRect.Top));
+
+            int x = screenCellTopLeft.X + Math.Max(0, (cellRect.Width - bubbleControl.Width) / 2);
+            int y = screenCellTopLeft.Y - bubbleControl.Height - 4;
+            Rectangle working = Screen.FromControl(grid).WorkingArea;
+
+            if (y < working.Top)
+            {
+                y = screenCellTopLeft.Y + cellRect.Height + 4;
+                bubbleControl.ArrowPointsUp = true;
+            }
+
+            if (x + bubbleControl.Width > working.Right)
+            {
+                x = working.Right - bubbleControl.Width - 4;
+            }
+
+            if (x < working.Left)
+            {
+                x = working.Left + 4;
+            }
+
+            finalLengthBubble.Show(new Point(x, y));
+
+            if (finalLengthBubbleTimer == null)
+            {
+                finalLengthBubbleTimer = new Timer();
+                finalLengthBubbleTimer.Interval = 1800;
+                finalLengthBubbleTimer.Tick += delegate
+                {
+                    HideFinalLengthBubble();
+                };
+            }
+
+            finalLengthBubbleTimer.Stop();
+            finalLengthBubbleTimer.Start();
+        }
+
+        private void HideFinalLengthBubble()
+        {
+            if (finalLengthBubbleTimer != null)
+            {
+                finalLengthBubbleTimer.Stop();
+            }
+
+            if (finalLengthBubble != null)
+            {
+                try
+                {
+                    finalLengthBubble.Close(ToolStripDropDownCloseReason.CloseCalled);
+                    finalLengthBubble.Dispose();
+                }
+                catch
+                {
+                }
+
+                finalLengthBubble = null;
+            }
+        }
+
+        private sealed class FinalLengthBubbleControl : Control
+        {
+            private readonly string message;
+            private const int BubbleRadius = 7;
+            private const int ArrowHeight = 7;
+            private const int HorizontalPadding = 12;
+            private const int VerticalPadding = 7;
+            private bool arrowPointsUp;
+
+            public FinalLengthBubbleControl(string text)
+            {
+                message = text ?? "";
+                SetStyle(
+                    ControlStyles.UserPaint |
+                    ControlStyles.AllPaintingInWmPaint |
+                    ControlStyles.OptimizedDoubleBuffer |
+                    ControlStyles.SupportsTransparentBackColor,
+                    true
+                );
+                UpdateStyles();
+
+                Font = new Font("맑은 고딕", 9.0F, FontStyle.Regular);
+                ForeColor = Color.White;
+                BackColor = Color.Transparent;
+                DoubleBuffered = true;
+
+                Size measured = TextRenderer.MeasureText(
+                    message,
+                    Font,
+                    new Size(Int32.MaxValue, Int32.MaxValue),
+                    TextFormatFlags.NoPadding | TextFormatFlags.SingleLine
+                );
+
+                Width = Math.Max(58, measured.Width + (HorizontalPadding * 2));
+                Height = measured.Height + (VerticalPadding * 2) + ArrowHeight;
+                MinimumSize = Size;
+                MaximumSize = Size;
+            }
+
+            public bool ArrowPointsUp
+            {
+                get { return arrowPointsUp; }
+                set
+                {
+                    if (arrowPointsUp == value)
+                    {
+                        return;
+                    }
+
+                    arrowPointsUp = value;
+                    Invalidate();
+                }
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                base.OnPaint(e);
+
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+                Rectangle bubbleRect = ArrowPointsUp
+                    ? new Rectangle(0, ArrowHeight, Width - 1, Height - ArrowHeight - 1)
+                    : new Rectangle(0, 0, Width - 1, Height - ArrowHeight - 1);
+
+                using (GraphicsPath path = CreateRoundedRectanglePath(bubbleRect, BubbleRadius))
+                using (SolidBrush background = new SolidBrush(Color.FromArgb(32, 32, 32)))
+                using (SolidBrush textBrush = new SolidBrush(Color.White))
+                {
+                    e.Graphics.FillPath(background, path);
+
+                    Point[] arrow;
+                    int centerX = Width / 2;
+                    if (ArrowPointsUp)
+                    {
+                        arrow = new Point[]
+                        {
+                            new Point(centerX - 6, ArrowHeight),
+                            new Point(centerX, 0),
+                            new Point(centerX + 6, ArrowHeight)
+                        };
+                    }
+                    else
+                    {
+                        int baseY = Height - ArrowHeight - 1;
+                        arrow = new Point[]
+                        {
+                            new Point(centerX - 6, baseY),
+                            new Point(centerX, Height - 1),
+                            new Point(centerX + 6, baseY)
+                        };
+                    }
+
+                    e.Graphics.FillPolygon(background, arrow);
+
+                    Rectangle textRect = new Rectangle(
+                        HorizontalPadding,
+                        bubbleRect.Top + VerticalPadding,
+                        Width - (HorizontalPadding * 2),
+                        bubbleRect.Height - (VerticalPadding * 2)
+                    );
+
+                    TextRenderer.DrawText(
+                        e.Graphics,
+                        message,
+                        Font,
+                        textRect,
+                        Color.White,
+                        TextFormatFlags.HorizontalCenter |
+                        TextFormatFlags.VerticalCenter |
+                        TextFormatFlags.NoPadding |
+                        TextFormatFlags.SingleLine
+                    );
+                }
+            }
+
+            private static GraphicsPath CreateRoundedRectanglePath(Rectangle rect, int radius)
+            {
+                GraphicsPath path = new GraphicsPath();
+                int diameter = Math.Max(2, radius * 2);
+
+                if (rect.Width <= diameter || rect.Height <= diameter)
+                {
+                    path.AddRectangle(rect);
+                    path.CloseFigure();
+                    return path;
+                }
+
+                path.AddArc(rect.Left, rect.Top, diameter, diameter, 180F, 90F);
+                path.AddArc(rect.Right - diameter, rect.Top, diameter, diameter, 270F, 90F);
+                path.AddArc(rect.Right - diameter, rect.Bottom - diameter, diameter, diameter, 0F, 90F);
+                path.AddArc(rect.Left, rect.Bottom - diameter, diameter, diameter, 90F, 90F);
+                path.CloseFigure();
+                return path;
+            }
         }
 
         private void Grid_CellMouseDown(object sender, DataGridViewCellMouseEventArgs e)
@@ -7358,6 +7772,7 @@ namespace OVIA.Desktop
             }
 
             ApplyRebarCalculationAndValidation(false);
+            ApplyRebarElongationForAllRows();
             MarkUnsaved();
             RecalculateSummary();
             grid.Invalidate();
@@ -8042,6 +8457,7 @@ namespace OVIA.Desktop
             }
 
             ApplyRebarCalculationAndValidation(false);
+            ApplyRebarElongationForAllRows();
             MarkUnsaved();
             RecalculateSummary();
             grid.Invalidate();
@@ -8987,7 +9403,9 @@ namespace OVIA.Desktop
             CommitPendingGridEdit();
             RefreshSaveStateFromCurrentGrid();
 
-            if (!isSaved && grid != null && grid.Columns.Count > 0 && grid.Rows.Count > 0)
+            bool pendingNewRegistration = registrationDraft != null && string.IsNullOrWhiteSpace(savedProjectFilePath);
+            bool hasUnsavedGridRows = !isSaved && grid != null && grid.Columns.Count > 0 && grid.Rows.Count > 0;
+            if (pendingNewRegistration || hasUnsavedGridRows)
             {
                 DialogResult result = MessageBox.Show(
                     "저장하지 않은 BarList 데이터가 있습니다.\r\n\r\n이전 화면으로 이동하면 저장하지 않은 변경 내용이 사라질 수 있습니다.\r\n이동하시겠습니까?",
@@ -8999,6 +9417,12 @@ namespace OVIA.Desktop
                 if (result != DialogResult.Yes)
                 {
                     return false;
+                }
+
+                if (pendingNewRegistration)
+                {
+                    // 팝업 저장은 Draft일 뿐이므로 상세 화면에서 저장완료 없이 나가면 Draft도 폐기한다.
+                    OviaBarListRegistrationDraftStore.Clear(companyId, projectNo);
                 }
             }
 
@@ -9021,7 +9445,8 @@ namespace OVIA.Desktop
         {
             CommitPendingGridEdit();
             RefreshSaveStateFromCurrentGrid();
-            return !isSaved && grid != null && grid.Columns.Count > 0 && grid.Rows.Count > 0;
+            bool pendingNewRegistration = registrationDraft != null && string.IsNullOrWhiteSpace(savedProjectFilePath);
+            return pendingNewRegistration || (!isSaved && grid != null && grid.Columns.Count > 0 && grid.Rows.Count > 0);
         }
 
         public string GetUnsavedWorkspaceDataName()
@@ -9346,7 +9771,7 @@ namespace OVIA.Desktop
                 return true;
             }
 
-            if (txtFilePath != null && IsBarListFileLocked(GetReferenceFilePath()))
+            if (IsBarListFileLocked(GetReferenceFilePath()))
             {
                 return true;
             }
@@ -9565,24 +9990,44 @@ namespace OVIA.Desktop
             try
             {
                 List<List<string>> rows = ReadCsv(filePath);
+
+                // 저장된 BarList를 여는 경우 철근 items와 별개인 헤더 메타를 먼저 보관한다.
+                // ERP items=0인 BarList도 여기서 제목/발주번호/ERP idx를 잃지 않는다.
+                if (loadAsSaved)
+                {
+                    CapturePersistedBarListMeta(rows);
+                }
+
                 rows = RemoveNonRebarRowsFromAutoCadCsv(rows);
                 NormalizeCadShapePathsInCsvRows(rows, filePath);
+
+                // 기존 BarList에 CAD를 나중에 추출하는 경우, AutoCAD CSV의 빈 메타값이
+                // 사용자가 최초 등록한 제목 등을 덮어쓰지 않도록 저장된 헤더 메타를 주입한다.
+                if (!loadAsSaved)
+                {
+                    ApplyPersistedBarListMetaToCsvRows(rows);
+                }
                 ApplyRegistrationDraftToCsvRows(rows);
 
-                if (rows == null || rows.Count <= 1)
-                {
-                    lblStatus.Text = "CSV 파일에 읽을 데이터가 없습니다.";
-                    lblStatus.ForeColor = OviaFluentTheme.Danger;
+                // ERP에 헤더만 있고 철근 items가 0건인 BarList의 메타 전용 행은
+                // 상세 Grid에서는 데이터 행으로 보이면 안 된다. 헤더만 남겨 0행으로 표시한다.
+                rows = RemoveMetadataOnlyBarListRowsForDisplay(rows);
 
+                if (rows == null || rows.Count == 0)
+                {
+                    lblStatus.Text = "CSV 파일을 읽을 수 없습니다.";
+                    lblStatus.ForeColor = OviaFluentTheme.Danger;
                     return false;
                 }
 
                 BindCsvRows(rows);
                 rebarMismatchWarningShown = false;
                 ApplyRebarCalculationAndValidation(true);
+                ApplyRebarElongationForAllRows();
                 allowExtractEditMenu = true;
                 ClearUndoRedoStates();
                 SetReferenceFilePath(filePath);
+                ApplyRebarElongationForAllRows();
                 lastLoadedFilePath = filePath;
 
                 RecalculateSummary();
@@ -9618,6 +10063,7 @@ namespace OVIA.Desktop
                 List<List<string>> rows = ReadCsv(filePath);
                 rows = RemoveNonRebarRowsFromAutoCadCsv(rows);
                 NormalizeCadShapePathsInCsvRows(rows, filePath);
+                ApplyPersistedBarListMetaToCsvRows(rows);
                 ApplyRegistrationDraftToCsvRows(rows);
 
                 if (rows == null || rows.Count <= 1)
@@ -9647,9 +10093,11 @@ namespace OVIA.Desktop
 
                 rebarMismatchWarningShown = false;
                 ApplyRebarCalculationAndValidation(true);
+                ApplyRebarElongationForAllRows();
                 allowExtractEditMenu = true;
                 ClearUndoRedoStates();
                 SetReferenceFilePath(filePath);
+                ApplyRebarElongationForAllRows();
                 lastLoadedFilePath = filePath;
                 RecalculateSummary();
                 MarkUnsaved();
@@ -9663,6 +10111,111 @@ namespace OVIA.Desktop
                 lblStatus.ForeColor = OviaFluentTheme.Danger;
                 return false;
             }
+        }
+
+        private static readonly string[] PersistedBarListMetaHeaders = new string[]
+        {
+            "OVIA_ERP_BARLIST_IDX", "OVIA_ERP_LIST_ORDER", "상태", "작성", "발주번호", "발주일", "등록일", "납기일",
+            "동", "층", "공종", "진행", "제목", "태그", "색상", "주문량", "태그발행", "기타",
+            "장대", "절단", "절곡", "출하", "미출하", "작성자", "OVIA_BARLIST_MEMO"
+        };
+
+        private void CapturePersistedBarListMeta(List<List<string>> rows)
+        {
+            if (rows == null || rows.Count == 0 || rows[0] == null)
+            {
+                return;
+            }
+
+            Dictionary<string, string> captured = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            List<string> headers = rows[0];
+
+            for (int h = 0; h < PersistedBarListMetaHeaders.Length; h++)
+            {
+                string header = PersistedBarListMetaHeaders[h];
+                int columnIndex = FindCsvColumnIndex(headers, header);
+                if (columnIndex < 0)
+                {
+                    continue;
+                }
+
+                string value = "";
+                for (int r = 1; r < rows.Count; r++)
+                {
+                    string candidate = GetCsvCellText(rows[r], columnIndex);
+                    if (candidate != "")
+                    {
+                        value = candidate;
+                        break;
+                    }
+                }
+
+                if (value != "")
+                {
+                    captured[header] = value;
+                }
+            }
+
+            // 저장된 파일을 정상적으로 읽은 경우에만 현재 BarList 메타를 교체한다.
+            // 값이 하나도 없으면 기존 메타를 지우지 않아 CAD 임시 CSV가 canonical 메타를 소거하지 못하게 한다.
+            if (captured.Count > 0)
+            {
+                persistedBarListMeta = captured;
+            }
+        }
+
+        private void ApplyPersistedBarListMetaToCsvRows(List<List<string>> rows)
+        {
+            if (rows == null || rows.Count == 0 || rows[0] == null || persistedBarListMeta == null || persistedBarListMeta.Count == 0)
+            {
+                return;
+            }
+
+            foreach (KeyValuePair<string, string> pair in persistedBarListMeta)
+            {
+                SetRegistrationDraftCsvValue(rows, pair.Key, pair.Value);
+            }
+        }
+
+        private List<List<string>> RemoveMetadataOnlyBarListRowsForDisplay(List<List<string>> rows)
+        {
+            if (rows == null || rows.Count <= 1 || rows[0] == null)
+            {
+                return rows;
+            }
+
+            List<string> headers = rows[0];
+            int erpIdIndex = FindCsvColumnIndex(headers, "OVIA_ERP_BARLIST_IDX");
+            int partIndex = FindCsvColumnIndex(headers, "부위");
+            int noIndex = FindCsvColumnIndex(headers, "번호");
+            int specIndex = FindCsvColumnIndex(headers, "철근규격", "규격");
+            int lengthIndex = FindCsvColumnIndex(headers, "길이(mm)", "길이");
+            int qtyIndex = FindCsvColumnIndex(headers, "수량(EA)", "수량");
+            int shapeIndex = FindCsvColumnIndex(headers, "OVIA_CAD_SHAPE_JSON", "CAD_SHAPE_JSON");
+
+            List<List<string>> filtered = new List<List<string>>();
+            filtered.Add(headers);
+
+            for (int r = 1; r < rows.Count; r++)
+            {
+                List<string> row = rows[r];
+                bool hasErpId = erpIdIndex >= 0 && GetCsvCellText(row, erpIdIndex) != "";
+                bool hasRebarData = GetCsvCellText(row, partIndex) != ""
+                    || GetCsvCellText(row, noIndex) != ""
+                    || GetCsvCellText(row, specIndex) != ""
+                    || GetCsvCellText(row, lengthIndex) != ""
+                    || GetCsvCellText(row, qtyIndex) != ""
+                    || GetCsvCellText(row, shapeIndex) != "";
+
+                if (hasErpId && !hasRebarData)
+                {
+                    continue;
+                }
+
+                filtered.Add(row);
+            }
+
+            return filtered;
         }
 
         private void ApplyRegistrationDraftToCsvRows(List<List<string>> rows)
@@ -10208,7 +10761,9 @@ namespace OVIA.Desktop
                     SetRowOriginalValues(newRowIndex, cells);
                 }
 
+                EnsureFinalLengthColumn();
                 ApplyUnitConversionAfterMapping(mappedTable);
+                ApplyRebarElongationForAllRows();
                 ResetImportedCalculationMetaForRows(0, grid.Rows.Count - 1);
                 ApplyGridColumnStyle();
                 ApplySourceDrawingToolTips(0, grid.Rows.Count - 1);
@@ -10868,6 +11423,7 @@ namespace OVIA.Desktop
             }
 
             RefreshModifiedCellVisual(rowIndex, columnIndex);
+            ApplyRebarElongationForRow(rowIndex);
             MarkUnsaved();
             RecalculateSummary();
             lblStatus.ForeColor = TextSub;
@@ -12341,6 +12897,13 @@ namespace OVIA.Desktop
 
         private bool IsCurrentGridEquivalentToSavedBaseline()
         {
+            // 신규등록 팝업에서 기본정보만 입력한 Draft는 아직 ERP/목록에 저장되지 않은 상태다.
+            // CAD 행이 0건이어도 상세 화면의 저장완료 버튼이 활성화되어야 한다.
+            if (registrationDraft != null && string.IsNullOrWhiteSpace(savedProjectFilePath))
+            {
+                return false;
+            }
+
             if (savedGridBaseline == null)
             {
                 return !HasGridData();
@@ -12533,6 +13096,26 @@ namespace OVIA.Desktop
                 return;
             }
 
+            // 신규등록 팝업에서 기본정보만 입력하고 아직 CAD를 추출하지 않은 상태는
+            // 실제 저장 전 Draft이므로 상단 '저장완료' 버튼을 활성화한다.
+            // 사용자가 이 버튼을 눌러 확인한 시점에만 목록/ERP에 최초 생성된다.
+            bool pendingEmptyRegistration = registrationDraft != null
+                && string.IsNullOrWhiteSpace(savedProjectFilePath)
+                && !HasGridData();
+            if (pendingEmptyRegistration)
+            {
+                saveProjectButton.Enabled = true;
+                saveProjectButton.UseDisabledAppearance = false;
+                saveProjectButton.KeepCustomColorsWhenDisabled = false;
+                saveProjectButton.Cursor = Cursors.Hand;
+                saveProjectButton.Text = "저장완료";
+                saveProjectButton.UseCustomColors = false;
+                saveProjectButton.StartColor = OviaFluentTheme.Accent;
+                saveProjectButton.EndColor = OviaFluentTheme.Accent;
+                saveProjectButton.Invalidate();
+                return;
+            }
+
             if (isSaved)
             {
                 // 저장이 완료된 상태는 완료 표식일 뿐 추가 액션이 아니다.
@@ -12572,6 +13155,22 @@ namespace OVIA.Desktop
             string orderNumber = GetFirstNonEmptyGridValue(new string[] { "발주번호", "발주 번호" });
             string dueDate = NormalizeProjectHeaderDate(GetFirstNonEmptyGridValue(new string[] { "납기일", "납기 일자", "납기일자" }));
             string barListTitle = GetFirstNonEmptyGridValue(new string[] { "제목", "BarList 제목", "바리스트 제목" });
+
+            if (barListTitle == "" && registrationDraft != null)
+            {
+                // 빈 BarList 최초 저장 직후에는 화면 Grid에 철근행이 없으므로 파일명으로 fallback하지 않는다.
+                // 신규등록 팝업에서 사용자가 입력한 제목을 상세 화면의 BarList 제목으로 그대로 유지한다.
+                barListTitle = (registrationDraft.Title ?? "").Trim();
+            }
+
+            if (barListTitle == "" && persistedBarListMeta != null)
+            {
+                string persistedTitle;
+                if (persistedBarListMeta.TryGetValue("제목", out persistedTitle))
+                {
+                    barListTitle = (persistedTitle ?? "").Trim();
+                }
+            }
 
             if (barListTitle == "")
             {
@@ -12802,6 +13401,8 @@ namespace OVIA.Desktop
 
         private void SaveGridToCsv(string filePath)
         {
+            ApplyRebarElongationForAllRows();
+
             using (StreamWriter writer = new StreamWriter(filePath, false, new UTF8Encoding(true)))
             {
                 List<DataGridViewColumn> orderedColumns = new List<DataGridViewColumn>();
@@ -12860,6 +13461,57 @@ namespace OVIA.Desktop
                     writer.WriteLine();
                 }
             }
+        }
+
+        private void SaveRegistrationDraftOnlyCsv(string filePath)
+        {
+            // 철근 items가 없는 신규 BarList를 위한 메타 전용 로컬 표현이다.
+            // 이후 CAD 추출 시 이 파일은 동일 ERP idx를 가진 정상 BarList로 갱신된다.
+            string[] headers = new string[]
+            {
+                "부위", "번호", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(Ton)", "비고", "원본 도면",
+                "OVIA_CAD_SHAPE_JSON", "OVIA_SHAPE_SOURCE", "OVIA_SHAPE_STATUS", FinalLengthHeader, "OVIA_ERP_BARLIST_IDX", "OVIA_ERP_LIST_ORDER",
+                "상태", "작성", "발주번호", "발주일", "등록일", "납기일", "동", "층", "공종", "진행", "제목", "태그", "색상", "주문량",
+                "태그발행", "기타", "장대", "절단", "절곡", "출하", "미출하", "작성자", "OVIA_BARLIST_MEMO"
+            };
+
+            using (StreamWriter writer = new StreamWriter(filePath, false, new UTF8Encoding(true)))
+            {
+                for (int i = 0; i < headers.Length; i++)
+                {
+                    if (i > 0) writer.Write(",");
+                    writer.Write(Csv(headers[i]));
+                }
+                writer.WriteLine();
+
+                for (int i = 0; i < headers.Length; i++)
+                {
+                    if (i > 0) writer.Write(",");
+                    writer.Write(Csv(GetRegistrationDraftValueForHeader(headers[i])));
+                }
+                writer.WriteLine();
+            }
+        }
+
+        private string GetRegistrationDraftValueForHeader(string header)
+        {
+            if (registrationDraft == null) return "";
+            string normalized = (header ?? "").Replace(" ", "").Trim();
+            if (normalized == "OVIA_ERP_BARLIST_IDX") return registrationDraft.ErpBarListId > 0 ? registrationDraft.ErpBarListId.ToString() : "";
+            if (normalized == "진행") return "";
+            if (normalized == "제목") return registrationDraft.Title ?? "";
+            if (normalized == "작성") return registrationDraft.WriteStatus ?? "";
+            if (normalized == "동") return registrationDraft.Building ?? "";
+            if (normalized == "층") return registrationDraft.Floor ?? "";
+            if (normalized == "공종") return registrationDraft.WorkType ?? "";
+            if (normalized == "태그") return registrationDraft.Tags ?? "";
+            if (normalized == "색상") return registrationDraft.Color ?? "";
+            if (normalized == "발주일") return registrationDraft.OrderDate ?? "";
+            if (normalized == "등록일") return registrationDraft.CreatedDate ?? "";
+            if (normalized == "납기일") return registrationDraft.DueDate ?? "";
+            if (normalized == "작성자") return registrationDraft.Writer ?? "";
+            if (normalized == "OVIA_BARLIST_MEMO") return registrationDraft.Memo ?? "";
+            return "";
         }
 
         private string Csv(string value)
@@ -12940,6 +13592,105 @@ namespace OVIA.Desktop
             meta.OriginalImportedText = cell.Value == null ? "" : cell.Value.ToString().Trim();
             cell.Tag = meta;
             cell.ToolTipText = "";
+        }
+
+        private int EnsureFinalLengthColumn()
+        {
+            if (grid == null)
+            {
+                return -1;
+            }
+
+            int existing = FindExactColumnIndexByHeaders(new string[] { FinalLengthHeader, "final_length" });
+            if (existing >= 0)
+            {
+                grid.Columns[existing].Visible = false;
+                grid.Columns[existing].ReadOnly = true;
+                return existing;
+            }
+
+            DataGridViewTextBoxColumn column = new DataGridViewTextBoxColumn();
+            column.Name = FinalLengthHeader;
+            column.HeaderText = FinalLengthHeader;
+            column.Visible = false;
+            column.ReadOnly = true;
+            column.SortMode = DataGridViewColumnSortMode.NotSortable;
+            int index = grid.Columns.Add(column);
+            return index;
+        }
+
+        private void ApplyRebarElongationForAllRows()
+        {
+            if (grid == null || grid.Rows.Count == 0)
+            {
+                return;
+            }
+
+            EnsureFinalLengthColumn();
+            for (int rowIndex = 0; rowIndex < grid.Rows.Count; rowIndex++)
+            {
+                ApplyRebarElongationForRow(rowIndex);
+            }
+        }
+
+        private void ApplyRebarElongationForRow(int rowIndex)
+        {
+            if (grid == null || rowIndex < 0 || rowIndex >= grid.Rows.Count || grid.Rows[rowIndex].IsNewRow)
+            {
+                return;
+            }
+
+            int finalLengthCol = EnsureFinalLengthColumn();
+            int specCol = FindRebarSpecColumnIndex();
+            int lengthCol = FindSingleLengthColumnIndex();
+            if (finalLengthCol < 0 || specCol < 0 || lengthCol < 0)
+            {
+                return;
+            }
+
+            double originalLengthMm;
+            if (!TryParseNumber(GetCellText(rowIndex, lengthCol), out originalLengthMm) || originalLengthMm < 0D)
+            {
+                grid.Rows[rowIndex].Cells[finalLengthCol].Value = "";
+                grid.Rows[rowIndex].Cells[lengthCol].ToolTipText = "";
+                return;
+            }
+
+            string shapePath = ResolveCadShapeJsonPath(GetCadShapeJsonText(rowIndex));
+            if (string.IsNullOrWhiteSpace(shapePath) || !File.Exists(shapePath))
+            {
+                // ERP/CSV에서 이미 final_length를 받은 행은 형상 상대경로가 아직 해석되지 않는
+                // 로드 초기 단계에서 원래 길이로 덮어쓰지 않는다.
+                string storedFinalText = GetCellText(rowIndex, finalLengthCol);
+                double storedFinalLength;
+                if (TryParseNumber(storedFinalText, out storedFinalLength) && storedFinalLength >= 0D)
+                {
+                    string preservedText = FormatFinalLengthMm(storedFinalLength);
+                    grid.Rows[rowIndex].Cells[finalLengthCol].Value = preservedText;
+                    grid.Rows[rowIndex].Cells[lengthCol].ToolTipText = "";
+                    return;
+                }
+            }
+
+            RebarElongationResult result = RebarElongationCalculator.Calculate(
+                shapePath,
+                GetCellText(rowIndex, specCol),
+                originalLengthMm
+            );
+
+            string finalLengthText = FormatFinalLengthMm(result.FinalLengthMm);
+            grid.Rows[rowIndex].Cells[finalLengthCol].Value = finalLengthText;
+            grid.Rows[rowIndex].Cells[lengthCol].ToolTipText = "";
+        }
+
+        private string FormatFinalLengthMm(double value)
+        {
+            if (Double.IsNaN(value) || Double.IsInfinity(value))
+            {
+                return "";
+            }
+
+            return Math.Max(0D, value).ToString("0.###", CultureInfo.InvariantCulture);
         }
 
         private void ApplyRebarCalculationAndValidation(bool showMismatchMessage)

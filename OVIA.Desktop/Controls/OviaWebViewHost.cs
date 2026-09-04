@@ -5,6 +5,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.WinForms;
@@ -41,10 +42,19 @@ namespace OVIA.Desktop.Controls
         private bool erpAutoLoginTargetPending;
         private bool erpAutoLoginFormAttempted;
         private bool erpAutoLoginFormScriptInProgress;
+        // ERP 자동로그인 인증 응답(JSON/세션 안내 페이지)은 사용자에게 노출하지 않는다.
+        // 실제 ERP target 페이지가 성공적으로 완료될 때까지 WebView를 숨긴다.
+        private bool suppressWebViewUntilErpTargetLoaded;
         private int erpAutoLoginFormAttemptCount;
         private Timer erpAutoLoginFormTimer;
         private string erpAutoLoginTargetUrl = "";
         private DateTime lastBlockedOviaLaunchUtc = DateTime.MinValue;
+        // WebView2 자체 History에는 ERP 자동로그인용 POST 엔드포인트도 포함된다.
+        // 사용자 뒤로/앞으로 이동은 인증 엔드포인트를 제외한 실제 ERP 화면 기록만 사용한다.
+        private readonly List<string> userNavigationHistory = new List<string>();
+        private int userNavigationHistoryIndex = -1;
+        private bool navigatingUserHistory;
+        private int pendingUserNavigationHistoryIndex = -1;
 
         public bool AutoResizeToDocumentHeight { get; set; }
         public bool EnableErpAutomaticLogin { get; set; }
@@ -67,14 +77,9 @@ namespace OVIA.Desktop.Controls
         {
             get
             {
-                try
-                {
-                    return webView != null && webView.CoreWebView2 != null && webView.CoreWebView2.CanGoBack;
-                }
-                catch
-                {
-                    return false;
-                }
+                return webView != null
+                    && webView.CoreWebView2 != null
+                    && userNavigationHistoryIndex > 0;
             }
         }
 
@@ -82,55 +87,152 @@ namespace OVIA.Desktop.Controls
         {
             get
             {
-                try
-                {
-                    return webView != null && webView.CoreWebView2 != null && webView.CoreWebView2.CanGoForward;
-                }
-                catch
-                {
-                    return false;
-                }
+                return webView != null
+                    && webView.CoreWebView2 != null
+                    && userNavigationHistoryIndex >= 0
+                    && userNavigationHistoryIndex < userNavigationHistory.Count - 1;
             }
         }
 
         public bool TryGoBackInWebView()
         {
-            try
-            {
-                if (webView == null || webView.CoreWebView2 == null || !webView.CoreWebView2.CanGoBack)
-                {
-                    return false;
-                }
-
-                ShowLoadingOverlay();
-                webView.CoreWebView2.GoBack();
-                RaiseNavigationStateChanged();
-                return true;
-            }
-            catch
+            if (!CanGoBackInWebView)
             {
                 return false;
             }
+
+            return NavigateToUserHistoryIndex(userNavigationHistoryIndex - 1);
         }
 
         public bool TryGoForwardInWebView()
         {
+            if (!CanGoForwardInWebView)
+            {
+                return false;
+            }
+
+            return NavigateToUserHistoryIndex(userNavigationHistoryIndex + 1);
+        }
+
+        private bool NavigateToUserHistoryIndex(int targetIndex)
+        {
             try
             {
-                if (webView == null || webView.CoreWebView2 == null || !webView.CoreWebView2.CanGoForward)
+                if (webView == null || webView.CoreWebView2 == null
+                    || targetIndex < 0 || targetIndex >= userNavigationHistory.Count)
                 {
                     return false;
                 }
 
-                ShowLoadingOverlay();
-                webView.CoreWebView2.GoForward();
+                string target = userNavigationHistory[targetIndex];
+                if (string.IsNullOrWhiteSpace(target))
+                {
+                    return false;
+                }
+
+                navigatingUserHistory = true;
+                pendingUserNavigationHistoryIndex = targetIndex;
+                NavigateCore(target);
                 RaiseNavigationStateChanged();
                 return true;
             }
             catch
             {
+                navigatingUserHistory = false;
+                pendingUserNavigationHistoryIndex = -1;
                 return false;
             }
+        }
+
+        private void ResetUserNavigationHistory()
+        {
+            userNavigationHistory.Clear();
+            userNavigationHistoryIndex = -1;
+            navigatingUserHistory = false;
+            pendingUserNavigationHistoryIndex = -1;
+            RaiseNavigationStateChanged();
+        }
+
+        private void CommitUserVisibleNavigation(string url)
+        {
+            string target = NormalizeUrl(url);
+            if (string.IsNullOrWhiteSpace(target) || IsInternalErpAuthenticationUrl(target))
+            {
+                return;
+            }
+
+            if (navigatingUserHistory)
+            {
+                if (pendingUserNavigationHistoryIndex >= 0
+                    && pendingUserNavigationHistoryIndex < userNavigationHistory.Count)
+                {
+                    userNavigationHistoryIndex = pendingUserNavigationHistoryIndex;
+                }
+
+                navigatingUserHistory = false;
+                pendingUserNavigationHistoryIndex = -1;
+                return;
+            }
+
+            if (userNavigationHistoryIndex >= 0
+                && userNavigationHistoryIndex < userNavigationHistory.Count
+                && string.Equals(userNavigationHistory[userNavigationHistoryIndex], target, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (userNavigationHistoryIndex < userNavigationHistory.Count - 1)
+            {
+                userNavigationHistory.RemoveRange(
+                    userNavigationHistoryIndex + 1,
+                    userNavigationHistory.Count - userNavigationHistoryIndex - 1);
+            }
+
+            userNavigationHistory.Add(target);
+            userNavigationHistoryIndex = userNavigationHistory.Count - 1;
+        }
+
+        private static bool IsInternalErpAuthenticationUrl(string url)
+        {
+            Uri uri;
+            if (!Uri.TryCreate(NormalizeUrl(url), UriKind.Absolute, out uri))
+            {
+                return false;
+            }
+
+            string query = uri.Query ?? string.Empty;
+            if (query.IndexOf("mode=web_session_login", StringComparison.OrdinalIgnoreCase) >= 0
+                || query.IndexOf("mode=web_session_exchange", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private void RetryCurrentPage()
+        {
+            if (webView == null || webView.CoreWebView2 == null)
+            {
+                // 실제 초기화가 끝나지 못한 경우에만 새 초기화를 허용한다.
+                initializationStarted = false;
+                EnsureInitialized();
+                return;
+            }
+
+            string current = GetCurrentWebViewUrl();
+            if (IsInternalErpAuthenticationUrl(current))
+            {
+                ResetErpLoginFormAutomation();
+                if (!TryStartErpAutomaticLogin(InitialUrl))
+                {
+                    NavigateCore(InitialUrl);
+                }
+                return;
+            }
+
+            string target = string.IsNullOrWhiteSpace(current) ? InitialUrl : current;
+            NavigateCore(target);
         }
 
         public bool TryReloadCurrentWebViewPage()
@@ -207,8 +309,7 @@ namespace OVIA.Desktop.Controls
             retryButton.Location = new Point(22, 264);
             retryButton.Click += delegate
             {
-                initializationStarted = false;
-                EnsureInitialized();
+                RetryCurrentPage();
             };
             messagePanel.Controls.Add(retryButton);
 
@@ -335,6 +436,7 @@ namespace OVIA.Desktop.Controls
             InitialUrl = url;
             celmonWwwRetryAttempted = false;
             ResetErpLoginFormAutomation();
+            ResetUserNavigationHistory();
 
             if (webView != null && webView.CoreWebView2 != null)
             {
@@ -457,6 +559,28 @@ namespace OVIA.Desktop.Controls
             }
         }
 
+        private void BeginHiddenErpAutomaticLoginNavigation()
+        {
+            suppressWebViewUntilErpTargetLoaded = true;
+
+            if (messagePanel != null)
+            {
+                messagePanel.Visible = false;
+            }
+
+            if (webView != null)
+            {
+                webView.Visible = false;
+            }
+
+            ShowLoadingOverlay();
+        }
+
+        private void CompleteHiddenErpAutomaticLoginNavigation()
+        {
+            suppressWebViewUntilErpTargetLoaded = false;
+        }
+
         private bool TryStartErpAutomaticLogin(string targetUrl)
         {
             if (!EnableErpAutomaticLogin
@@ -526,9 +650,8 @@ namespace OVIA.Desktop.Controls
                         erpAutoLoginTargetUrl = targetUri.AbsoluteUri;
                         erpAutoLoginRequestInProgress = true;
                         erpAutoLoginTargetPending = false;
-                        ShowLoadingOverlay();
+                        BeginHiddenErpAutomaticLoginNavigation();
                         webView.CoreWebView2.NavigateWithWebResourceRequest(ssoRequest);
-                        ShowWebView();
                         RaiseNavigationStateChanged();
                         return true;
                     }
@@ -537,6 +660,7 @@ namespace OVIA.Desktop.Controls
                         erpAutoLoginRequestInProgress = false;
                         erpAutoLoginTargetPending = false;
                         erpAutoLoginTargetUrl = "";
+                        CompleteHiddenErpAutomaticLoginNavigation();
                     }
                 }
             }
@@ -591,9 +715,8 @@ namespace OVIA.Desktop.Controls
                 erpAutoLoginTargetUrl = targetUri.AbsoluteUri;
                 erpAutoLoginRequestInProgress = true;
                 erpAutoLoginTargetPending = false;
-                ShowLoadingOverlay();
+                BeginHiddenErpAutomaticLoginNavigation();
                 webView.CoreWebView2.NavigateWithWebResourceRequest(request);
-                ShowWebView();
                 RaiseNavigationStateChanged();
                 return true;
             }
@@ -602,6 +725,7 @@ namespace OVIA.Desktop.Controls
                 erpAutoLoginRequestInProgress = false;
                 erpAutoLoginTargetPending = false;
                 erpAutoLoginTargetUrl = "";
+                CompleteHiddenErpAutomaticLoginNavigation();
                 return false;
             }
         }
@@ -1030,6 +1154,12 @@ namespace OVIA.Desktop.Controls
 
             if (e.IsSuccess && statusCode < 400)
             {
+                string completedUrl = GetCurrentWebViewUrl();
+                if (erpAutoLoginTargetPending || !IsInternalErpAuthenticationUrl(completedUrl))
+                {
+                    CompleteHiddenErpAutomaticLoginNavigation();
+                }
+                CommitUserVisibleNavigation(completedUrl);
                 ShowWebView();
                 ScheduleDocumentHeightMeasurements();
                 BeginHideLoadingOverlay();
@@ -1074,6 +1204,9 @@ namespace OVIA.Desktop.Controls
                 return;
             }
 
+            navigatingUserHistory = false;
+            pendingUserNavigationHistoryIndex = -1;
+            CompleteHiddenErpAutomaticLoginNavigation();
             ShowWebAccessMessage(currentUrl, statusCode, e.WebErrorStatus.ToString());
             RaiseNavigationStateChanged();
         }
@@ -1280,6 +1413,25 @@ namespace OVIA.Desktop.Controls
 
         private void ShowWebView()
         {
+            if (suppressWebViewUntilErpTargetLoaded)
+            {
+                if (messagePanel != null)
+                {
+                    messagePanel.Visible = false;
+                }
+
+                if (webView != null)
+                {
+                    webView.Visible = false;
+                }
+
+                if (loadingOverlay != null && loadingOverlay.Visible)
+                {
+                    loadingOverlay.BringToFront();
+                }
+                return;
+            }
+
             if (messagePanel != null)
             {
                 messagePanel.Visible = false;
@@ -1366,7 +1518,7 @@ namespace OVIA.Desktop.Controls
 
             if (webView != null)
             {
-                webView.Visible = true;
+                webView.Visible = !suppressWebViewUntilErpTargetLoaded;
             }
 
             if (loadingOverlay != null)
@@ -1414,8 +1566,11 @@ namespace OVIA.Desktop.Controls
 
             if (webView != null)
             {
-                webView.Visible = true;
-                webView.BringToFront();
+                webView.Visible = !suppressWebViewUntilErpTargetLoaded;
+                if (webView.Visible)
+                {
+                    webView.BringToFront();
+                }
             }
         }
 
@@ -1764,27 +1919,23 @@ namespace OVIA.Desktop.Controls
 
     public sealed class OviaContentLoadingOverlay : Panel
     {
-        private readonly OviaContentLoadingSymbolControl loadingSymbol;
         private readonly Timer showTimer;
-        private Control resizeSubscribedParent;
+        private OviaPngSpinnerWindow spinnerWindow;
+        private Control trackedParent;
+        private Form trackedOwner;
         private bool loadingPending;
         private bool loadingInProgress;
 
         public OviaContentLoadingOverlay()
         {
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
-            Dock = DockStyle.None;
-            Size = new Size(112, 112);
+            // IMPORTANT: 이 Panel 자체는 화면에 그리지 않는다.
+            // DataGridView/WebView2 위의 WinForms Transparent BackColor는 진짜 alpha 투명이 아니므로
+            // 회색/흰 사각형이 생길 수 있다. 실제 표시는 per-pixel alpha Layered Window가 담당한다.
+            SetStyle(ControlStyles.SupportsTransparentBackColor, true);
+            Size = new Size(1, 1);
             BackColor = Color.Transparent;
             Visible = false;
-            Margin = Padding.Empty;
-            Padding = Padding.Empty;
-
-            loadingSymbol = new OviaContentLoadingSymbolControl();
-            loadingSymbol.Size = new Size(112, 112);
-            loadingSymbol.BackColor = Color.Transparent;
-            loadingSymbol.Location = Point.Empty;
-            Controls.Add(loadingSymbol);
+            TabStop = false;
 
             showTimer = new Timer();
             showTimer.Interval = Math.Max(1, OVIA.Desktop.OviaSystemSettingsStore.GetLoadingDelayMilliseconds());
@@ -1796,186 +1947,159 @@ namespace OVIA.Desktop.Controls
                     ShowOverlayNow();
                 }
             };
-
-            Resize += delegate { LayoutLoadingSymbol(); };
         }
 
         protected override void OnParentChanged(EventArgs e)
         {
-            if (resizeSubscribedParent != null)
-            {
-                resizeSubscribedParent.Resize -= Parent_Resize;
-                resizeSubscribedParent = null;
-            }
-
+            UnsubscribePositionEvents();
             base.OnParentChanged(e);
-
-            if (Parent != null)
-            {
-                resizeSubscribedParent = Parent;
-                resizeSubscribedParent.Resize += Parent_Resize;
-            }
-
-            LayoutLoadingSymbol();
+            SubscribePositionEvents();
+            RepositionSpinner();
         }
-
-        private void Parent_Resize(object sender, EventArgs e)
-        {
-            LayoutLoadingSymbol();
-        }
-
 
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
-                if (resizeSubscribedParent != null)
-                {
-                    resizeSubscribedParent.Resize -= Parent_Resize;
-                    resizeSubscribedParent = null;
-                }
-
+                UnsubscribePositionEvents();
                 if (showTimer != null)
                 {
                     showTimer.Stop();
                     showTimer.Dispose();
                 }
-
-                if (loadingSymbol != null)
-                {
-                    loadingSymbol.Stop();
-                    loadingSymbol.Dispose();
-                }
+                CloseSpinnerWindow();
             }
-
             base.Dispose(disposing);
         }
 
         public void BeginLoading()
         {
-            ApplyLoadingSettings();
             loadingPending = true;
             loadingInProgress = true;
-
-            if (showTimer != null)
-            {
-                showTimer.Stop();
-                showTimer.Start();
-                return;
-            }
-
-            ShowOverlayNow();
+            int delay = OVIA.Desktop.OviaSystemSettingsStore.GetLoadingDelayMilliseconds();
+            showTimer.Interval = Math.Max(1, delay);
+            showTimer.Stop();
+            showTimer.Start();
         }
 
         public void EndLoading()
         {
             loadingPending = false;
             loadingInProgress = false;
-
-            if (showTimer != null)
-            {
-                showTimer.Stop();
-            }
-
-            if (loadingSymbol != null)
-            {
-                loadingSymbol.Stop();
-            }
-
-            Visible = false;
+            showTimer.Stop();
+            CloseSpinnerWindow();
         }
 
         public void ShowOverlayNow()
         {
-            if (!loadingInProgress || !loadingPending)
+            if (!loadingInProgress || !loadingPending || Parent == null || Parent.IsDisposed)
             {
                 return;
             }
 
-            LayoutLoadingSymbol();
-            Visible = true;
-            BringToFront();
-
-            if (loadingSymbol != null)
+            EnsureSpinnerWindow();
+            RepositionSpinner();
+            if (spinnerWindow == null)
             {
-                loadingSymbol.Start();
-            }
-        }
-
-        private void ApplyLoadingSettings()
-        {
-            int delay = OVIA.Desktop.OviaSystemSettingsStore.GetLoadingDelayMilliseconds();
-            if (delay < 1)
-            {
-                delay = 1;
-            }
-
-            if (showTimer != null)
-            {
-                showTimer.Interval = delay;
-            }
-
-            if (loadingSymbol != null)
-            {
-                loadingSymbol.SetImagePath(OVIA.Desktop.OviaSystemSettingsStore.GetConfiguredLoadingAnimationImagePath());
-            }
-        }
-
-        protected override void OnPaintBackground(PaintEventArgs e)
-        {
-            if (Parent == null)
-            {
-                base.OnPaintBackground(e);
                 return;
             }
 
-            GraphicsState state = e.Graphics.Save();
+            spinnerWindow.SetImagePath(OVIA.Desktop.OviaSystemSettingsStore.GetConfiguredLoadingAnimationImagePath());
+            spinnerWindow.Start();
+            if (!spinnerWindow.Visible)
+            {
+                Form owner = Parent.FindForm();
+                if (owner != null && !owner.IsDisposed)
+                    spinnerWindow.Show(owner);
+                else
+                    spinnerWindow.Show();
+            }
+            spinnerWindow.BringToFront();
+        }
+
+        private void EnsureSpinnerWindow()
+        {
+            if (spinnerWindow != null && !spinnerWindow.IsDisposed)
+                return;
+            spinnerWindow = new OviaPngSpinnerWindow();
+        }
+
+        private void CloseSpinnerWindow()
+        {
+            if (spinnerWindow == null)
+                return;
             try
             {
-                e.Graphics.TranslateTransform(-Left, -Top);
-                using (PaintEventArgs parentArgs = new PaintEventArgs(e.Graphics, new Rectangle(Left, Top, Width, Height)))
-                {
-                    InvokePaintBackground(Parent, parentArgs);
-                    InvokePaint(Parent, parentArgs);
-                }
+                spinnerWindow.Stop();
+                spinnerWindow.Close();
+                spinnerWindow.Dispose();
             }
-            finally
-            {
-                e.Graphics.Restore(state);
-            }
+            catch { }
+            spinnerWindow = null;
         }
 
-        private void LayoutLoadingSymbol()
+        private void SubscribePositionEvents()
         {
-            if (loadingSymbol == null)
+            trackedParent = Parent;
+            if (trackedParent != null)
             {
-                return;
+                trackedParent.Resize += PositionChanged;
+                trackedParent.LocationChanged += PositionChanged;
             }
-
-            Size = loadingSymbol.Size;
-
-            if (Parent != null)
+            trackedOwner = trackedParent == null ? null : trackedParent.FindForm();
+            if (trackedOwner != null)
             {
-                int x = Math.Max(0, (Parent.ClientSize.Width - Width) / 2);
-                int y = Math.Max(0, (Parent.ClientSize.Height - Height) / 2);
-                Location = new Point(x, y);
+                trackedOwner.Move += PositionChanged;
+                trackedOwner.Resize += PositionChanged;
             }
-
-            loadingSymbol.Location = Point.Empty;
         }
 
-        private sealed class OviaContentLoadingSymbolControl : Control
+        private void UnsubscribePositionEvents()
+        {
+            if (trackedParent != null)
+            {
+                trackedParent.Resize -= PositionChanged;
+                trackedParent.LocationChanged -= PositionChanged;
+                trackedParent = null;
+            }
+            if (trackedOwner != null)
+            {
+                trackedOwner.Move -= PositionChanged;
+                trackedOwner.Resize -= PositionChanged;
+                trackedOwner = null;
+            }
+        }
+
+        private void PositionChanged(object sender, EventArgs e)
+        {
+            RepositionSpinner();
+        }
+
+        private void RepositionSpinner()
+        {
+            if (spinnerWindow == null || spinnerWindow.IsDisposed || Parent == null || Parent.IsDisposed || !Parent.IsHandleCreated)
+                return;
+            Point center = Parent.PointToScreen(new Point(Parent.ClientSize.Width / 2, Parent.ClientSize.Height / 2));
+            spinnerWindow.Location = new Point(center.X - spinnerWindow.Width / 2, center.Y - spinnerWindow.Height / 2);
+        }
+
+        private sealed class OviaPngSpinnerWindow : Form
         {
             private readonly Timer animationTimer;
             private Image symbolImage;
             private string symbolImagePath = "";
             private int angle;
 
-            public OviaContentLoadingSymbolControl()
+            public OviaPngSpinnerWindow()
             {
-                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
-                TabStop = false;
-                Cursor = Cursors.Default;
+                FormBorderStyle = FormBorderStyle.None;
+                ShowInTaskbar = false;
+                StartPosition = FormStartPosition.Manual;
+                TopMost = false;
+                Size = new Size(112, 112);
+                BackColor = Color.Black;
+
+                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
                 SetImagePath(OVIA.Desktop.OviaSystemSettingsStore.GetConfiguredLoadingAnimationImagePath());
 
                 animationTimer = new Timer();
@@ -1983,122 +2107,170 @@ namespace OVIA.Desktop.Controls
                 animationTimer.Tick += delegate
                 {
                     angle = (angle + 6) % 360;
-                    Invalidate();
+                    UpdateLayeredSpinner();
                 };
+            }
+
+            protected override bool ShowWithoutActivation { get { return true; } }
+
+            protected override CreateParams CreateParams
+            {
+                get
+                {
+                    const int WS_EX_NOACTIVATE = 0x08000000;
+                    const int WS_EX_TOOLWINDOW = 0x00000080;
+                    const int WS_EX_LAYERED = 0x00080000;
+                    CreateParams cp = base.CreateParams;
+                    cp.ExStyle |= WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_LAYERED;
+                    return cp;
+                }
+            }
+
+            protected override void OnShown(EventArgs e)
+            {
+                base.OnShown(e);
+                UpdateLayeredSpinner();
+            }
+
+            protected override void OnLocationChanged(EventArgs e)
+            {
+                base.OnLocationChanged(e);
+                if (IsHandleCreated)
+                    UpdateLayeredSpinner();
             }
 
             public void SetImagePath(string path)
             {
-                string normalizedPath = path == null ? "" : path.Trim();
-                if (string.Equals(symbolImagePath, normalizedPath, StringComparison.OrdinalIgnoreCase))
-                {
+                string normalized = path == null ? "" : path.Trim();
+                if (string.Equals(symbolImagePath, normalized, StringComparison.OrdinalIgnoreCase) && symbolImage != null)
                     return;
-                }
 
                 Image old = symbolImage;
-                symbolImage = null;
-                symbolImagePath = normalizedPath;
+                symbolImage = LoadSymbolImage(normalized);
+                symbolImagePath = normalized;
+                if (old != null) old.Dispose();
 
-                if (old != null)
-                {
-                    old.Dispose();
-                }
-
-                symbolImage = LoadSymbolImage(normalizedPath);
-                Invalidate();
+                if (IsHandleCreated)
+                    UpdateLayeredSpinner();
             }
 
             public void Start()
             {
-                if (animationTimer != null && !animationTimer.Enabled)
-                {
+                if (!animationTimer.Enabled)
                     animationTimer.Start();
-                }
+                if (IsHandleCreated)
+                    UpdateLayeredSpinner();
             }
 
             public void Stop()
             {
-                if (animationTimer != null)
-                {
-                    animationTimer.Stop();
-                }
+                animationTimer.Stop();
             }
 
             protected override void Dispose(bool disposing)
             {
                 if (disposing)
                 {
-                    if (animationTimer != null)
-                    {
-                        animationTimer.Stop();
-                        animationTimer.Dispose();
-                    }
-
-                    if (symbolImage != null)
-                    {
-                        symbolImage.Dispose();
-                    }
+                    animationTimer.Stop();
+                    animationTimer.Dispose();
+                    if (symbolImage != null) symbolImage.Dispose();
                 }
-
                 base.Dispose(disposing);
             }
 
-            protected override void OnPaintBackground(PaintEventArgs e)
+            // 일반 WinForms Paint/TransparencyKey를 전혀 사용하지 않는다.
+            // 매 프레임 ARGB 비트맵을 만든 뒤 UpdateLayeredWindow로 per-pixel alpha를
+            // Windows 합성기에 직접 전달한다. 따라서 PNG의 반투명 가장자리까지 그대로 보존된다.
+            private void UpdateLayeredSpinner()
             {
-                PaintParentBackground(e);
+                if (!IsHandleCreated || IsDisposed || symbolImage == null || Width <= 0 || Height <= 0)
+                    return;
+
+                using (Bitmap frame = new Bitmap(Width, Height, PixelFormat.Format32bppPArgb))
+                {
+                    using (Graphics g = Graphics.FromImage(frame))
+                    {
+                        g.Clear(Color.Transparent);
+                        g.CompositingMode = CompositingMode.SourceOver;
+                        g.CompositingQuality = CompositingQuality.HighQuality;
+                        g.SmoothingMode = SmoothingMode.HighQuality;
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+                        float cx = frame.Width / 2F;
+                        float cy = frame.Height / 2F;
+
+                        // 어떤 각도에서도 이미지가 잘리지 않도록 회전 시 필요한 대각선 크기를 기준으로 맞춘다.
+                        float available = Math.Min(frame.Width, frame.Height) - 8F;
+                        double sourceDiagonal = Math.Sqrt((double)symbolImage.Width * symbolImage.Width +
+                                                          (double)symbolImage.Height * symbolImage.Height);
+                        float scale = sourceDiagonal <= 0.0 ? 1F : (float)(available / sourceDiagonal);
+                        scale = Math.Min(scale, 1F);
+
+                        float drawW = symbolImage.Width * scale;
+                        float drawH = symbolImage.Height * scale;
+
+                        GraphicsState state = g.Save();
+                        g.TranslateTransform(cx, cy);
+                        g.RotateTransform(angle);
+                        RectangleF destinationRect =
+                            new RectangleF(-drawW / 2F, -drawH / 2F, drawW, drawH);
+                        RectangleF sourceRect =
+                            new RectangleF(0F, 0F, symbolImage.Width, symbolImage.Height);
+
+                        // .NET Framework/WinForms 호환 RectangleF 오버로드를 명시적으로 사용한다.
+                        g.DrawImage(symbolImage, destinationRect, sourceRect, GraphicsUnit.Pixel);
+                        g.Restore(state);
+                    }
+
+                    ApplyPerPixelAlpha(frame);
+                }
             }
 
-            private void PaintParentBackground(PaintEventArgs e)
+            private void ApplyPerPixelAlpha(Bitmap bitmap)
             {
-                if (Parent == null)
-                {
-                    base.OnPaintBackground(e);
-                    return;
-                }
+                IntPtr screenDc = IntPtr.Zero;
+                IntPtr memoryDc = IntPtr.Zero;
+                IntPtr hBitmap = IntPtr.Zero;
+                IntPtr oldBitmap = IntPtr.Zero;
 
-                GraphicsState state = e.Graphics.Save();
                 try
                 {
-                    e.Graphics.TranslateTransform(-Left, -Top);
-                    using (PaintEventArgs parentArgs = new PaintEventArgs(e.Graphics, new Rectangle(Left, Top, Width, Height)))
-                    {
-                        InvokePaintBackground(Parent, parentArgs);
-                        InvokePaint(Parent, parentArgs);
-                    }
+                    screenDc = NativeMethods.GetDC(IntPtr.Zero);
+                    memoryDc = NativeMethods.CreateCompatibleDC(screenDc);
+                    hBitmap = bitmap.GetHbitmap(Color.FromArgb(0));
+                    oldBitmap = NativeMethods.SelectObject(memoryDc, hBitmap);
+
+                    NativeMethods.SIZE size = new NativeMethods.SIZE(bitmap.Width, bitmap.Height);
+                    NativeMethods.POINT source = new NativeMethods.POINT(0, 0);
+                    NativeMethods.POINT destination = new NativeMethods.POINT(Left, Top);
+                    NativeMethods.BLENDFUNCTION blend = new NativeMethods.BLENDFUNCTION();
+                    blend.BlendOp = NativeMethods.AC_SRC_OVER;
+                    blend.BlendFlags = 0;
+                    blend.SourceConstantAlpha = 255;
+                    blend.AlphaFormat = NativeMethods.AC_SRC_ALPHA;
+
+                    NativeMethods.UpdateLayeredWindow(
+                        Handle,
+                        screenDc,
+                        ref destination,
+                        ref size,
+                        memoryDc,
+                        ref source,
+                        0,
+                        ref blend,
+                        NativeMethods.ULW_ALPHA);
                 }
                 finally
                 {
-                    e.Graphics.Restore(state);
-                }
-            }
-
-            protected override void OnPaint(PaintEventArgs e)
-            {
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-
-                float cx = ClientSize.Width / 2F;
-                float cy = ClientSize.Height / 2F;
-                float size = Math.Min(ClientSize.Width, ClientSize.Height) * 0.62F;
-
-                if (symbolImage != null)
-                {
-                    GraphicsState state = e.Graphics.Save();
-                    e.Graphics.TranslateTransform(cx, cy);
-                    e.Graphics.RotateTransform(angle);
-                    RectangleF rect = new RectangleF(-size / 2F, -size / 2F, size, size);
-                    e.Graphics.DrawImage(symbolImage, rect);
-                    e.Graphics.Restore(state);
-                    return;
-                }
-
-                using (Pen pen = new Pen(OviaFluentTheme.Accent, 5F))
-                {
-                    pen.StartCap = LineCap.Round;
-                    pen.EndCap = LineCap.Round;
-                    RectangleF arcRect = new RectangleF(cx - size / 2F, cy - size / 2F, size, size);
-                    e.Graphics.DrawArc(pen, arcRect, angle, 270);
+                    if (oldBitmap != IntPtr.Zero && memoryDc != IntPtr.Zero)
+                        NativeMethods.SelectObject(memoryDc, oldBitmap);
+                    if (hBitmap != IntPtr.Zero)
+                        NativeMethods.DeleteObject(hBitmap);
+                    if (memoryDc != IntPtr.Zero)
+                        NativeMethods.DeleteDC(memoryDc);
+                    if (screenDc != IntPtr.Zero)
+                        NativeMethods.ReleaseDC(IntPtr.Zero, screenDc);
                 }
             }
 
@@ -2106,39 +2278,97 @@ namespace OVIA.Desktop.Controls
             {
                 string defaultPath = OVIA.Desktop.OviaSystemSettingsStore.GetDefaultLoadingSymbolPath();
                 string[] candidates = new string[] { preferredPath, defaultPath };
-
                 for (int i = 0; i < candidates.Length; i++)
                 {
-                    string path = candidates[i];
                     try
                     {
-                        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                        string path = candidates[i];
+                        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
+                        using (Image loaded = Image.FromFile(path))
                         {
-                            using (Image loaded = Image.FromFile(path))
+                            Bitmap bitmap = new Bitmap(loaded.Width, loaded.Height, PixelFormat.Format32bppPArgb);
+                            using (Graphics g = Graphics.FromImage(bitmap))
                             {
-                                Bitmap bitmap = new Bitmap(loaded.Width, loaded.Height, PixelFormat.Format32bppPArgb);
-                                using (Graphics g = Graphics.FromImage(bitmap))
-                                {
-                                    g.Clear(Color.Transparent);
-                                    g.CompositingMode = CompositingMode.SourceCopy;
-                                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                                    g.DrawImage(loaded, new Rectangle(0, 0, bitmap.Width, bitmap.Height));
-                                }
-
-                                return bitmap;
+                                g.Clear(Color.Transparent);
+                                g.CompositingMode = CompositingMode.SourceCopy;
+                                g.DrawImageUnscaled(loaded, 0, 0);
                             }
+                            return bitmap;
                         }
                     }
-                    catch
-                    {
-                    }
+                    catch { }
                 }
-
                 return null;
             }
+
+            private static class NativeMethods
+            {
+                public const byte AC_SRC_OVER = 0x00;
+                public const byte AC_SRC_ALPHA = 0x01;
+                public const int ULW_ALPHA = 0x00000002;
+
+                [StructLayout(LayoutKind.Sequential)]
+                public struct POINT
+                {
+                    public int X;
+                    public int Y;
+                    public POINT(int x, int y) { X = x; Y = y; }
+                }
+
+                [StructLayout(LayoutKind.Sequential)]
+                public struct SIZE
+                {
+                    public int CX;
+                    public int CY;
+                    public SIZE(int cx, int cy) { CX = cx; CY = cy; }
+                }
+
+                [StructLayout(LayoutKind.Sequential, Pack = 1)]
+                public struct BLENDFUNCTION
+                {
+                    public byte BlendOp;
+                    public byte BlendFlags;
+                    public byte SourceConstantAlpha;
+                    public byte AlphaFormat;
+                }
+
+                [DllImport("user32.dll", SetLastError = true)]
+                public static extern IntPtr GetDC(IntPtr hWnd);
+
+                [DllImport("user32.dll", SetLastError = true)]
+                public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+                [DllImport("gdi32.dll", SetLastError = true)]
+                public static extern IntPtr CreateCompatibleDC(IntPtr hDC);
+
+                [DllImport("gdi32.dll", SetLastError = true)]
+                [return: MarshalAs(UnmanagedType.Bool)]
+                public static extern bool DeleteDC(IntPtr hdc);
+
+                [DllImport("gdi32.dll", SetLastError = true)]
+                public static extern IntPtr SelectObject(IntPtr hDC, IntPtr hObject);
+
+                [DllImport("gdi32.dll", SetLastError = true)]
+                [return: MarshalAs(UnmanagedType.Bool)]
+                public static extern bool DeleteObject(IntPtr hObject);
+
+                [DllImport("user32.dll", SetLastError = true)]
+                [return: MarshalAs(UnmanagedType.Bool)]
+                public static extern bool UpdateLayeredWindow(
+                    IntPtr hwnd,
+                    IntPtr hdcDst,
+                    ref POINT pptDst,
+                    ref SIZE psize,
+                    IntPtr hdcSrc,
+                    ref POINT pptSrc,
+                    int crKey,
+                    ref BLENDFUNCTION pblend,
+                    int dwFlags);
+            }
         }
+
     }
+
 
     public class OviaWebViewDocumentHeightChangedEventArgs : EventArgs
     {
