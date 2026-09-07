@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -379,7 +379,9 @@ namespace OVIA.Desktop
                 return;
             }
 
-            if (!string.Equals(launch.TargetType, "barlist", StringComparison.OrdinalIgnoreCase)) return;
+            bool isBarListTarget = string.Equals(launch.TargetType, "barlist", StringComparison.OrdinalIgnoreCase);
+            bool isRebarShapeTarget = OviaErpLaunchService.IsRebarShapeTarget(launch);
+            if (!isBarListTarget && !isRebarShapeTarget) return;
             if (launch.BarListId <= 0 || string.IsNullOrWhiteSpace(launch.ProjectNo)) return;
 
             try
@@ -405,6 +407,28 @@ namespace OVIA.Desktop
                         launch.ProjectStatus,
                         filePath
                     );
+
+                    if (isRebarShapeTarget)
+                    {
+                        bool opened = mainForm.OpenCurrentBarListShapeEditor(
+                            launch.RebarItemOrder,
+                            launch.RebarSourceRowNo,
+                            launch.RebarPart,
+                            launch.RebarDia,
+                            launch.RebarLengthMm
+                        );
+
+                        if (!opened)
+                        {
+                            MessageBox.Show(
+                                "ERP에서 선택한 철근형상 행을 OVIA에서 찾지 못했습니다.\r\n" +
+                                "BarList는 열어 두었으므로 대상 행을 확인해주세요.",
+                                "OVIA 철근형상 열기",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Warning
+                            );
+                        }
+                    }
                     return;
                 }
 

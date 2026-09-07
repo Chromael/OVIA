@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -1917,6 +1917,17 @@ NavigateToBarListMapping();
                 title,
                 new OviaMainWorkspaceNavigationEntry("BARLIST", projectNo, projectName, clientName, projectStatus, filePath)
             );
+        }
+
+        public bool OpenCurrentBarListShapeEditor(int itemOrder, string sourceRowNo, string part, string dia, string lengthMm)
+        {
+            FrmBarList barList = currentScreen as FrmBarList;
+            if (barList == null || barList.IsDisposed)
+            {
+                return false;
+            }
+
+            return barList.OpenShapeEditorFromErpLaunch(itemOrder, sourceRowNo, part, dia, lengthMm);
         }
 
         public void NavigateToBarListMapping()

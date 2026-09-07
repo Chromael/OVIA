@@ -653,7 +653,7 @@ namespace OVIA.Desktop
             txtBarListSearch.TextChanged += BarListFilter_Changed;
             card.Controls.Add(txtBarListSearch);
 
-            cboBarListSort = CreateFilterSelectBox(new Point(328, 18), new Size(132, OviaFluentTheme.CommonInputHeight), new string[] { "ERP 정렬순", "최근등록순", "수정일순", "제목순", "발주일순", "납기일순" });
+            cboBarListSort = CreateFilterSelectBox(new Point(328, 18), new Size(132, OviaFluentTheme.CommonInputHeight), new string[] { "최근등록순", "수정일순", "제목순", "발주일순", "납기일순" });
             card.Controls.Add(cboBarListSort);
 
             cboStatusFilter = CreateFilterSelectBox(new Point(470, 18), new Size(118, OviaFluentTheme.CommonInputHeight), new string[] { "상태전체", "접수", "미전송", "전송" });
@@ -1675,6 +1675,17 @@ namespace OVIA.Desktop
             if (a == null) return -1;
             if (b == null) return 1;
 
+            // 최근등록순의 단일 기준은 ERP barlist.idx(auto increment)이다.
+            // 발주번호(barlist_no)는 빈 번호를 재사용할 수 있으므로 등록순 기준으로 사용하면 안 된다.
+            // ERP에 저장된 BarList끼리는 idx가 작을수록 오래된 등록, 클수록 최근 등록이다.
+            int aErpId = OviaErpBarListSyncService.GetPersistedErpBarListId(a.FilePath);
+            int bErpId = OviaErpBarListSyncService.GetPersistedErpBarListId(b.FilePath);
+            if (aErpId > 0 && bErpId > 0 && aErpId != bErpId)
+            {
+                return aErpId.CompareTo(bErpId);
+            }
+
+            // ERP ID가 아직 없는 로컬/임시 BarList에만 등록일을 보조 기준으로 사용한다.
             DateTime aCreated;
             DateTime bCreated;
             bool aCreatedOk = DateTime.TryParse(a.CreatedDate, out aCreated);
@@ -1688,14 +1699,6 @@ namespace OVIA.Desktop
             else if (aCreatedOk != bCreatedOk)
             {
                 return aCreatedOk ? -1 : 1;
-            }
-
-            // ERP에서 내려온 BarList는 auto increment idx가 생성 순서를 가장 안정적으로 보존한다.
-            int aErpId = OviaErpBarListSyncService.GetPersistedErpBarListId(a.FilePath);
-            int bErpId = OviaErpBarListSyncService.GetPersistedErpBarListId(b.FilePath);
-            if (aErpId > 0 && bErpId > 0 && aErpId != bErpId)
-            {
-                return aErpId.CompareTo(bErpId);
             }
 
             DateTime aFileCreated = GetFileCreationTimeSafe(a.FilePath);
@@ -1756,23 +1759,7 @@ namespace OVIA.Desktop
                 return;
             }
 
-            string sortText = cboBarListSort == null || cboBarListSort.SelectedItem == null ? "ERP 정렬순" : cboBarListSort.SelectedItem.ToString();
-
-            if (sortText == "ERP 정렬순")
-            {
-                // ERP barlist_sync_pull 응답 배열의 순서를 그대로 보존한다.
-                // ERP가 현재 발주번호순으로 출력하면 OVIA도 동일 순서이며,
-                // 향후 ERP 정렬 규칙이 바뀌어도 OVIA가 별도 규칙으로 재정렬하지 않는다.
-                list.Sort(delegate (ProjectBarListSummary a, ProjectBarListSummary b)
-                {
-                    int ao = a == null ? int.MaxValue : a.ErpListOrder;
-                    int bo = b == null ? int.MaxValue : b.ErpListOrder;
-                    int result = ao.CompareTo(bo);
-                    if (result != 0) return result;
-                    return b.ListNumber.CompareTo(a.ListNumber);
-                });
-                return;
-            }
+            string sortText = cboBarListSort == null || cboBarListSort.SelectedItem == null ? "최근등록순" : cboBarListSort.SelectedItem.ToString();
 
             if (sortText == "제목순")
             {
@@ -1810,10 +1797,18 @@ namespace OVIA.Desktop
                 return;
             }
 
-            // 최근등록순은 표시용 등록일(yyyy-MM-dd)만으로 정렬하지 않는다.
-            // AssignStableBarListNumbers()에서 생성 이력에 따라
-            // 오래된 BarList=1, 최신 BarList=가장 큰 No.가 이미 확정되어 있으므로,
-            // 기본 최근등록순은 고정 No.를 내림차순으로 표시한다.
+            // 최근등록순: ERP barlist.idx를 기준으로 부여된 No.의 내림차순.
+            // 따라서 신규등록 직후 가장 큰 No.가 항상 맨 위에 온다.
+            if (sortText == "최근등록순")
+            {
+                list.Sort(delegate (ProjectBarListSummary a, ProjectBarListSummary b)
+                {
+                    return b.ListNumber.CompareTo(a.ListNumber);
+                });
+                return;
+            }
+
+            // 알 수 없는 정렬값도 최근등록순으로 안전하게 복귀한다.
             list.Sort(delegate (ProjectBarListSummary a, ProjectBarListSummary b)
             {
                 return b.ListNumber.CompareTo(a.ListNumber);

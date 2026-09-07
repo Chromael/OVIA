@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
@@ -38,6 +38,12 @@ namespace OVIA.Desktop
         public string ClientName { get; set; }
         public string ProjectStatus { get; set; }
         public int BarListId { get; set; }
+        public int RebarItemId { get; set; }
+        public int RebarItemOrder { get; set; }
+        public string RebarSourceRowNo { get; set; }
+        public string RebarPart { get; set; }
+        public string RebarDia { get; set; }
+        public string RebarLengthMm { get; set; }
     }
 
     /// <summary>
@@ -203,6 +209,14 @@ namespace OVIA.Desktop
                 && !string.IsNullOrWhiteSpace(launch.ProjectNo);
         }
 
+        public static bool IsRebarShapeTarget(OviaErpLaunchResult launch)
+        {
+            return launch != null
+                && string.Equals(launch.TargetType, "rebar_shape", StringComparison.OrdinalIgnoreCase)
+                && launch.BarListId > 0
+                && !string.IsNullOrWhiteSpace(launch.ProjectNo);
+        }
+
         public static async Task<string> PrepareBarListAsync(OviaErpLaunchResult launch)
         {
             if (launch == null || launch.BarListId <= 0 || string.IsNullOrWhiteSpace(launch.ProjectNo)) return "";
@@ -287,12 +301,20 @@ namespace OVIA.Desktop
                     "barlist_idx", "barlist_id", "bar_idx", "idx", "barlist_no"
                 });
 
-                // 상세 철근형상 더블클릭용 ERP 구현에서 target type을 shape/rebar 계열로
-                // 구분해도 Desktop의 목적지는 동일 부모 BarList 상세 화면이다.
-                if (barListId > 0 && !string.Equals(targetType, "new_barlist", StringComparison.OrdinalIgnoreCase))
+                // 일반 BarList 실행은 기존대로 부모 BarList 상세로 정규화한다.
+                // rebar_shape는 부모 BarList를 연 직후 해당 행의 '철근 형상 확인·수정' 팝업을
+                // 바로 열어야 하므로 별도 target type을 보존한다.
+                bool isRebarShapeTarget = string.Equals(targetType, "rebar_shape", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(targetType, "barlist_shape", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(targetType, "rebar", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(targetType, "shape", StringComparison.OrdinalIgnoreCase);
+
+                if (isRebarShapeTarget)
                 {
-                    // 실제 BarList 식별자가 있으면 target type 표기보다 영구키를 우선한다.
-                    // ERP 상세 철근행/형상 더블클릭은 부모 BarList 상세로 이동해야 한다.
+                    targetType = "rebar_shape";
+                }
+                else if (barListId > 0 && !string.Equals(targetType, "new_barlist", StringComparison.OrdinalIgnoreCase))
+                {
                     targetType = "barlist";
                 }
 
@@ -327,7 +349,13 @@ namespace OVIA.Desktop
                     ProjectName = ReadString(target, "project_name", ""),
                     ClientName = ReadString(target, "customer_name", ReadString(target, "client_name", "")),
                     ProjectStatus = projectStatus,
-                    BarListId = barListId
+                    BarListId = barListId,
+                    RebarItemId = ReadInt(target, "item_idx"),
+                    RebarItemOrder = ReadInt(target, "item_order"),
+                    RebarSourceRowNo = ReadString(target, "source_row_no", ""),
+                    RebarPart = ReadString(target, "part", ""),
+                    RebarDia = ReadString(target, "dia", ""),
+                    RebarLengthMm = ReadString(target, "length_mm", "")
                 };
             }
             catch (Exception ex)

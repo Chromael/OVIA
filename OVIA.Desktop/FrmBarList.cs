@@ -7097,7 +7097,17 @@ namespace OVIA.Desktop
 
             string header = grid.Columns[e.ColumnIndex].HeaderText;
 
-            if (IsTotalLengthDisplayHeader(header) && e.Value != null)
+            if (IsBarListLengthDisplayHeader(header) && e.Value != null)
+            {
+                string formatted = FormatBarListLengthForDisplay(e.Value.ToString());
+
+                if (formatted != "")
+                {
+                    e.Value = formatted;
+                    e.FormattingApplied = true;
+                }
+            }
+            else if (IsTotalLengthDisplayHeader(header) && e.Value != null)
             {
                 string formatted = FormatBarListTotalLengthForDisplay(e.Value.ToString());
 
@@ -11331,16 +11341,152 @@ namespace OVIA.Desktop
             }
         }
 
-        private void OpenShapePickerForCell(int rowIndex, int columnIndex)
+        /// <summary>
+        /// ERP BarList의 특정 철근형상 셀에서 실행된 딥링크용 진입점입니다.
+        /// 부모 BarList가 ERP에서 최신 상태로 Pull된 뒤 이 메서드가 호출되며,
+        /// 대상 행의 '철근 형상 확인·수정' 팝업을 즉시 엽니다.
+        /// '수정 적용'은 현재 OVIA BarList 작업 데이터에만 반영하고,
+        /// ERP 동기화는 사용자가 기존 '검토 후 저장'을 클릭할 때 수행합니다.
+        /// </summary>
+        public bool OpenShapeEditorFromErpLaunch(int itemOrder, string sourceRowNo, string part, string dia, string lengthMm)
+        {
+            if (grid == null || grid.Rows.Count == 0)
+            {
+                return false;
+            }
+
+            int shapeColumnIndex = FindFirstRebarShapeColumnIndex();
+            if (shapeColumnIndex < 0)
+            {
+                return false;
+            }
+
+            int numberColumnIndex = FindNumberColumnIndex();
+            int partColumnIndex = FindPartColumnIndex();
+            int specColumnIndex = FindRebarSpecColumnIndex();
+            int lengthColumnIndex = FindSingleLengthColumnIndex();
+
+            string wantedNo = (sourceRowNo ?? "").Trim();
+            string wantedPart = (part ?? "").Trim();
+            string wantedDia = (dia ?? "").Trim();
+            string wantedLength = NormalizeExternalLaunchNumber(lengthMm);
+
+            int bestRow = -1;
+            int bestScore = -1;
+
+            // ERP Pull과 로컬 canonical CSV는 barlist_item.idx ASC 순서를 동일하게 사용한다.
+            // 따라서 item_order가 전달되면 중복 번호/동일 규격 행에서도 정확한 행을 우선 선택한다.
+            if (itemOrder > 0)
+            {
+                int dataIndex = itemOrder - 1;
+                int seen = 0;
+                for (int r = 0; r < grid.Rows.Count; r++)
+                {
+                    if (grid.Rows[r].IsNewRow) continue;
+                    if (seen == dataIndex)
+                    {
+                        bestRow = r;
+                        bestScore = 1000;
+                        break;
+                    }
+                    seen++;
+                }
+            }
+
+            for (int r = 0; r < grid.Rows.Count && bestScore < 1000; r++)
+            {
+                if (grid.Rows[r].IsNewRow) continue;
+
+                int score = 0;
+                bool numberMismatch = false;
+
+                if (wantedNo != "" && numberColumnIndex >= 0)
+                {
+                    string actualNo = GetCellText(r, numberColumnIndex).Trim();
+                    if (!string.Equals(actualNo, wantedNo, StringComparison.OrdinalIgnoreCase))
+                    {
+                        numberMismatch = true;
+                    }
+                    else
+                    {
+                        score += 100;
+                    }
+                }
+
+                if (numberMismatch) continue;
+
+                if (wantedPart != "" && partColumnIndex >= 0
+                    && string.Equals(GetCellText(r, partColumnIndex).Trim(), wantedPart, StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 20;
+                }
+
+                if (wantedDia != "" && specColumnIndex >= 0
+                    && string.Equals(GetCellText(r, specColumnIndex).Trim(), wantedDia, StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 20;
+                }
+
+                if (wantedLength != "" && lengthColumnIndex >= 0
+                    && string.Equals(NormalizeExternalLaunchNumber(GetCellText(r, lengthColumnIndex)), wantedLength, StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 20;
+                }
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestRow = r;
+                }
+            }
+
+            if (bestRow < 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                grid.CurrentCell = grid.Rows[bestRow].Cells[shapeColumnIndex];
+                grid.FirstDisplayedScrollingRowIndex = Math.Max(0, bestRow);
+            }
+            catch
+            {
+            }
+
+            bool applied = OpenShapePickerForCell(bestRow, shapeColumnIndex);
+            if (!applied)
+            {
+                return true; // 대상 행은 찾았고 사용자가 팝업을 취소한 정상 흐름
+            }
+
+            // 수정 적용은 OVIA의 현재 BarList 작업 데이터에만 반영한다.
+            // ERP 반영은 기존 저장 정책대로 사용자가 '검토 후 저장'을 클릭할 때 수행한다.
+            // 여기서 SaveProjectBarList_Click을 자동 호출하지 않는다.
+            return true;
+        }
+
+        private static string NormalizeExternalLaunchNumber(string value)
+        {
+            string text = (value ?? "").Trim().Replace(",", "");
+            double parsed;
+            if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed))
+            {
+                return parsed.ToString("0.########", CultureInfo.InvariantCulture);
+            }
+            return text;
+        }
+
+        private bool OpenShapePickerForCell(int rowIndex, int columnIndex)
         {
             if (grid == null || rowIndex < 0 || columnIndex < 0 || rowIndex >= grid.Rows.Count || columnIndex >= grid.Columns.Count)
             {
-                return;
+                return false;
             }
 
             if (grid.Rows[rowIndex].IsNewRow)
             {
-                return;
+                return false;
             }
 
             string currentValue = GetCellText(rowIndex, columnIndex);
@@ -11352,7 +11498,7 @@ namespace OVIA.Desktop
 
             if (picker.ShowDialog(this) != DialogResult.OK || picker.SelectedShape == null)
             {
-                return;
+                return false;
             }
 
             PushUndoState(CaptureGridState());
@@ -11428,6 +11574,7 @@ namespace OVIA.Desktop
             RecalculateSummary();
             lblStatus.ForeColor = TextSub;
             grid.InvalidateRow(rowIndex);
+            return true;
         }
 
         private string PersistAppliedCadShapeSnapshotForRow(int rowIndex, string editedJsonPath)
@@ -12721,6 +12868,27 @@ namespace OVIA.Desktop
                 || normalized == "총중량";
         }
 
+        private bool IsBarListLengthDisplayHeader(string header)
+        {
+            string normalized = NormalizeInternalColumnToken(header);
+
+            return normalized == "길이MM"
+                || normalized == "길이";
+        }
+
+        private string FormatBarListLengthForDisplay(string text)
+        {
+            decimal value;
+
+            if (!TryParseDecimalNumber(text, out value))
+            {
+                return FormatBarListNumberForDisplay(text);
+            }
+
+            decimal rounded = Decimal.Round(value, 0, MidpointRounding.AwayFromZero);
+            return rounded.ToString("#,0", CultureInfo.InvariantCulture);
+        }
+
         private bool IsTotalLengthDisplayHeader(string header)
         {
             string normalized = NormalizeInternalColumnToken(header);
@@ -12836,7 +13004,7 @@ namespace OVIA.Desktop
 
             lblRowCount.Text = rowCount.ToString("N0", CultureInfo.InvariantCulture);
             lblTotalQty.Text = totalQty.ToString("#,0.###", CultureInfo.InvariantCulture);
-            lblTotalLength.Text = totalLength.ToString("#,0.00", CultureInfo.InvariantCulture);
+            lblTotalLength.Text = Math.Round(totalLength, 0, MidpointRounding.AwayFromZero).ToString("#,0", CultureInfo.InvariantCulture);
 
             /*
              * 상단 중량 합계는 현재 OVIA 리스트의 중량(Ton) 셀 값을 그대로 합산합니다.
