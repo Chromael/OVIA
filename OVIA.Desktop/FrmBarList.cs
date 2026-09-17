@@ -56,6 +56,7 @@ namespace OVIA.Desktop
         private ToolStripMenuItem redoMenuItem;
         private ToolStripMenuItem rowCopyMenuItem;
         private ToolStripMenuItem rowPasteMenuItem;
+        private ToolStripMenuItem selectionSumMenuItem;
         private BarListCellClipboardData cellClipboardData = null;
         private List<object[]> rowClipboardRows = new List<object[]>();
         private string rowClipboardSchemaKey = "";
@@ -85,10 +86,14 @@ namespace OVIA.Desktop
         // ERP/로컬에 이미 확정된 BarList 헤더 메타데이터를 철근 행과 분리해 보존한다.
         // 빈 BarList는 화면 Grid에 가짜 1행을 표시하지 않되, 이후 CAD 추출 시 제목/발주정보/ERP idx가 유지되어야 한다.
         private Dictionary<string, string> persistedBarListMeta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        private Label lblRowCount;
-        private Label lblTotalQty;
-        private Label lblTotalLength;
-        private Label lblTotalWeight;
+        private OviaSelectableTextBox lblRowCount;
+        private OviaSelectableTextBox lblTotalQty;
+        private OviaSelectableTextBox lblTotalLength;
+        private OviaSelectableTextBox lblTotalWeight;
+        private OviaBarListCard selectionSumCard;
+        private OviaSelectableTextBox lblSelectionSum;
+        private Label lblSelectionSumUnit;
+        private Button selectionSumClearButton;
         private Label lblStatus;
         private OviaProjectContextHeader projectContextHeader;
         private OviaBarListButton saveProjectButton;
@@ -120,6 +125,7 @@ namespace OVIA.Desktop
         private BarListSummaryMode activeSummaryFilterMode = BarListSummaryMode.Spec;
         private string activeSummaryFilterValue = "";
         private bool hasActiveSummaryFilter = false;
+        private bool hasActiveSelectionSum = false;
         private const int SummaryDrawerWidth = 430;
         private const int SummaryDrawerGap = 10;
         private ToolTip windowToolTip;
@@ -136,6 +142,7 @@ namespace OVIA.Desktop
         private Dictionary<string, RebarCalculationMismatchInfo> rebarCalculationMismatches = new Dictionary<string, RebarCalculationMismatchInfo>();
         private bool isApplyingRebarCalculation = false;
         private bool rebarMismatchWarningShown = false;
+        private bool initialRebarValidationWarningPending = false;
 
         private const int GridZoomMinPercent = 100;
         private const int GridZoomMaxPercent = 220;
@@ -223,8 +230,19 @@ namespace OVIA.Desktop
 
             if (this.initialFilePath.Trim() != "" && File.Exists(this.initialFilePath))
             {
-                LoadCsv(this.initialFilePath, true);
+                initialRebarValidationWarningPending = LoadCsv(this.initialFilePath, true);
             }
+        }
+
+        private void FrmBarList_Shown(object sender, EventArgs e)
+        {
+            if (!initialRebarValidationWarningPending)
+            {
+                return;
+            }
+
+            initialRebarValidationWarningPending = false;
+            ShowRebarCalculationValidationWarning();
         }
 
         private void BuildUI()
@@ -244,6 +262,7 @@ namespace OVIA.Desktop
             this.MinimumSize = new Size(1100, 750);
             this.BackColor = SurfaceColor;
             this.FormClosing += FrmBarList_FormClosing;
+            this.Shown += FrmBarList_Shown;
 
             windowToolTip = new ToolTip();
             windowToolTip.AutoPopDelay = 4000;
@@ -1027,6 +1046,8 @@ namespace OVIA.Desktop
         private void BuildProjectInfo(Control parent)
         {
             projectContextHeader = new OviaProjectContextHeader();
+            projectContextHeader.HighlightProjectNumberWithAccent = true;
+            projectContextHeader.OrderNumberToolTipText = "발주No";
             projectContextHeader.Location = new Point(34, 156);
             projectContextHeader.Size = new Size(1168, 58);
             projectContextHeader.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -1079,7 +1100,8 @@ namespace OVIA.Desktop
             AddCompactSummaryCard(parent, "행", "0", "", new Point(34, y), new Size(165, 50), out lblRowCount);
             AddCompactSummaryCard(parent, "수량", "0", "EA", new Point(209, y), new Size(210, 50), out lblTotalQty);
             AddCompactSummaryCard(parent, "총길이", "0.00", "M", new Point(429, y), new Size(240, 50), out lblTotalLength);
-            AddCompactSummaryCard(parent, "중량", "0.000", "Ton", new Point(679, y), new Size(220, 50), out lblTotalWeight);
+            AddCompactSummaryCard(parent, "중량", "0", "kg", new Point(679, y), new Size(220, 50), out lblTotalWeight);
+            BuildSelectionSumCard(parent, y);
 
             lblStatus = new Label();
             lblStatus.Text = "CAD에서 영역을 추출하거나 저장된 BarList를 불러오세요.";
@@ -1094,7 +1116,92 @@ namespace OVIA.Desktop
             parent.Controls.Add(lblStatus);
         }
 
-        private void AddCompactSummaryCard(Control parent, string title, string value, string unit, Point location, Size size, out Label valueLabel)
+        private void BuildSelectionSumCard(Control parent, int y)
+        {
+            selectionSumCard = new OviaBarListCard();
+            selectionSumCard.Location = new Point(909, y);
+            selectionSumCard.Size = new Size(265, 50);
+            selectionSumCard.SurfaceColor = SurfaceColor;
+            selectionSumCard.CompactMode = true;
+            selectionSumCard.Visible = false;
+            parent.Controls.Add(selectionSumCard);
+
+            Label titleLabel = new Label();
+            titleLabel.Text = "선택 합계";
+            titleLabel.AutoSize = true;
+            titleLabel.Font = OviaFluentTheme.FontData(8.7F, FontStyle.Bold);
+            titleLabel.ForeColor = TextSub;
+            titleLabel.BackColor = Color.White;
+            titleLabel.Location = new Point(14, 16);
+            selectionSumCard.Controls.Add(titleLabel);
+
+            selectionSumClearButton = new Button();
+            selectionSumClearButton.Text = "×";
+            selectionSumClearButton.Size = new Size(26, 26);
+            selectionSumClearButton.Location = new Point(selectionSumCard.Width - 32, 12);
+            selectionSumClearButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            selectionSumClearButton.FlatStyle = FlatStyle.Flat;
+            selectionSumClearButton.FlatAppearance.BorderSize = 0;
+            selectionSumClearButton.FlatAppearance.MouseOverBackColor = OviaFluentTheme.NeutralLight;
+            selectionSumClearButton.FlatAppearance.MouseDownBackColor = OviaFluentTheme.ControlBorder;
+            selectionSumClearButton.BackColor = Color.White;
+            selectionSumClearButton.ForeColor = TextSub;
+            selectionSumClearButton.Font = OviaFluentTheme.FontButton(11F, FontStyle.Regular);
+            selectionSumClearButton.Cursor = Cursors.Hand;
+            selectionSumClearButton.TabStop = false;
+            selectionSumClearButton.Click += delegate { ClearSelectionSum(); };
+            windowToolTip.SetToolTip(selectionSumClearButton, "선택 합계를 지우고 다시 선택합니다.");
+            selectionSumCard.Controls.Add(selectionSumClearButton);
+
+            lblSelectionSumUnit = new Label();
+            lblSelectionSumUnit.Text = "kg";
+            lblSelectionSumUnit.AutoSize = true;
+            lblSelectionSumUnit.Font = OviaFluentTheme.FontData(8.5F, FontStyle.Regular);
+            lblSelectionSumUnit.ForeColor = TextSub;
+            lblSelectionSumUnit.BackColor = Color.White;
+            lblSelectionSumUnit.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            selectionSumCard.Controls.Add(lblSelectionSumUnit);
+
+            lblSelectionSum = new OviaSelectableTextBox();
+            lblSelectionSum.Text = "0";
+            lblSelectionSum.Font = OviaFluentTheme.FontTitle(13F, FontStyle.Bold);
+            lblSelectionSum.ForeColor = TextDark;
+            lblSelectionSum.BackColor = Color.White;
+            lblSelectionSum.TextAlign = HorizontalAlignment.Right;
+            lblSelectionSum.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            selectionSumCard.Controls.Add(lblSelectionSum);
+            LayoutSelectionSumCardValue("kg");
+        }
+
+        private void LayoutSelectionSumCardValue(string unit)
+        {
+            if (selectionSumCard == null || selectionSumCard.IsDisposed ||
+                lblSelectionSum == null || lblSelectionSum.IsDisposed ||
+                lblSelectionSumUnit == null || lblSelectionSumUnit.IsDisposed ||
+                selectionSumClearButton == null || selectionSumClearButton.IsDisposed)
+            {
+                return;
+            }
+
+            lblSelectionSumUnit.Text = unit ?? String.Empty;
+            Size unitSize = TextRenderer.MeasureText(lblSelectionSumUnit.Text, lblSelectionSumUnit.Font);
+            int unitX = Math.Max(154, selectionSumClearButton.Left - unitSize.Width - 6);
+            lblSelectionSumUnit.Location = new Point(unitX, 17);
+
+            int valueLeft = 92;
+            int valueRight = Math.Max(valueLeft + 36, unitX - 6);
+            int valueHeight = Math.Min(selectionSumCard.Height - 8, Math.Max(22, TextRenderer.MeasureText(
+                "Ag",
+                lblSelectionSum.Font,
+                new Size(Math.Max(36, valueRight - valueLeft), selectionSumCard.Height),
+                TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Height + 4));
+            int valueTop = Math.Max(0, (selectionSumCard.Height - valueHeight) / 2);
+
+            lblSelectionSum.Location = new Point(valueLeft, valueTop);
+            lblSelectionSum.Size = new Size(Math.Max(36, valueRight - valueLeft), valueHeight);
+        }
+
+        private void AddCompactSummaryCard(Control parent, string title, string value, string unit, Point location, Size size, out OviaSelectableTextBox valueLabel)
         {
             OviaBarListCard card = new OviaBarListCard();
             card.Location = location;
@@ -1131,15 +1238,20 @@ namespace OVIA.Desktop
                 card.Controls.Add(unitLabel);
             }
 
-            valueLabel = new Label();
+            valueLabel = new OviaSelectableTextBox();
             valueLabel.Text = value;
-            valueLabel.AutoSize = false;
             valueLabel.Font = OviaFluentTheme.FontTitle(13F, FontStyle.Bold);
             valueLabel.ForeColor = TextDark;
             valueLabel.BackColor = Color.White;
-            valueLabel.Location = new Point(valueLeft, 7);
-            valueLabel.Size = new Size(Math.Max(36, valueRight - valueLeft), 34);
-            valueLabel.TextAlign = ContentAlignment.MiddleRight;
+            int valueHeight = Math.Min(size.Height - 8, Math.Max(22, TextRenderer.MeasureText(
+                "Ag",
+                valueLabel.Font,
+                new Size(Math.Max(36, valueRight - valueLeft), size.Height),
+                TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Height + 4));
+            int valueTop = Math.Max(0, (size.Height - valueHeight) / 2);
+            valueLabel.Location = new Point(valueLeft, valueTop);
+            valueLabel.Size = new Size(Math.Max(36, valueRight - valueLeft), valueHeight);
+            valueLabel.TextAlign = HorizontalAlignment.Right;
             valueLabel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             card.Controls.Add(valueLabel);
         }
@@ -1728,7 +1840,7 @@ namespace OVIA.Desktop
                 info.RowCount.ToString("N0", CultureInfo.InvariantCulture),
                 info.TotalQty.ToString("#,0.###", CultureInfo.InvariantCulture),
                 info.TotalLength.ToString("#,0.00", CultureInfo.InvariantCulture),
-                info.TotalWeight.ToString("#,0.###", CultureInfo.InvariantCulture)
+                info.TotalWeight.ToString("#,0", CultureInfo.InvariantCulture)
             );
 
             summaryGrid.Rows[index].Tag = info;
@@ -1992,7 +2104,7 @@ namespace OVIA.Desktop
                 selectionSummaryLabel.Text = "선택 " + rowIndexes.Count.ToString("N0", CultureInfo.InvariantCulture)
                     + "행   |   수량 " + qty.ToString("#,0.###", CultureInfo.InvariantCulture)
                     + " EA   |   총길이 " + length.ToString("#,0.00", CultureInfo.InvariantCulture)
-                    + " M   |   중량 " + weight.ToString("#,0.###", CultureInfo.InvariantCulture) + " Ton";
+                    + " M   |   중량 " + weight.ToString("#,0", CultureInfo.InvariantCulture) + " kg";
             }
             else
             {
@@ -2003,6 +2115,167 @@ namespace OVIA.Desktop
 
             selectionSummaryPanel.Visible = true;
             LayoutSelectionSummaryOverlay();
+        }
+
+        private void ContextSelectionSum_Click(object sender, EventArgs e)
+        {
+            int columnIndex;
+            string unit;
+            string format;
+
+            if (!TryGetSelectionSumDefinition(out columnIndex, out unit, out format))
+            {
+                return;
+            }
+
+            decimal sum = 0M;
+            List<DataGridViewCell> selectedCells = GetClipboardSelectedCells();
+            int i;
+
+            for (i = 0; i < selectedCells.Count; i++)
+            {
+                DataGridViewCell cell = selectedCells[i];
+
+                if (cell == null || cell.ColumnIndex != columnIndex || cell.RowIndex < 0 || cell.RowIndex >= grid.Rows.Count)
+                {
+                    continue;
+                }
+
+                decimal value;
+
+                if (TryParseDecimalNumber(GetCellText(cell.RowIndex, cell.ColumnIndex), out value))
+                {
+                    sum += value;
+                }
+            }
+
+            hasActiveSelectionSum = true;
+            lblSelectionSum.Text = sum.ToString(format, CultureInfo.InvariantCulture);
+            LayoutSelectionSumCardValue(unit);
+            selectionSumCard.Visible = true;
+
+            if (lblStatus != null)
+            {
+                lblStatus.Visible = false;
+            }
+
+            selectionSumCard.BringToFront();
+        }
+
+        private void ClearSelectionSum()
+        {
+            hasActiveSelectionSum = false;
+
+            if (selectionSumCard != null && !selectionSumCard.IsDisposed)
+            {
+                selectionSumCard.Visible = false;
+            }
+
+            if (lblSelectionSum != null && !lblSelectionSum.IsDisposed)
+            {
+                lblSelectionSum.Text = "0";
+            }
+
+            if (lblSelectionSumUnit != null && !lblSelectionSumUnit.IsDisposed)
+            {
+                lblSelectionSumUnit.Text = String.Empty;
+            }
+
+            // 선택 합계 X 해제 시 이전 상태 메시지가 다시 나타나지 않도록 비웁니다.
+            // Undo/Redo 자체의 상태 메시지 동작은 그대로 유지하고, 선택 합계 해제 경로에서만 숨깁니다.
+            if (lblStatus != null && !lblStatus.IsDisposed)
+            {
+                lblStatus.Text = String.Empty;
+                lblStatus.Visible = false;
+            }
+
+            if (grid != null && !grid.IsDisposed)
+            {
+                grid.ClearSelection();
+                grid.CurrentCell = null;
+                RefreshSelectionVisualCache();
+                InvalidateSelectionVisuals();
+                UpdateSelectionSummaryOverlay();
+            }
+        }
+
+        private bool TryGetSelectionSumDefinition(out int columnIndex, out string unit, out string format)
+        {
+            columnIndex = -1;
+            unit = "";
+            format = "#,0.###";
+
+            if (grid == null || grid.IsDisposed)
+            {
+                return false;
+            }
+
+            List<DataGridViewCell> selectedCells = GetClipboardSelectedCells();
+
+            if (selectedCells.Count == 0)
+            {
+                return false;
+            }
+
+            int candidateColumn = selectedCells[0].ColumnIndex;
+
+            if (candidateColumn < 0 || candidateColumn >= grid.Columns.Count || !grid.Columns[candidateColumn].Visible)
+            {
+                return false;
+            }
+
+            int i;
+
+            for (i = 1; i < selectedCells.Count; i++)
+            {
+                if (selectedCells[i].ColumnIndex != candidateColumn)
+                {
+                    return false;
+                }
+            }
+
+            string header = grid.Columns[candidateColumn].HeaderText == null ? "" : grid.Columns[candidateColumn].HeaderText.Trim();
+
+            if (IsBarListLengthDisplayHeader(header))
+            {
+                unit = "mm";
+                format = "#,0.###";
+            }
+            else if (header.IndexOf("수량", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                unit = "EA";
+                format = "#,0.###";
+            }
+            else if (IsTotalLengthDisplayHeader(header))
+            {
+                unit = "M";
+                format = "#,0.00##";
+            }
+            else if (header.IndexOf("중량", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                unit = "kg";
+                format = "#,0.###";
+            }
+            else
+            {
+                return false;
+            }
+
+            columnIndex = candidateColumn;
+            return true;
+        }
+
+        private void RefreshSelectionSumMenuState()
+        {
+            if (selectionSumMenuItem == null)
+            {
+                return;
+            }
+
+            int columnIndex;
+            string unit;
+            string format;
+            selectionSumMenuItem.Enabled = TryGetSelectionSumDefinition(out columnIndex, out unit, out format);
         }
 
         private void BuildGridContextMenu()
@@ -2018,6 +2291,12 @@ namespace OVIA.Desktop
             redoMenuItem = new ToolStripMenuItem("다시 실행(Shift + Ctrl + Z)");
             redoMenuItem.Click += ContextRedo_Click;
             gridContextMenu.Items.Add(redoMenuItem);
+
+            gridContextMenu.Items.Add(new ToolStripSeparator());
+
+            selectionSumMenuItem = new ToolStripMenuItem("선택영역 합계");
+            selectionSumMenuItem.Click += ContextSelectionSum_Click;
+            gridContextMenu.Items.Add(selectionSumMenuItem);
 
             gridContextMenu.Items.Add(new ToolStripSeparator());
 
@@ -3147,7 +3426,10 @@ namespace OVIA.Desktop
                 int lengthColumn = FindCsvColumnIndex(rows[0], "길이MM", "길이(mm)", "길이", "LENGTH");
                 int qtyColumn = FindCsvColumnIndex(rows[0], "수량EA", "수량(EA)", "수량", "QTY", "QUANTITY");
 
-                if (rowTypeColumn < 0 || markColumn < 0 || specColumn < 0 || lengthColumn < 0 || qtyColumn < 0)
+                // CAD 원본에는 번호/철근규격/철근형상 등 선택 항목이 없을 수 있다.
+                // Desktop 준비 검증도 AutoCAD 추출 계약과 동일하게 길이+수량만 최소 DATA 조건으로 사용한다.
+                // 번호/규격 컬럼은 표준 CSV에 존재하되 셀 값이 빈칸이어도 전체 패키지를 거부하지 않는다.
+                if (rowTypeColumn < 0 || lengthColumn < 0 || qtyColumn < 0)
                 {
                     return false;
                 }
@@ -4123,7 +4405,7 @@ namespace OVIA.Desktop
                 + exportedRows.ToString("N0", CultureInfo.InvariantCulture)
                 + "    수량 " + exportedQty.ToString("#,0.###", CultureInfo.InvariantCulture) + " EA"
                 + "    총길이 " + exportedLength.ToString("#,0.00", CultureInfo.InvariantCulture) + " M"
-                + "    중량 " + exportedWeight.ToString("#,0.000", CultureInfo.InvariantCulture) + " Ton";
+                + "    중량 " + exportedWeight.ToString("#,0", CultureInfo.InvariantCulture) + " kg";
 
             BarListExcelExporter.Save(filePath, document);
             return exportedRows;
@@ -5616,7 +5898,7 @@ namespace OVIA.Desktop
         {
             string[] headers = new string[]
             {
-                "부위", "번호", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(Ton)", "비고", "원본 도면"
+                "부위", "번호", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(kg)", "비고", "원본 도면"
             };
             int[] widths = new int[] { 58, 50, 74, 148, 82, 74, 82, 82, 105, 145 };
             int i;
@@ -5660,7 +5942,7 @@ namespace OVIA.Desktop
                 int lengthColumn = FindCsvColumnIndex(headers, "길이(mm)", "길이MM", "길이", "LENGTH");
                 int qtyColumn = FindCsvColumnIndex(headers, "수량(EA)", "수량EA", "수량", "QTY", "QUANTITY");
                 int totalLengthColumn = FindCsvColumnIndex(headers, "총길이(M)", "총길이M", "총길이", "TOTAL LENGTH");
-                int weightColumn = FindCsvColumnIndex(headers, "중량(Ton)", "중량TON", "총중량(Ton)", "중량", "TOTAL WEIGHT");
+                int weightColumn = FindCsvColumnIndex(headers, "중량(kg)", "중량(KG)", "중량(Ton)", "중량TON", "총중량(kg)", "총중량(KG)", "총중량(Ton)", "중량", "TOTAL WEIGHT");
                 int noteColumn = FindCsvColumnIndex(headers, "비고", "NOTE", "REMARK");
                 int drawingColumn = FindCsvColumnIndex(headers, "원본 도면", "원본도면", "SOURCE DRAWING", "SOURCE DRAWING NAME");
                 int r;
@@ -5896,7 +6178,7 @@ namespace OVIA.Desktop
             label.Text = "선택 " + selectedRows.Count.ToString("N0", CultureInfo.InvariantCulture)
                 + "행   |   수량 " + qty.ToString("#,0.###", CultureInfo.InvariantCulture)
                 + " EA   |   총길이 " + length.ToString("#,0.00", CultureInfo.InvariantCulture)
-                + " M   |   중량 " + weight.ToString("#,0.###", CultureInfo.InvariantCulture) + " Ton";
+                + " M   |   중량 " + weight.ToString("#,0", CultureInfo.InvariantCulture) + " kg";
         }
 
         private bool ApplyOtherBarListImport(string filePath, List<int> selectedSourceRows)
@@ -6106,6 +6388,13 @@ namespace OVIA.Desktop
 
         private void Grid_CellBeginEdit(object sender, DataGridViewCellCancelEventArgs e)
         {
+            if (IsProgressEditLocked())
+            {
+                e.Cancel = true;
+                ShowProgressEditLockedMessage();
+                return;
+            }
+
             if (isRestoringGridState)
             {
                 return;
@@ -6165,6 +6454,12 @@ namespace OVIA.Desktop
             if (IsRebarShapeColumn(e.ColumnIndex))
             {
                 OpenShapePickerForCell(e.RowIndex, e.ColumnIndex);
+                return;
+            }
+
+            if (IsProgressEditLocked())
+            {
+                ShowProgressEditLockedMessage();
                 return;
             }
 
@@ -6888,6 +7183,19 @@ namespace OVIA.Desktop
 
         private void Grid_KeyDown(object sender, KeyEventArgs e)
         {
+            if (IsProgressEditLocked()
+                && ((e.Control && e.KeyCode == Keys.V)
+                    || (e.Control && e.KeyCode == Keys.Z)
+                    || e.KeyCode == Keys.Delete
+                    || e.KeyCode == Keys.F2
+                    || e.KeyCode == Keys.Enter))
+            {
+                ShowProgressEditLockedMessage();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
+
             if (grid != null && grid.IsCurrentCellInEditMode
                 && e.Control && !e.Shift
                 && (e.KeyCode == Keys.C || e.KeyCode == Keys.V))
@@ -7511,15 +7819,51 @@ namespace OVIA.Desktop
 
         private void GridContextMenu_Opening(object sender, System.ComponentModel.CancelEventArgs e)
         {
-            if (!CanUseExtractEditMenu())
+            EnsureAtLeastOneCellSelected();
+
+            foreach (ToolStripItem item in gridContextMenu.Items)
             {
-                e.Cancel = true;
-                lblStatus.Text = "BarList 데이터가 있을 때만 우클릭 편집 메뉴를 사용할 수 있습니다.";
+                item.Enabled = true;
+            }
+
+            if (IsProgressEditLocked())
+            {
+                foreach (ToolStripItem item in gridContextMenu.Items)
+                {
+                    item.Enabled = false;
+                }
+
+                RefreshSelectionSumMenuState();
+                lblStatus.Text = "진행중이거나 완료된 BarList는 수정할 수 없습니다.";
                 lblStatus.ForeColor = TextSub;
                 return;
             }
 
-            EnsureAtLeastOneCellSelected();
+            if (!CanUseExtractEditMenu())
+            {
+                RefreshSelectionSumMenuState();
+
+                if (selectionSumMenuItem == null || !selectionSumMenuItem.Enabled)
+                {
+                    e.Cancel = true;
+                    lblStatus.Text = "BarList 데이터가 있을 때만 우클릭 편집 메뉴를 사용할 수 있습니다.";
+                    lblStatus.ForeColor = TextSub;
+                    return;
+                }
+
+                foreach (ToolStripItem item in gridContextMenu.Items)
+                {
+                    if (!Object.ReferenceEquals(item, selectionSumMenuItem) && !(item is ToolStripSeparator))
+                    {
+                        item.Enabled = false;
+                    }
+                }
+
+                selectionSumMenuItem.Enabled = true;
+                return;
+            }
+
+            RefreshSelectionSumMenuState();
             RefreshUndoRedoMenuState();
             RefreshClipboardMenuState();
         }
@@ -9774,6 +10118,66 @@ namespace OVIA.Desktop
             return false;
         }
 
+        private bool IsProgressEditLocked()
+        {
+            string progress = "";
+
+            if (persistedBarListMeta != null)
+            {
+                persistedBarListMeta.TryGetValue("진행", out progress);
+            }
+
+            if (String.IsNullOrWhiteSpace(progress) && grid != null && grid.Columns.Contains("진행"))
+            {
+                int columnIndex = grid.Columns["진행"].Index;
+                for (int r = 0; r < grid.Rows.Count; r++)
+                {
+                    if (!grid.Rows[r].IsNewRow)
+                    {
+                        progress = GetCellText(r, columnIndex);
+                        if (!String.IsNullOrWhiteSpace(progress)) break;
+                    }
+                }
+            }
+
+            string normalized = (progress ?? "").Replace(" ", "").Trim();
+            return string.Equals(normalized, "진행중", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalized, "완료", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void ShowProgressEditLockedMessage()
+        {
+            MessageBox.Show(
+                "진행중이거나 완료된 BarList는 수정할 수 없습니다.",
+                "OVIA BarList",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information
+            );
+        }
+
+        private void ApplyProgressEditLockUi()
+        {
+            bool locked = IsProgressEditLocked();
+
+            if (grid != null)
+            {
+                grid.ReadOnly = locked;
+                grid.AllowUserToDeleteRows = !locked;
+            }
+
+            if (otherBarListButton != null)
+            {
+                otherBarListButton.Visible = !locked;
+            }
+
+            if (cadSelectionButton != null) cadSelectionButton.Enabled = !locked;
+            if (cadSelectionModeOffButton != null && locked) cadSelectionModeOffButton.Enabled = false;
+            if (deleteCadBoxButton != null && locked) deleteCadBoxButton.Enabled = false;
+            if (saveProjectButton != null && locked) saveProjectButton.Enabled = false;
+
+            LayoutActionButtons();
+        }
+
         private bool IsCurrentBarListImportLocked()
         {
             if (IsBarListFileLocked(savedProjectFilePath))
@@ -10032,7 +10436,9 @@ namespace OVIA.Desktop
 
                 BindCsvRows(rows);
                 rebarMismatchWarningShown = false;
-                ApplyRebarCalculationAndValidation(true);
+                // 저장된 BarList 최초 진입은 화면 전환이 끝난 뒤 Shown에서 검증 알림을 띄운다.
+                // CAD 추가/신규 입력은 이미 상세 화면 안에 있으므로 기존처럼 즉시 알림을 유지한다.
+                ApplyRebarCalculationAndValidation(!loadAsSaved);
                 ApplyRebarElongationForAllRows();
                 allowExtractEditMenu = true;
                 ClearUndoRedoStates();
@@ -10056,6 +10462,7 @@ namespace OVIA.Desktop
                     lblStatus.ForeColor = OviaFluentTheme.Danger;
                 }
 
+                ApplyProgressEditLockUi();
                 return true;
             }
             catch (Exception ex)
@@ -10317,8 +10724,9 @@ namespace OVIA.Desktop
             int lengthColumn = FindCsvColumnIndex(rows[0], "길이MM", "길이(mm)", "길이", "LENGTH");
             int qtyColumn = FindCsvColumnIndex(rows[0], "수량EA", "수량(EA)", "수량", "QTY", "QUANTITY");
             int totalLengthColumn = FindCsvColumnIndex(rows[0], "총길이M", "총길이(M)", "총길이", "TOTALLENGTH");
-            int totalWeightColumn = FindCsvColumnIndex(rows[0], "중량TON", "중량(Ton)", "총중량TON", "총중량(Ton)", "중량", "총중량", "TOTALWEIGHT");
-            bool canValidateRebarData = markColumn >= 0 && specColumn >= 0 && lengthColumn >= 0 && qtyColumn >= 0;
+            int totalWeightColumn = FindCsvColumnIndex(rows[0], "중량(kg)", "중량(KG)", "중량(Ton)", "중량TON", "총중량(kg)", "총중량(KG)", "총중량(Ton)", "총중량TON", "중량", "총중량", "TOTALWEIGHT");
+            // 번호/규격은 선택 항목이다. 길이+수량 컬럼만 있으면 실제 DATA 여부를 검증한다.
+            bool canValidateRebarData = lengthColumn >= 0 && qtyColumn >= 0;
 
             List<List<string>> filtered = new List<List<string>>();
             filtered.Add(rows[0]);
@@ -10443,21 +10851,20 @@ namespace OVIA.Desktop
 
         private bool IsActualRebarCsvRow(List<string> row, int markColumn, int specColumn, int lengthColumn, int qtyColumn)
         {
-            string mark = GetCsvCellText(row, markColumn);
-            string spec = GetCsvCellText(row, specColumn);
+            /*
+             * OVIA 2026-09-16 _03 - CAD 선택 컬럼 허용 계약 통일
+             * AutoCAD 추출기는 길이+수량이 정상인 DATA 행을 허용하지만 Desktop이 다시
+             * 번호+규격+길이+수량을 필수로 검사하면 .ready가 있어도 CSV 전체를 거부한다.
+             * CAD에 실제로 없는 번호/규격/형상은 빈칸으로 보존하고, DATA 행의 최소 판정은
+             * 양수 길이와 양수 수량으로 통일한다. markColumn/specColumn 인자는 기존 호출 계약과
+             * 호환을 위해 유지하되 DATA 승인 조건에는 사용하지 않는다.
+             */
             double length;
             double qty;
-
-            Match markMatch = Regex.Match(mark.Trim(), @"^([0-9]{1,6})[A-Za-z]?$", RegexOptions.IgnoreCase);
-            int markNumber;
-            bool markOk = markMatch.Success
-                && Int32.TryParse(markMatch.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out markNumber)
-                && markNumber > 0;
-            bool specOk = Regex.IsMatch(spec.Trim(), @"^(?:UHD|SHD|HD|SD|D)[0-9]{1,3}[A-Z]{0,4}$", RegexOptions.IgnoreCase);
             bool lengthOk = TryParseNumber(GetCsvCellText(row, lengthColumn), out length) && length > 0;
             bool qtyOk = TryParseNumber(GetCsvCellText(row, qtyColumn), out qty) && qty > 0;
 
-            return markOk && specOk && lengthOk && qtyOk;
+            return lengthOk && qtyOk;
         }
 
         private string GetCsvCellText(List<string> row, int columnIndex)
@@ -10604,7 +11011,7 @@ namespace OVIA.Desktop
 
                 if (appendedRowCount > 0)
                 {
-                    ConvertAppendedWeightColumnsIfNeeded(mappedTable, destinationColumns, startRowIndex, grid.Rows.Count - 1);
+                    ConvertAppendedWeightColumnsToKilogramsIfNeeded(mappedTable, destinationColumns, startRowIndex, grid.Rows.Count - 1);
                     ResetImportedCalculationMetaForRows(startRowIndex, grid.Rows.Count - 1);
                     ApplyGridColumnStyle();
                     ApplySourceDrawingToolTips(startRowIndex, grid.Rows.Count - 1);
@@ -10671,7 +11078,7 @@ namespace OVIA.Desktop
             return destinationColumns;
         }
 
-        private void ConvertAppendedWeightColumnsIfNeeded(OviaBarListMappedTable mappedTable, Dictionary<int, int> destinationColumns, int startRowIndex, int endRowIndex)
+        private void ConvertAppendedWeightColumnsToKilogramsIfNeeded(OviaBarListMappedTable mappedTable, Dictionary<int, int> destinationColumns, int startRowIndex, int endRowIndex)
         {
             if (mappedTable == null || destinationColumns == null)
             {
@@ -10689,7 +11096,7 @@ namespace OVIA.Desktop
                     continue;
                 }
 
-                if (!HeaderLooksKg(mapped.SourceHeader))
+                if (!HeaderLooksTon(mapped.SourceHeader))
                 {
                     continue;
                 }
@@ -10699,7 +11106,7 @@ namespace OVIA.Desktop
                     continue;
                 }
 
-                ConvertColumnKgToTon(destinationColumns[i], startRowIndex, endRowIndex);
+                ConvertColumnTonToKg(destinationColumns[i], startRowIndex, endRowIndex);
             }
         }
 
@@ -10772,7 +11179,7 @@ namespace OVIA.Desktop
                 }
 
                 EnsureFinalLengthColumn();
-                ApplyUnitConversionAfterMapping(mappedTable);
+                ApplyWeightUnitConversionAfterMapping(mappedTable);
                 ApplyRebarElongationForAllRows();
                 ResetImportedCalculationMetaForRows(0, grid.Rows.Count - 1);
                 ApplyGridColumnStyle();
@@ -11494,7 +11901,8 @@ namespace OVIA.Desktop
             string currentDimensionText = GetShapeDimensionText(rowIndex);
             string pickerSearchValue = currentShapeNo != "" ? currentShapeNo : currentValue;
             string currentCadShapePath = ResolveCadShapeJsonPath(GetCadShapeJsonText(rowIndex));
-            FrmShapePicker picker = new FrmShapePicker(GetShapeRepository(), pickerSearchValue, currentDimensionText, currentCadShapePath);
+            bool readOnlyShapeView = IsProgressEditLocked();
+            FrmShapePicker picker = new FrmShapePicker(GetShapeRepository(), pickerSearchValue, currentDimensionText, currentCadShapePath, readOnlyShapeView);
 
             if (picker.ShowDialog(this) != DialogResult.OK || picker.SelectedShape == null)
             {
@@ -11920,17 +12328,17 @@ namespace OVIA.Desktop
         }
 
 
-        private void ApplyUnitConversionAfterMapping(OviaBarListMappedTable mappedTable)
+        private void ApplyWeightUnitConversionAfterMapping(OviaBarListMappedTable mappedTable)
         {
             if (grid == null)
             {
                 return;
             }
 
-            ApplyUnitConversionAfterMapping(mappedTable, 0, grid.Rows.Count - 1);
+            ApplyWeightUnitConversionAfterMapping(mappedTable, 0, grid.Rows.Count - 1);
         }
 
-        private void ApplyUnitConversionAfterMapping(OviaBarListMappedTable mappedTable, int startRowIndex, int endRowIndex)
+        private void ApplyWeightUnitConversionAfterMapping(OviaBarListMappedTable mappedTable, int startRowIndex, int endRowIndex)
         {
             if (grid == null || mappedTable == null)
             {
@@ -11948,12 +12356,12 @@ namespace OVIA.Desktop
                     continue;
                 }
 
-                if (!HeaderLooksKg(mapped.SourceHeader))
+                if (!HeaderLooksTon(mapped.SourceHeader))
                 {
                     continue;
                 }
 
-                ConvertColumnKgToTon(i, startRowIndex, endRowIndex);
+                ConvertColumnTonToKg(i, startRowIndex, endRowIndex);
             }
         }
 
@@ -11972,17 +12380,31 @@ namespace OVIA.Desktop
                 || value.IndexOf("킬로", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
-        private void ConvertColumnKgToTon(int columnIndex)
+        private bool HeaderLooksTon(string header)
+        {
+            if (header == null)
+            {
+                return false;
+            }
+
+            string value = header.Trim().ToUpperInvariant();
+            value = value.Replace(" ", "");
+
+            return value.IndexOf("TON", StringComparison.OrdinalIgnoreCase) >= 0
+                || value.IndexOf("톤", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private void ConvertColumnTonToKg(int columnIndex)
         {
             if (grid == null)
             {
                 return;
             }
 
-            ConvertColumnKgToTon(columnIndex, 0, grid.Rows.Count - 1);
+            ConvertColumnTonToKg(columnIndex, 0, grid.Rows.Count - 1);
         }
 
-        private void ConvertColumnKgToTon(int columnIndex, int startRowIndex, int endRowIndex)
+        private void ConvertColumnTonToKg(int columnIndex, int startRowIndex, int endRowIndex)
         {
             if (grid == null || columnIndex < 0 || columnIndex >= grid.Columns.Count)
             {
@@ -12016,8 +12438,8 @@ namespace OVIA.Desktop
                     continue;
                 }
 
-                double ton = value / 1000.0;
-                grid.Rows[r].Cells[columnIndex].Value = ton.ToString("0.###", CultureInfo.InvariantCulture);
+                double kg = value * 1000.0;
+                grid.Rows[r].Cells[columnIndex].Value = kg.ToString("0.###", CultureInfo.InvariantCulture);
             }
         }
 
@@ -12530,7 +12952,9 @@ namespace OVIA.Desktop
                 }
                 else if (name != null && name.Trim().Equals("번호", StringComparison.OrdinalIgnoreCase))
                 {
-                    baseWidth = 48;
+                    // 번호 헤더가 좁은 폭에서 "번/호" 두 줄로 자동 개행되지 않도록
+                    // 최소 표시 폭을 확보합니다. 데이터/정렬 로직에는 영향을 주지 않습니다.
+                    baseWidth = 56;
                 }
                 else if (ContainsAny(name, "규격", "철근규격"))
                 {
@@ -12575,6 +12999,13 @@ namespace OVIA.Desktop
                 grid.Columns[i].MinimumWidth = Math.Min(scaledWidth, ScaleGridSize(45));
                 grid.Columns[i].Width = scaledWidth;
                 grid.Columns[i].HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+
+                if (name != null && name.Trim().Equals("번호", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 번호는 항상 한 줄 헤더로 표시합니다.
+                    grid.Columns[i].HeaderCell.Style.WrapMode = DataGridViewTriState.False;
+                }
+
                 grid.Columns[i].DefaultCellStyle.Alignment = GetBarListCellAlignment(name);
 
                 if (IsRebarSpecDisplayHeader(name))
@@ -13007,11 +13438,11 @@ namespace OVIA.Desktop
             lblTotalLength.Text = Math.Round(totalLength, 0, MidpointRounding.AwayFromZero).ToString("#,0", CultureInfo.InvariantCulture);
 
             /*
-             * 상단 중량 합계는 현재 OVIA 리스트의 중량(Ton) 셀 값을 그대로 합산합니다.
+             * 상단 중량 합계는 현재 OVIA 리스트의 중량(kg) 셀 값을 그대로 합산합니다.
              * 행별 중량 셀은 기존 계산/검증 계약에 따라 소수 셋째 자리 값을 유지하며,
              * 화면에 표시된 각 행의 중량 합과 상단 카드 값이 항상 일치해야 합니다.
              */
-            lblTotalWeight.Text = totalWeight.ToString("#,0.###", CultureInfo.InvariantCulture);
+            lblTotalWeight.Text = totalWeight.ToString("#,0", CultureInfo.InvariantCulture);
 
             RefreshProjectContextHeaderFromGrid();
             RefreshSummaryDrawerData();
@@ -13261,6 +13692,15 @@ namespace OVIA.Desktop
         {
             if (saveProjectButton == null)
             {
+                return;
+            }
+
+            if (IsProgressEditLocked())
+            {
+                saveProjectButton.Enabled = false;
+                saveProjectButton.UseDisabledAppearance = true;
+                saveProjectButton.Cursor = Cursors.Default;
+                saveProjectButton.Invalidate();
                 return;
             }
 
@@ -13637,7 +14077,7 @@ namespace OVIA.Desktop
             // 이후 CAD 추출 시 이 파일은 동일 ERP idx를 가진 정상 BarList로 갱신된다.
             string[] headers = new string[]
             {
-                "부위", "번호", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(Ton)", "비고", "원본 도면",
+                "부위", "번호", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(kg)", "비고", "원본 도면",
                 "OVIA_CAD_SHAPE_JSON", "OVIA_SHAPE_SOURCE", "OVIA_SHAPE_STATUS", FinalLengthHeader, "OVIA_ERP_BARLIST_IDX", "OVIA_ERP_LIST_ORDER",
                 "상태", "작성", "발주번호", "발주일", "등록일", "납기일", "동", "층", "공종", "진행", "제목", "태그", "색상", "주문량",
                 "태그발행", "기타", "장대", "절단", "절곡", "출하", "미출하", "작성자", "OVIA_BARLIST_MEMO"
@@ -13899,13 +14339,6 @@ namespace OVIA.Desktop
             try
             {
                 Dictionary<string, double> unitWeights = OviaRebarUnitWeightStore.LoadEnabledUnitWeights();
-                bool importedTotalWeightUsesKilograms = ShouldCompareImportedTotalWeightAsKilograms(
-                    specCol,
-                    lengthCol,
-                    qtyCol,
-                    totalWeightCol,
-                    unitWeights
-                );
                 int r;
 
                 for (r = 0; r < grid.Rows.Count; r++)
@@ -13944,7 +14377,7 @@ namespace OVIA.Desktop
 
                     double unitWeightKgM = unitWeights[baseSpec];
                     double calculatedTotalLengthM = Math.Round((lengthMm / 1000.0) * qty, 3, MidpointRounding.AwayFromZero);
-                    double calculatedTotalWeightTon = Math.Round((calculatedTotalLengthM * unitWeightKgM) / 1000.0, 3, MidpointRounding.AwayFromZero);
+                    double calculatedTotalWeightKg = Math.Round(calculatedTotalLengthM * unitWeightKgM, 0, MidpointRounding.AwayFromZero);
 
                     if (totalLengthCol >= 0)
                     {
@@ -13958,12 +14391,7 @@ namespace OVIA.Desktop
                     if (totalWeightCol >= 0)
                     {
                         string originalText = GetOriginalImportedTotalText(r, totalWeightCol);
-                        bool rowWeightUsesKilograms = ShouldCompareImportedWeightRowAsKilograms(
-                            originalText,
-                            calculatedTotalWeightTon,
-                            importedTotalWeightUsesKilograms
-                        );
-                        bool mismatch = SetCalculatedCellValue(r, totalWeightCol, calculatedTotalWeightTon, "총중량(Ton)", originalText, baseSpec, unitWeightKgM, rowWeightUsesKilograms, next);
+                        bool mismatch = SetCalculatedCellValue(r, totalWeightCol, calculatedTotalWeightKg, "총중량(kg)", originalText, baseSpec, unitWeightKgM, false, next);
                         mismatchFound = mismatchFound || mismatch;
                         totalWeightMismatchFound = totalWeightMismatchFound || mismatch;
                         anyCalculated = true;
@@ -13998,31 +14426,112 @@ namespace OVIA.Desktop
                 lblStatus.ForeColor = mismatchFound ? OviaFluentTheme.Danger : TextSub;
             }
 
-            if (showMismatchMessage && mismatchFound && !rebarMismatchWarningShown)
+            if (showMismatchMessage && mismatchFound)
             {
-                rebarMismatchWarningShown = true;
-                string mismatchMessage;
+                ShowRebarCalculationValidationWarning();
+            }
+        }
 
-                if (totalLengthMismatchFound && totalWeightMismatchFound)
+        private void ShowRebarCalculationValidationWarning()
+        {
+            if (rebarMismatchWarningShown || rebarCalculationMismatches == null || rebarCalculationMismatches.Count == 0)
+            {
+                return;
+            }
+
+            bool actualTotalLengthMismatchFound = false;
+            bool roundedTotalLengthDisplayFound = false;
+            bool totalWeightMismatchFound = false;
+
+            foreach (KeyValuePair<string, RebarCalculationMismatchInfo> pair in rebarCalculationMismatches)
+            {
+                RebarCalculationMismatchInfo info = pair.Value;
+
+                if (info == null)
                 {
-                    mismatchMessage = "총길이 또는 총중량 값이 다른 곳이 있습니다. 빨간색 셀의 CAD 원본값과 OVIA 계산값을 확인해주세요.";
+                    continue;
                 }
-                else if (totalLengthMismatchFound)
+
+                if (info.ValueName != null && info.ValueName.IndexOf("중량", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    mismatchMessage = "총길이 값이 다른 곳이 있습니다. 빨간색 셀의 CAD 원본값과 OVIA 계산값을 확인해주세요.";
+                    totalWeightMismatchFound = true;
+                    continue;
+                }
+
+                if (IsTwoDecimalTotalLengthRoundingDifference(info))
+                {
+                    roundedTotalLengthDisplayFound = true;
                 }
                 else
                 {
-                    mismatchMessage = "총중량 값이 다른 곳이 있습니다. 빨간색 셀의 CAD 원본값과 OVIA 계산값을 확인해주세요.";
+                    actualTotalLengthMismatchFound = true;
                 }
-
-                MessageBox.Show(
-                    mismatchMessage,
-                    "OVIA 계산 검증",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning
-                );
             }
+
+            string mismatchMessage = "";
+
+            if (actualTotalLengthMismatchFound && totalWeightMismatchFound)
+            {
+                mismatchMessage = "총길이 또는 총중량 값이 다른 곳이 있습니다. 빨간색 셀의 CAD 원본값과 OVIA 계산값을 확인해주세요.";
+            }
+            else if (actualTotalLengthMismatchFound)
+            {
+                mismatchMessage = "총길이 값이 다른 곳이 있습니다. 빨간색 셀의 CAD 원본값과 OVIA 계산값을 확인해주세요.";
+            }
+            else if (totalWeightMismatchFound)
+            {
+                mismatchMessage = "총중량 값이 다른 곳이 있습니다. 빨간색 셀의 CAD 원본값과 OVIA 계산값을 확인해주세요.";
+            }
+
+            if (roundedTotalLengthDisplayFound)
+            {
+                string roundingMessage = "소수점 셋째 자리에서 반올림되어 표시된 총길이 값이 있습니다. 빨간색 셀의 CAD 원본값과 OVIA 계산값을 확인해주세요.";
+                mismatchMessage = mismatchMessage == ""
+                    ? roundingMessage
+                    : mismatchMessage + "\r\n\r\n" + roundingMessage;
+            }
+
+            if (mismatchMessage == "")
+            {
+                return;
+            }
+
+            rebarMismatchWarningShown = true;
+            MessageBox.Show(
+                mismatchMessage,
+                "OVIA 계산 검증",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning
+            );
+        }
+
+        private bool IsTwoDecimalTotalLengthRoundingDifference(RebarCalculationMismatchInfo info)
+        {
+            if (info == null
+                || (info.ValueName != null && info.ValueName.IndexOf("중량", StringComparison.OrdinalIgnoreCase) >= 0))
+            {
+                return false;
+            }
+
+            decimal originalValue;
+            decimal calculatedValue;
+
+            if (!TryParseDecimalNumber(info.OriginalText, out originalValue)
+                || !TryParseDecimalNumber(info.CalculatedText, out calculatedValue))
+            {
+                return false;
+            }
+
+            decimal originalAtThreeDecimals = Decimal.Round(originalValue, 3, MidpointRounding.AwayFromZero);
+            decimal calculatedAtThreeDecimals = Decimal.Round(calculatedValue, 3, MidpointRounding.AwayFromZero);
+
+            if (originalAtThreeDecimals == calculatedAtThreeDecimals)
+            {
+                return false;
+            }
+
+            return Decimal.Round(originalValue, 2, MidpointRounding.AwayFromZero)
+                == Decimal.Round(calculatedValue, 2, MidpointRounding.AwayFromZero);
         }
 
         private void ClearRebarCalculationMismatchState()
@@ -14079,10 +14588,12 @@ namespace OVIA.Desktop
                 && valueName != null
                 && valueName.IndexOf("중량", StringComparison.OrdinalIgnoreCase) >= 0;
 
-            string calculatedDisplayText = GetThreeDecimalComparisonText(calculatedValue);
-            string originalDisplayText = GetThreeDecimalComparisonText(meta.OriginalImportedText);
+            bool isWeightValue = valueName != null && valueName.IndexOf("중량", StringComparison.OrdinalIgnoreCase) >= 0;
+            string calculatedDisplayText = isWeightValue ? GetWholeKilogramComparisonText(calculatedValue) : GetThreeDecimalComparisonText(calculatedValue);
+            string originalDisplayText = isWeightValue ? GetWholeKilogramComparisonText(meta.OriginalImportedText) : GetThreeDecimalComparisonText(meta.OriginalImportedText);
             bool mismatch = originalDisplayText != ""
-                && !AreImportedAndCalculatedValuesEquivalent(
+                && !AreRebarCalculationValuesEquivalent(
+                    valueName,
                     meta.OriginalImportedText,
                     calculatedDisplayText,
                     meta.OriginalWeightUsesKilograms
@@ -14115,10 +14626,7 @@ namespace OVIA.Desktop
 
                 if (info.OriginalWeightUsesKilograms)
                 {
-                    mismatchOriginalText = info.OriginalText
-                        + " kg ("
-                        + GetKilogramAsTonComparisonText(info.OriginalText)
-                        + " Ton)";
+                    mismatchOriginalText = info.OriginalText + " kg";
                 }
 
                 cell.ToolTipText = "CAD 원본값: " + mismatchOriginalText + " / OVIA 계산값: " + info.CalculatedText + "\r\n" + baseSpec + " 단위중량: " + unitWeightKgM.ToString("0.000", CultureInfo.InvariantCulture) + " kg/m";
@@ -14130,10 +14638,7 @@ namespace OVIA.Desktop
 
                 if (meta.OriginalWeightUsesKilograms && originalDisplayText != "")
                 {
-                    originalTooltipText = meta.OriginalImportedText
-                        + " kg ("
-                        + GetKilogramAsTonComparisonText(meta.OriginalImportedText)
-                        + " Ton)";
+                    originalTooltipText = meta.OriginalImportedText + " kg";
                 }
 
                 cell.ToolTipText = "CAD 원본값: " + originalTooltipText
@@ -14164,7 +14669,8 @@ namespace OVIA.Desktop
                     continue;
                 }
 
-                if (AreImportedAndCalculatedValuesEquivalent(
+                if (AreRebarCalculationValuesEquivalent(
+                    info.ValueName,
                     info.OriginalText,
                     info.CalculatedText,
                     info.OriginalWeightUsesKilograms
@@ -14425,6 +14931,27 @@ namespace OVIA.Desktop
             return fallbackToKilograms;
         }
 
+        private bool AreRebarCalculationValuesEquivalent(
+            string valueName,
+            string originalText,
+            string calculatedText,
+            bool originalWeightUsesKilograms)
+        {
+            if (valueName != null && valueName.IndexOf("중량", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                string originalKg = GetWholeKilogramComparisonText(originalText);
+                string calculatedKg = GetWholeKilogramComparisonText(calculatedText);
+                return originalKg != "" && calculatedKg != ""
+                    && String.Equals(originalKg, calculatedKg, StringComparison.Ordinal);
+            }
+
+            return AreImportedAndCalculatedValuesEquivalent(
+                originalText,
+                calculatedText,
+                originalWeightUsesKilograms
+            );
+        }
+
         private bool AreImportedAndCalculatedValuesEquivalent(
             string originalText,
             string calculatedText,
@@ -14498,6 +15025,32 @@ namespace OVIA.Desktop
                 GetThreeDecimalComparisonText(calculatedValue),
                 StringComparison.Ordinal
             );
+        }
+
+        private string GetWholeKilogramComparisonText(string text)
+        {
+            decimal value;
+
+            if (!TryParseDecimalNumber(text, out value))
+            {
+                return "";
+            }
+
+            decimal rounded = Decimal.Round(value, 0, MidpointRounding.AwayFromZero);
+            return rounded.ToString("#,0", CultureInfo.InvariantCulture);
+        }
+
+        private string GetWholeKilogramComparisonText(double value)
+        {
+            decimal decimalValue;
+
+            if (!Decimal.TryParse(value.ToString("R", CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture, out decimalValue))
+            {
+                return Math.Round(value, 0, MidpointRounding.AwayFromZero).ToString("#,0", CultureInfo.InvariantCulture);
+            }
+
+            decimal rounded = Decimal.Round(decimalValue, 0, MidpointRounding.AwayFromZero);
+            return rounded.ToString("#,0", CultureInfo.InvariantCulture);
         }
 
         private string GetThreeDecimalComparisonText(string text)
@@ -14601,11 +15154,12 @@ namespace OVIA.Desktop
                 return false;
             }
 
-            // 그리기 직전에도 CAD 원본 단위(Ton 또는 KG)를 반영하여 소수 셋째 자리로 재검증합니다.
+            // 그리기 직전에도 CAD 원본 중량값을 kg 기준 1kg 단위로 재검증합니다.
             object currentValue = grid.Rows[rowIndex].Cells[columnIndex].Value;
             string current = currentValue == null ? "" : currentValue.ToString();
 
-            return !AreImportedAndCalculatedValuesEquivalent(
+            return !AreRebarCalculationValuesEquivalent(
+                info.ValueName,
                 info.OriginalText,
                 current,
                 info.OriginalWeightUsesKilograms
@@ -14729,7 +15283,7 @@ namespace OVIA.Desktop
 
         private int FindTotalWeightColumnIndex()
         {
-            int exact = FindExactColumnIndexByHeaders(new string[] { "총중량(Ton)", "중량(Ton)", "중량", "총중량", "TotalWeight", "TOTAL_WEIGHT" });
+            int exact = FindExactColumnIndexByHeaders(new string[] { "총중량(kg)", "중량(kg)", "총중량(KG)", "중량(KG)", "총중량(Ton)", "중량(Ton)", "중량", "총중량", "TotalWeight", "TOTAL_WEIGHT" });
             if (exact >= 0)
             {
                 return exact;
@@ -15108,6 +15662,22 @@ namespace OVIA.Desktop
                 {
                     current.Add(col.Key, col);
                 }
+            }
+
+            // OVIA canonical 중량 단위는 kg이다. 기존 사용자 AppData 매핑에
+            // weight_ton 키/중량(Ton) 표시명이 남아 있어도 런타임 표준 표시와 데이터형은 kg로 승격한다.
+            // key 자체는 기존 저장/ERP 호환성을 위해 weight_ton을 유지한다.
+            OviaBarListMappingColumn legacyWeightColumn;
+            if (current.TryGetValue("weight_ton", out legacyWeightColumn) && legacyWeightColumn != null)
+            {
+                legacyWeightColumn.DisplayName = "중량(kg)";
+                legacyWeightColumn.DataType = "number_kg";
+                if (!ContainsText(legacyWeightColumn.Aliases, "중량(kg)")) legacyWeightColumn.Aliases.Add("중량(kg)");
+                if (!ContainsText(legacyWeightColumn.Aliases, "중량(KG)")) legacyWeightColumn.Aliases.Add("중량(KG)");
+                if (!ContainsText(legacyWeightColumn.Aliases, "총중량(kg)")) legacyWeightColumn.Aliases.Add("총중량(kg)");
+                if (!ContainsText(legacyWeightColumn.Aliases, "총중량(KG)")) legacyWeightColumn.Aliases.Add("총중량(KG)");
+                if (!ContainsText(legacyWeightColumn.Aliases, "중량(Ton)")) legacyWeightColumn.Aliases.Add("중량(Ton)");
+                if (!ContainsText(legacyWeightColumn.Aliases, "총중량(Ton)")) legacyWeightColumn.Aliases.Add("총중량(Ton)");
             }
 
             OviaBarListMappingStore builtIn = CreateBuiltInDefault();
@@ -15661,7 +16231,7 @@ namespace OVIA.Desktop
             store.AddColumn("length_mm", "길이(mm)", "number", 100, "길이", "L", "LENGTH", "절단길이", "산출길이", "MM", "길이MM", "길이(MM)");
             store.AddColumn("qty_ea", "수량(EA)", "number", 100, "수량", "개수", "갯수", "본수", "EA", "QTY", "QUANTITY", "수량EA", "수량(EA)");
             store.AddColumn("total_length_m", "총길이(M)", "number", 90, "총길이", "총연장", "연장", "TOTAL LENGTH", "T.L", "M", "총길이M", "총길이(M)");
-            store.AddColumn("weight_ton", "중량(Ton)", "number_ton", 90, "중량", "총중량", "톤", "TON", "Ton", "ton", "WEIGHT", "WT", "TOTAL WEIGHT", "중량TON", "중량(TON)", "총중량TON", "총중량(TON)", "KG", "kg", "중량KG", "중량(KG)");
+            store.AddColumn("weight_ton", "중량(kg)", "number_kg", 90, "중량(kg)", "중량(KG)", "총중량(kg)", "총중량(KG)", "중량", "총중량", "KG", "kg", "중량KG", "중량(KG)", "총중량KG", "총중량(KG)", "중량(Ton)", "총중량(Ton)", "톤", "TON", "Ton", "ton", "WEIGHT", "WT", "TOTAL WEIGHT", "중량TON", "중량(TON)", "총중량TON", "총중량(TON)");
             store.AddColumn("remark", "비고", "text", 80, "비고", "REMARK", "NOTE", "메모", "특기사항", "비고사항");
             store.AddColumn("source_drawing_name", "원본 도면", "readonly_text", 80, "원본 도면", "원본도면", "도면 파일명", "도면파일명", "SOURCE DRAWING", "SOURCE DRAWING NAME", "DWG NAME");
 

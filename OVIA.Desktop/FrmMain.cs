@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -73,6 +73,7 @@ namespace OVIA.Desktop
         private bool suppressNavigationHistory;
         private OviaWebViewHost dashboardWebViewHost;
         private OviaWorkspaceHeader dashboardWorkspaceHeader;
+        private OviaWorkspaceInputGestureFilter workspaceInputGestureFilter;
         private bool erpLaunchSessionEndedHandled;
 
         private sealed class OviaMainWorkspaceNavigationEntry
@@ -131,6 +132,11 @@ namespace OVIA.Desktop
                 userId);
 
             BuildMainUI();
+
+            // F5 및 우클릭 수평 드래그 제스처는 메인 워크스페이스에서만 감시한다.
+            // 모달 팝업이 활성화된 동안에는 필터가 자동으로 동작하지 않는다.
+            workspaceInputGestureFilter = new OviaWorkspaceInputGestureFilter(this);
+            Application.AddMessageFilter(workspaceInputGestureFilter);
         }
 
         /// <summary>
@@ -2571,8 +2577,91 @@ ShowWorkspaceScreenWithHistory(
             Close();
         }
 
+        internal bool ExecuteWorkspaceRefreshShortcut()
+        {
+            OviaWorkspaceHeader header = FindWorkspaceHeader(currentScreen);
+            if (header == null && dashboardWorkspaceHeader != null && !dashboardWorkspaceHeader.IsDisposed)
+            {
+                header = dashboardWorkspaceHeader;
+            }
+
+            if (header == null)
+            {
+                return false;
+            }
+
+            header.PerformRefreshCommand();
+            return true;
+        }
+
+        internal bool ExecuteWorkspaceBackGesture()
+        {
+            OviaWorkspaceHeader header = FindWorkspaceHeader(currentScreen);
+            if (header == null && dashboardWorkspaceHeader != null && !dashboardWorkspaceHeader.IsDisposed)
+            {
+                header = dashboardWorkspaceHeader;
+            }
+
+            if (header == null || !header.BackEnabled)
+            {
+                return false;
+            }
+
+            header.PerformBackCommand();
+            return true;
+        }
+
+        internal bool ExecuteWorkspaceForwardGesture()
+        {
+            OviaWorkspaceHeader header = FindWorkspaceHeader(currentScreen);
+            if (header == null && dashboardWorkspaceHeader != null && !dashboardWorkspaceHeader.IsDisposed)
+            {
+                header = dashboardWorkspaceHeader;
+            }
+
+            if (header == null || !header.ForwardEnabled)
+            {
+                return false;
+            }
+
+            header.PerformForwardCommand();
+            return true;
+        }
+
+        private OviaWorkspaceHeader FindWorkspaceHeader(Control root)
+        {
+            if (root == null || root.IsDisposed)
+            {
+                return null;
+            }
+
+            OviaWorkspaceHeader header = root as OviaWorkspaceHeader;
+            if (header != null)
+            {
+                return header;
+            }
+
+            int i;
+            for (i = 0; i < root.Controls.Count; i++)
+            {
+                header = FindWorkspaceHeader(root.Controls[i]);
+                if (header != null)
+                {
+                    return header;
+                }
+            }
+
+            return null;
+        }
+
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            if (workspaceInputGestureFilter != null)
+            {
+                Application.RemoveMessageFilter(workspaceInputGestureFilter);
+                workspaceInputGestureFilter = null;
+            }
+
             if (currentScreen != null && !currentScreen.IsDisposed)
             {
                 currentScreen.Dispose();

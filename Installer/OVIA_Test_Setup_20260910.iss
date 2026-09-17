@@ -11,16 +11,21 @@
 #define AutoCad2027ReleaseDir SourceRoot + "\OVIA.AutoCAD.2027\bin\x64\Release\net10.0-windows"
 
 [Setup]
+; OVIA_CODE_SIGNING_POLICY_20260908
+; 정식 배포는 Inno Setup Compile 후 Installer\Sign-OVIA-Setup.ps1로
+; OVIA_Setup_{버전}.exe에 Authenticode SHA-256 + RFC3161 타임스탬프를 적용합니다.
+; 인증서가 없는 Debug/개발 환경에서 Compile 자체가 실패하지 않도록 서명은 후처리합니다.
+VersionInfoDescription=OVIA Setup
 AppId={{B22D4E7E-9D42-49B9-8F05-6E31D8262D36}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName}
 UninstallDisplayName={#MyAppName}
-AppPublisher={#MyAppPublisher}
+AppPublisher=CELMON
 VersionInfoVersion={#MyAppVersion}.0
 VersionInfoProductVersion={#MyAppVersion}
-VersionInfoProductName={#MyAppName}
-VersionInfoCompany={#MyAppPublisher}
+VersionInfoProductName=OVIA
+VersionInfoCompany=CELMON
 DefaultDirName={autopf}\OVIA
 DefaultGroupName=OVIA
 DisableProgramGroupPage=yes
@@ -34,20 +39,21 @@ WizardStyle=modern
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-MinVersion=10.0.22000
+MinVersion=10.0
 CloseApplications=yes
 RestartApplications=no
+; 설치 시작 전 별도 WMI 프로세스 조회를 하지 않습니다.
+; 설치 대상 파일 사용 여부는 Inno Setup Restart Manager가 처리합니다.
+; OVIA 실행 감지는 AppMutex, 설치 프로그램 중복 실행은 SetupMutex가 담당합니다.
+SetupLogging=yes
+SetupMutex=Global\OVIA.Setup.SingleInstance
+AppMutex=Local\OVIA.Desktop.SingleInstance
 UsePreviousAppDir=yes
 UsePreviousGroup=yes
 ChangesAssociations=no
 
 [Languages]
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
-
-[Messages]
-; OVIA 공식 지원 OS 정책: Windows 11(10.0.22000) 이상 + x64-compatible Windows만 설치 허용.
-; MinVersion 또는 ArchitecturesAllowed 조건을 만족하지 못하면 이 메시지를 표시하고 설치를 종료합니다.
-WindowsVersionNotSupported=OVIA는 Windows 11 64비트 이상 환경에서만 설치할 수 있습니다.%n%n현재 운영체제 또는 시스템 아키텍처에서는 OVIA를 설치할 수 없습니다.%nWindows 11 64비트 환경에서 다시 실행해 주세요.
 
 [Tasks]
 Name: "desktopicon"; Description: "바탕 화면에 OVIA 바로가기 만들기"; GroupDescription: "추가 바로가기:"; Flags: unchecked
@@ -106,6 +112,14 @@ Source: "{#AutoCad2025ReleaseDir}\OVIA.AutoCAD.2025.dll"; DestDir: "{autopf}\Aut
 Source: "{#AutoCad2026ReleaseDir}\OVIA.AutoCAD.2026.dll"; DestDir: "{autopf}\Autodesk\ApplicationPlugins\OVIA.bundle\Contents\2026"; Flags: ignoreversion
 Source: "{#AutoCad2027ReleaseDir}\OVIA.AutoCAD.2027.dll"; DestDir: "{autopf}\Autodesk\ApplicationPlugins\OVIA.bundle\Contents\2027"; Flags: ignoreversion
 
+[InstallDelete]
+; 동일 AppId 업데이트 시 과거 런타임 DLL이 남아 새 버전과 혼용되지 않도록
+; 실행 파일 영역만 정리합니다. Data/Version 및 사용자 데이터는 삭제하지 않습니다.
+Type: files; Name: "{app}\OVIA.Desktop.exe"
+Type: files; Name: "{app}\OVIA.Desktop.exe.config"
+Type: files; Name: "{app}\*.dll"
+Type: filesandordirs; Name: "{app}\runtimes"
+
 [Icons]
 Name: "{group}\OVIA"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Icons\ovia_symbol.ico"
 Name: "{autodesktop}\OVIA"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\Icons\ovia_symbol.ico"; Tasks: desktopicon
@@ -122,6 +136,23 @@ Root: HKCR; Subkey: "ovia\shell\open\command"; ValueType: string; ValueData: """
 Filename: "{app}\{#MyAppExeName}"; Description: "OVIA 실행"; Flags: nowait postinstall skipifsilent
 
 [Code]
+const
+  OviaUninstallKey = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{B22D4E7E-9D42-49B9-8F05-6E31D8262D36}_is1';
+
+function DiagnosticLogPath: String;
+begin
+  Result := AddBackslash(GetTempDir) + 'OVIA_Install.log';
+end;
+
+procedure Diag(const Text: String);
+var
+  Line: String;
+begin
+  Log(Text);
+  Line := GetDateTimeString('yyyy-mm-dd hh:nn:ss', '-', ':') + ' ' + Text + #13#10;
+  SaveStringToFile(DiagnosticLogPath, Line, True);
+end;
+
 function IsDotNet472OrLaterInstalled: Boolean;
 var
   ReleaseValue: Cardinal;
@@ -163,17 +194,137 @@ begin
   end;
 end;
 
-function InitializeSetup: Boolean;
+function QueryInstalledVersion(var Version: String): Boolean;
+begin
+  Version := '';
+  Result := RegQueryStringValue(HKLM64, OviaUninstallKey, 'DisplayVersion', Version);
+  if not Result then
+    Result := RegQueryStringValue(HKLM32, OviaUninstallKey, 'DisplayVersion', Version);
+  if not Result then
+    Result := RegQueryStringValue(HKCU, OviaUninstallKey, 'DisplayVersion', Version);
+
+  Version := Trim(Version);
+  Result := Result and (Version <> '');
+end;
+
+function ReadNumericToken(const Version: String; var P: Integer): Integer;
+var
+  S: String;
+  C: Char;
+begin
+  S := '';
+
+  while (P <= Length(Version)) and (Version[P] = '.') do
+    P := P + 1;
+
+  while P <= Length(Version) do
+  begin
+    C := Version[P];
+    if (C >= '0') and (C <= '9') then
+    begin
+      S := S + C;
+      P := P + 1;
+    end
+    else
+      Break;
+  end;
+
+  while (P <= Length(Version)) and (Version[P] <> '.') do
+    P := P + 1;
+
+  if S = '' then
+    Result := 0
+  else
+    Result := StrToIntDef(S, 0);
+end;
+
+function CompareOviaVersions(const A, B: String): Integer;
+var
+  PA, PB, I, VA, VB: Integer;
+begin
+  PA := 1;
+  PB := 1;
+  Result := 0;
+
+  for I := 0 to 3 do
+  begin
+    VA := ReadNumericToken(A, PA);
+    VB := ReadNumericToken(B, PB);
+    if VA < VB then
+    begin
+      Result := -1;
+      Exit;
+    end;
+    if VA > VB then
+    begin
+      Result := 1;
+      Exit;
+    end;
+  end;
+end;
+
+function CheckInstalledVersionPolicy: Boolean;
+var
+  InstalledVersion: String;
+  CompareResult: Integer;
 begin
   Result := True;
 
+  if not QueryInstalledVersion(InstalledVersion) then
+  begin
+    Diag('기존 OVIA 설치 없음 - 신규 설치');
+    Exit;
+  end;
+
+  Diag('기존 설치 버전=' + InstalledVersion + ', 설치 대상 버전={#MyAppVersion}');
+  CompareResult := CompareOviaVersions(InstalledVersion, '{#MyAppVersion}');
+
+  if CompareResult > 0 then
+  begin
+    MsgBox(
+      '현재 설치된 OVIA ' + InstalledVersion + '이(가) 설치하려는 버전 {#MyAppVersion}보다 최신입니다.' + #13#10 + #13#10 +
+      '안전한 버전 관리를 위해 이전 버전으로의 다운그레이드는 허용하지 않습니다.',
+      mbCriticalError, MB_OK);
+    Diag('설치 중단: 다운그레이드 차단');
+    Result := False;
+    Exit;
+  end;
+
+  if CompareResult = 0 then
+  begin
+    if MsgBox(
+      'OVIA {#MyAppVersion}이(가) 이미 설치되어 있습니다.' + #13#10 + #13#10 +
+      '동일한 버전을 다시 설치하시겠습니까?',
+      mbConfirmation, MB_YESNO) <> IDYES then
+    begin
+      Diag('사용자 취소: 동일 버전 재설치');
+      Result := False;
+      Exit;
+    end;
+    Diag('동일 버전 재설치 승인');
+  end
+  else
+  begin
+    Diag('자동 업데이트 허용: ' + InstalledVersion + ' -> {#MyAppVersion}');
+  end;
+end;
+
+function InitializeSetup: Boolean;
+begin
+  DeleteFile(DiagnosticLogPath);
+  Diag('OVIA Setup 시작. 대상 버전={#MyAppVersion}');
+  Result := False;
+
+  if not CheckInstalledVersionPolicy then
+    Exit;
+
   if not IsDotNet472OrLaterInstalled then
   begin
+    Diag('설치 중단: .NET Framework 4.7.2 이상 없음');
     MsgBox(
       'OVIA를 설치하려면 Microsoft .NET Framework 4.7.2 이상이 필요합니다.' + #13#10 +
       'Windows 업데이트 또는 Microsoft 공식 설치 파일로 .NET Framework를 먼저 설치한 뒤 다시 실행해 주세요.',
       mbCriticalError, MB_OK);
-    Result := False;
     Exit;
   end;
 
@@ -182,19 +333,29 @@ begin
     if MsgBox(
       'Microsoft Edge WebView2 Runtime이 확인되지 않았습니다.' + #13#10 + #13#10 +
       'OVIA의 ERP 및 웹 화면이 정상적으로 표시되지 않을 수 있습니다.' + #13#10 +
-      '이번 테스트 설치를 계속하시겠습니까?',
+      '설치를 계속하시겠습니까?',
       mbConfirmation, MB_YESNO) = IDNO then
     begin
-      Result := False;
+      Diag('사용자 취소: WebView2 Runtime 미확인');
       Exit;
     end;
   end;
+
+  Diag('사전 검사 통과');
+  Result := True;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssPostInstall then
-  begin
-    Log('OVIA 테스트 설치 완료: ' + ExpandConstant('{app}'));
+  case CurStep of
+    ssInstall:
+      Diag('파일 설치 시작');
+    ssPostInstall:
+      Diag('파일 설치 완료: ' + ExpandConstant('{app}'));
   end;
+end;
+
+procedure DeinitializeSetup;
+begin
+  Diag('OVIA Setup 종료');
 end;

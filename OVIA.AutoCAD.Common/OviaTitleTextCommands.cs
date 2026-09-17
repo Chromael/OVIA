@@ -15,8 +15,9 @@ using Autodesk.AutoCAD.Runtime;
 namespace OVIA.AutoCAD_2027
 {
     /// <summary>
-    /// BarList 수정 팝업의 제목 입력 전용 AutoCAD 명령입니다.
+    /// BarList 신규등록/수정 팝업의 제목 입력 전용 AutoCAD 명령입니다.
     /// 기존 OVIABOX/OVIABOXTABLE 데이터 추출 로직과 완전히 분리되어 있습니다.
+    /// TEXT/MTEXT/ATTRIB뿐 아니라 선택한 BLOCK(INSERT) 내부의 표시 텍스트만 읽습니다.
     /// </summary>
     public sealed class OviaTitleTextCommands
     {
@@ -48,83 +49,107 @@ namespace OVIA.AutoCAD_2027
 
             try
             {
-                PromptSelectionOptions options = new PromptSelectionOptions();
-                options.MessageForAdding = "\n제목으로 가져올 TEXT 또는 MTEXT를 선택한 후 Enter를 누르세요: ";
-                options.MessageForRemoval = "\n제목 선택에서 제외할 객체를 지정하세요: ";
-                options.AllowDuplicates = false;
-
-                SelectionFilter filter = new SelectionFilter(
-                    new TypedValue[]
-                    {
-                        new TypedValue((int)DxfCode.Start, "TEXT,MTEXT,ATTRIB")
-                    }
-                );
-
-                PromptSelectionResult selectionResult = editor.GetSelection(options, filter);
-
-                if (selectionResult.Status == PromptStatus.Cancel)
-                {
-                    WriteResult(requestToken, "CANCEL", "", "");
-                    editor.WriteMessage("\nOVIA: 제목 텍스트 선택을 취소했습니다.\n");
-                    return;
-                }
-
-                if (selectionResult.Status != PromptStatus.OK || selectionResult.Value == null)
-                {
-                    WriteResult(requestToken, "ERROR", "", "TEXT 또는 MTEXT를 선택하지 못했습니다.");
-                    editor.WriteMessage("\nOVIA: TEXT 또는 MTEXT를 선택하지 못했습니다.\n");
-                    return;
-                }
+                editor.WriteMessage("\nOVIA: 제목으로 가져올 글자 자체를 선택하세요. 여러 글자는 차례로 선택하고 Enter로 완료합니다.\n");
 
                 List<CadTitleTextPiece> pieces = new List<CadTitleTextPiece>();
-                ObjectId[] objectIds = selectionResult.Value.GetObjectIds();
+                int selectionOrder = 0;
 
-                using (Transaction transaction = database.TransactionManager.StartTransaction())
+                while (true)
                 {
-                    int index;
-                    for (index = 0; index < objectIds.Length; index++)
-                    {
-                        Entity entity = transaction.GetObject(objectIds[index], OpenMode.ForRead, false) as Entity;
-                        CadTitleTextPiece piece = CreateTextPiece(entity, index);
+                    PromptNestedEntityOptions options =
+                        new PromptNestedEntityOptions("\n제목 TEXT/MTEXT 선택 <Enter=완료>: ");
+                    options.AllowNone = true;
 
-                        if (piece != null && piece.Text != "")
-                        {
-                            pieces.Add(piece);
-                        }
+                    PromptNestedEntityResult nestedResult = editor.GetNestedEntity(options);
+
+                    if (nestedResult.Status == PromptStatus.None)
+                    {
+                        break;
                     }
 
-                    transaction.Commit();
+                    if (nestedResult.Status == PromptStatus.Cancel)
+                    {
+                        WriteResult(requestToken, "CANCEL", "", "");
+                        editor.WriteMessage("\nOVIA: 제목 텍스트 선택을 취소했습니다.\n");
+                        return;
+                    }
+
+                    if (nestedResult.Status != PromptStatus.OK)
+                    {
+                        continue;
+                    }
+
+                    bool added = false;
+
+                    using (Transaction transaction = database.TransactionManager.StartTransaction())
+                    {
+                        Entity entity = transaction.GetObject(
+                            nestedResult.ObjectId, OpenMode.ForRead, false) as Entity;
+
+                        Matrix3d transform = GetNestedTransform(
+                            nestedResult.GetContainers(), transaction);
+
+                        added = AddSelectedLeafText(
+                            entity, transform, selectionOrder, pieces);
+
+                        transaction.Commit();
+                    }
+
+                    if (added)
+                    {
+                        selectionOrder++;
+                    }
+                    else
+                    {
+                        // 중요: BLOCK 전체를 재귀 순회하는 fallback은 사용하지 않습니다.
+                        editor.WriteMessage(
+                            "\nOVIA: BLOCK 자체가 아니라 제목 글자(TEXT/MTEXT/속성)를 직접 클릭하세요.\n");
+                    }
                 }
 
                 string titleText = BuildTitleText(pieces);
                 if (titleText == "")
                 {
-                    WriteResult(requestToken, "ERROR", "", "선택한 객체에서 제목 텍스트를 읽지 못했습니다.");
-                    editor.WriteMessage("\nOVIA: 선택한 객체에서 제목 텍스트를 읽지 못했습니다.\n");
+                    WriteResult(requestToken, "ERROR", "",
+                        "선택한 객체에서 제목 텍스트를 읽지 못했습니다.");
+                    editor.WriteMessage(
+                        "\nOVIA: 선택한 객체에서 제목 텍스트를 읽지 못했습니다.\n");
                     return;
                 }
 
+                // 기존 정상 버전의 Desktop Bridge 계약을 그대로 유지합니다.
                 WriteResult(requestToken, "OK", titleText, "");
-                editor.WriteMessage("\nOVIA: 선택한 CAD 텍스트를 BarList 제목 입력창으로 전달했습니다.\n");
+                editor.WriteMessage(
+                    "\nOVIA: 선택한 CAD 텍스트를 BarList 제목 입력창으로 전달했습니다.\n");
             }
             catch (System.Exception ex)
             {
                 WriteResult(requestToken, "ERROR", "", ex.Message);
-                editor.WriteMessage("\nOVIA 제목 텍스트 추출 오류: " + ex.Message + "\n");
+                editor.WriteMessage(
+                    "\nOVIA 제목 텍스트 추출 오류: " + ex.Message + "\n");
             }
         }
 
-        private CadTitleTextPiece CreateTextPiece(Entity entity, int selectionOrder)
+        private bool AddSelectedLeafText(
+            Entity entity,
+            Matrix3d transform,
+            int selectionOrder,
+            List<CadTitleTextPiece> pieces)
         {
             if (entity == null)
             {
-                return null;
+                return false;
             }
 
             DBText dbText = entity as DBText;
             if (dbText != null)
             {
-                return CreatePiece(dbText.TextString, dbText.Position, selectionOrder);
+                AddPiece(
+                    pieces,
+                    dbText.TextString,
+                    dbText.Position.TransformBy(transform),
+                    selectionOrder);
+                return true;
             }
 
             MText mText = entity as MText;
@@ -136,24 +161,75 @@ namespace OVIA.AutoCAD_2027
                     text = NormalizeText(mText.Contents);
                 }
 
-                return CreatePiece(text, mText.Location, selectionOrder);
+                AddPiece(
+                    pieces,
+                    text,
+                    mText.Location.TransformBy(transform),
+                    selectionOrder);
+                return true;
             }
 
-            AttributeReference attribute = entity as AttributeReference;
-            if (attribute != null)
+            AttributeReference attributeReference = entity as AttributeReference;
+            if (attributeReference != null)
             {
-                return CreatePiece(attribute.TextString, attribute.Position, selectionOrder);
+                AddPiece(
+                    pieces,
+                    attributeReference.TextString,
+                    attributeReference.Position.TransformBy(transform),
+                    selectionOrder);
+                return true;
             }
 
-            return null;
+            AttributeDefinition attributeDefinition = entity as AttributeDefinition;
+            if (attributeDefinition != null)
+            {
+                AddPiece(
+                    pieces,
+                    attributeDefinition.TextString,
+                    attributeDefinition.Position.TransformBy(transform),
+                    selectionOrder);
+                return true;
+            }
+
+            // BlockReference인 경우에도 내부 전체 텍스트를 수집하지 않습니다.
+            return false;
         }
 
-        private CadTitleTextPiece CreatePiece(string text, Point3d position, int selectionOrder)
+        private Matrix3d GetNestedTransform(
+            ObjectId[] containers,
+            Transaction transaction)
+        {
+            Matrix3d transform = Matrix3d.Identity;
+
+            if (containers == null || containers.Length == 0)
+            {
+                return transform;
+            }
+
+            // GetContainers()는 바깥쪽/안쪽 BLOCK 경로를 제공합니다.
+            // 문자열 추출에는 변환이 필요 없지만, 기존 BuildTitleText의 위치 정렬을
+            // 유지하기 위해 선택된 leaf의 표시 위치에만 적용합니다.
+            for (int i = containers.Length - 1; i >= 0; i--)
+            {
+                BlockReference blockReference =
+                    transaction.GetObject(
+                        containers[i], OpenMode.ForRead, false) as BlockReference;
+
+                if (blockReference != null)
+                {
+                    transform = transform * blockReference.BlockTransform;
+                }
+            }
+
+            return transform;
+        }
+
+        private void AddPiece(List<CadTitleTextPiece> pieces, string text, Point3d position, int selectionOrder)
         {
             text = NormalizeText(text);
             if (text == "")
             {
-                return null;
+                return;
             }
 
             CadTitleTextPiece piece = new CadTitleTextPiece();
@@ -161,7 +237,7 @@ namespace OVIA.AutoCAD_2027
             piece.X = position.X;
             piece.Y = position.Y;
             piece.SelectionOrder = selectionOrder;
-            return piece;
+            pieces.Add(piece);
         }
 
         private string BuildTitleText(List<CadTitleTextPiece> pieces)
@@ -171,27 +247,10 @@ namespace OVIA.AutoCAD_2027
                 return "";
             }
 
-            double maxHeight = 0.0;
-            double minHeight = 0.0;
-            bool initialized = false;
-
-            int i;
-            for (i = 0; i < pieces.Count; i++)
-            {
-                if (!initialized)
-                {
-                    maxHeight = pieces[i].Y;
-                    minHeight = pieces[i].Y;
-                    initialized = true;
-                }
-                else
-                {
-                    maxHeight = Math.Max(maxHeight, pieces[i].Y);
-                    minHeight = Math.Min(minHeight, pieces[i].Y);
-                }
-            }
-
+            double maxHeight = pieces.Max(piece => piece.Y);
+            double minHeight = pieces.Min(piece => piece.Y);
             double yTolerance = Math.Max(0.0001, Math.Abs(maxHeight - minHeight) * 0.01);
+
             List<CadTitleTextPiece> ordered = pieces
                 .OrderByDescending(piece => Math.Round(piece.Y / yTolerance))
                 .ThenBy(piece => piece.X)
@@ -199,6 +258,7 @@ namespace OVIA.AutoCAD_2027
                 .ToList();
 
             StringBuilder title = new StringBuilder();
+            int i;
             for (i = 0; i < ordered.Count; i++)
             {
                 if (ordered[i].Text == "")
@@ -282,11 +342,7 @@ namespace OVIA.AutoCAD_2027
 
         private string GetBridgeDirectory()
         {
-            return Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "OVIA",
-                "Bridge"
-            );
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OVIA", "Bridge");
         }
 
         private string GetRequestFilePath()

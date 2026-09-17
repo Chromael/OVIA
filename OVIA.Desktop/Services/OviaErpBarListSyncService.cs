@@ -82,9 +82,10 @@ namespace OVIA.Desktop
                 int erpId = ParseInt(GetFirstValue(rows, headers, ErpIdHeader));
                 if (erpId <= 0) return Fail("ERP BarList 식별자를 찾을 수 없습니다.");
 
+                // 상태(barlist_status)는 ERP 단일 원장이므로 OVIA payload에 포함하지 않는다.
+                // 발주일(order_date)과 납기일(due_date)은 ERP <-> OVIA 양방향 동기화 대상이므로
+                // 현재 OVIA 값은 metadata update로 ERP에 전송한다.
                 // PATCH 13: 목록 제목/기본정보 수정은 상세 items 전체 교체 API와 분리한다.
-                // barlist_sync_meta_update는 기존 barlist_idx의 헤더 메타만 UPDATE하고
-                // progress_status와 items를 요청/갱신하지 않는다.
                 Dictionary<string, object> payload = BuildMetadataOnlyPushPayload(projectNo, erpId, rows, headers);
                 OviaErpBarListSyncResult result = await PostAsync(companyId, "barlist_sync_meta_update", payload);
 
@@ -112,6 +113,10 @@ namespace OVIA.Desktop
                 List<string> headers = rows[0];
                 int erpId = ParseInt(GetFirstValue(rows, headers, ErpIdHeader));
                 Dictionary<string, object> payload = BuildPushPayload(projectNo, erpId, csvPath, rows, headers);
+
+                // 상태(barlist_status)는 BuildPushPayload에서 제외한다. ERP가 상태의 단일 원장이다.
+                // 발주일/납기일은 양방향 동기화 대상이므로 OVIA에서 수정된 현재 값을 그대로 ERP에 전송한다.
+
                 OviaErpBarListSyncResult result = await PostAsync(companyId, "barlist_sync_push", payload);
 
                 if (result.IsSuccess && result.BarListId > 0)
@@ -364,7 +369,6 @@ namespace OVIA.Desktop
             payload["project_no"] = projectNo == null ? "" : projectNo.Trim();
 
             Dictionary<string, object> meta = new Dictionary<string, object>();
-            meta["barlist_status"] = "";
             meta["write_location"] = registration.WriteStatus ?? "";
             meta["order_number"] = "";
             meta["order_date"] = registration.OrderDate ?? "";
@@ -400,7 +404,8 @@ namespace OVIA.Desktop
             payload["barlist_idx"] = erpId;
 
             Dictionary<string, object> meta = new Dictionary<string, object>();
-            AddMeta(meta, "barlist_status", rows, headers, "상태");
+            // barlist_status는 ERP 단독 원장이므로 OVIA -> ERP payload에 포함하지 않는다.
+            // order_date/due_date는 양방향 동기화 필드이므로 아래에서 정상 전송한다.
             AddMeta(meta, "write_location", rows, headers, "작성");
             AddMeta(meta, "order_number", rows, headers, "발주번호");
             AddMeta(meta, "order_date", rows, headers, "발주일");
@@ -436,7 +441,8 @@ namespace OVIA.Desktop
             payload["barlist_idx"] = erpId;
 
             Dictionary<string, object> meta = new Dictionary<string, object>();
-            AddMeta(meta, "barlist_status", rows, headers, "상태");
+            // barlist_status는 ERP 단독 원장이므로 OVIA -> ERP payload에 포함하지 않는다.
+            // order_date/due_date는 양방향 동기화 필드이므로 아래에서 정상 전송한다.
             AddMeta(meta, "write_location", rows, headers, "작성");
             AddMeta(meta, "order_number", rows, headers, "발주번호");
             AddMeta(meta, "order_date", rows, headers, "발주일");
@@ -479,11 +485,11 @@ namespace OVIA.Desktop
                 item["source_row_no"] = GetValue(rows[r], headers, "번호");
                 item["dia"] = GetValue(rows[r], headers, "철근규격", "규격");
                 item["shape_json"] = ReadErpTransportShapeJson(csvPath, GetValue(rows[r], headers, ShapeHeader, "CAD_SHAPE_JSON"));
-                item["length_mm"] = GetValue(rows[r], headers, "길이(mm)", "길이");
-                item["final_length"] = GetValue(rows[r], headers, FinalLengthHeader, "final_length");
-                item["qty_ea"] = GetValue(rows[r], headers, "수량(EA)", "수량");
-                item["total_length_m"] = GetValue(rows[r], headers, "총길이(M)", "총길이");
-                item["weight_ton"] = GetValue(rows[r], headers, "중량(Ton)", "중량");
+                item["length_mm"] = NormalizeErpInteger(GetValue(rows[r], headers, "길이(mm)", "길이"));
+                item["final_length"] = NormalizeErpInteger(GetValue(rows[r], headers, FinalLengthHeader, "final_length"));
+                item["qty_ea"] = NormalizeErpInteger(GetValue(rows[r], headers, "수량(EA)", "수량"));
+                item["total_length_m"] = NormalizeErpDecimal(GetValue(rows[r], headers, "총길이(M)", "총길이"), 2);
+                item["weight_kg"] = NormalizeErpInteger(GetValue(rows[r], headers, "중량(kg)", "중량(KG)", "중량(Ton)", "중량"));
                 item["remark"] = GetValue(rows[r], headers, "비고");
                 item["source_drawing_name"] = GetValue(rows[r], headers, "원본 도면", "원본도면");
                 items.Add(item);
@@ -504,9 +510,37 @@ namespace OVIA.Desktop
                 && string.IsNullOrWhiteSpace(GetValue(row, headers, FinalLengthHeader, "final_length"))
                 && string.IsNullOrWhiteSpace(GetValue(row, headers, "수량(EA)", "수량"))
                 && string.IsNullOrWhiteSpace(GetValue(row, headers, "총길이(M)", "총길이"))
-                && string.IsNullOrWhiteSpace(GetValue(row, headers, "중량(Ton)", "중량"))
+                && string.IsNullOrWhiteSpace(GetValue(row, headers, "중량(kg)", "중량(KG)", "중량(Ton)", "중량"))
                 && string.IsNullOrWhiteSpace(GetValue(row, headers, "비고"))
                 && string.IsNullOrWhiteSpace(GetValue(row, headers, "원본 도면", "원본도면"));
+        }
+
+        // ERP barlist_item 숫자 계약은 화면 표시 형식과 분리한다.
+        // OVIA Grid/CSV에는 기존처럼 천 단위 쉼표를 표시할 수 있지만 ERP 전송 payload에는 쉼표를 넣지 않는다.
+        private static string NormalizeErpInteger(string value)
+        {
+            decimal number;
+            if (!TryParseErpNumber(value, out number)) return "0";
+            return Decimal.Round(number, 0, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture);
+        }
+
+        private static string NormalizeErpDecimal(string value, int decimalPlaces)
+        {
+            decimal number;
+            if (!TryParseErpNumber(value, out number)) number = 0M;
+            if (decimalPlaces < 0) decimalPlaces = 0;
+            if (decimalPlaces > 8) decimalPlaces = 8;
+            number = Decimal.Round(number, decimalPlaces, MidpointRounding.AwayFromZero);
+            return number.ToString("F" + decimalPlaces.ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
+        }
+
+        private static bool TryParseErpNumber(string value, out decimal number)
+        {
+            number = 0M;
+            if (string.IsNullOrWhiteSpace(value)) return false;
+            string normalized = value.Trim().Replace(",", "").Replace(" ", "");
+            return Decimal.TryParse(normalized, NumberStyles.Any, CultureInfo.InvariantCulture, out number)
+                || Decimal.TryParse(normalized, NumberStyles.Any, CultureInfo.CurrentCulture, out number);
         }
 
         private static async Task<OviaErpBarListSyncResult> PostAsync(string companyId, string mode, Dictionary<string, object> payload)
@@ -597,7 +631,14 @@ namespace OVIA.Desktop
             }
 
             string existing = FindLocalFileByErpId(dir, id);
-            if (existing != "" && IsSyncPending(existing)) return;
+            if (existing != "" && IsSyncPending(existing))
+            {
+                // CAD 미저장/전송보류 상태에서는 철근행과 Shape 파일을 ERP Pull로 덮어쓰면 안 된다.
+                // 다만 ERP가 단독 원장인 상태/발주일은 stale 로컬값을 계속 보여주면 안 되므로
+                // 두 필드만 현재 CSV에 안전하게 갱신하고 상세 데이터는 그대로 보존한다.
+                RefreshErpOwnedMetaInPendingLocalCache(existing, id, erpListOrder, meta, barlist);
+                return;
+            }
 
             // ERP barlist_idx 하나당 로컬 CSV도 반드시 하나만 유지한다.
             // 제목/공사명/저장시각은 물리 파일 식별자로 사용하지 않는다.
@@ -605,7 +646,7 @@ namespace OVIA.Desktop
             string shapeDir = Path.Combine(dir, "Shapes");
             Directory.CreateDirectory(shapeDir);
 
-            string[] headers = new string[] { "부위", "번호", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(Ton)", "비고", "원본 도면", ShapeHeader, "OVIA_SHAPE_SOURCE", "OVIA_SHAPE_STATUS", FinalLengthHeader, ErpIdHeader, ErpListOrderHeader, "상태", "작성", "발주번호", "발주일", "등록일", "납기일", "동", "층", "공종", "진행", "제목", "태그", "색상", "주문량", "태그발행", "기타", "장대", "절단", "절곡", "출하", "미출하", "작성자", "OVIA_WRITER_USER_NAME", "OVIA_BARLIST_MEMO" };
+            string[] headers = new string[] { "부위", "번호", "철근규격", "철근형상", "길이(mm)", "수량(EA)", "총길이(M)", "중량(kg)", "비고", "원본 도면", ShapeHeader, "OVIA_SHAPE_SOURCE", "OVIA_SHAPE_STATUS", FinalLengthHeader, ErpIdHeader, ErpListOrderHeader, "상태", "작성", "발주번호", "발주일", "등록일", "납기일", "동", "층", "공종", "진행", "제목", "태그", "색상", "주문량", "태그발행", "기타", "장대", "절단", "절곡", "출하", "미출하", "작성자", "OVIA_WRITER_USER_NAME", "OVIA_BARLIST_MEMO" };
             List<List<string>> rows = new List<List<string>>();
             rows.Add(new List<string>(headers));
 
@@ -647,7 +688,7 @@ namespace OVIA.Desktop
                 Set(row, headers, FinalLengthHeader, ReadString(item, "final_length"));
                 Set(row, headers, "수량(EA)", ReadString(item, "qty_ea"));
                 Set(row, headers, "총길이(M)", ReadString(item, "total_length_m"));
-                Set(row, headers, "중량(Ton)", ReadString(item, "weight_ton"));
+                Set(row, headers, "중량(kg)", ReadString(item, "weight_kg"));
                 Set(row, headers, "비고", ReadString(item, "remark"));
                 Set(row, headers, "원본 도면", ReadString(item, "source_drawing_name"));
                 Set(row, headers, ErpIdHeader, id.ToString(CultureInfo.InvariantCulture));
@@ -672,6 +713,41 @@ namespace OVIA.Desktop
                 catch
                 {
                 }
+            }
+        }
+
+        private static void RefreshErpOwnedMetaInPendingLocalCache(
+            string csvPath,
+            int erpId,
+            int erpListOrder,
+            IDictionary<string, object> meta,
+            IDictionary<string, object> root)
+        {
+            try
+            {
+                List<List<string>> rows = ReadCsv(csvPath);
+                if (rows.Count < 2) return;
+
+                List<string> headerList = rows[0];
+                string[] headers = headerList.ToArray();
+                string status = ReadFirstMetaString(meta, root, "barlist_status", "status");
+                string orderDate = ReadFirstMetaString(meta, root, "order_date");
+
+                for (int r = 1; r < rows.Count; r++)
+                {
+                    while (rows[r].Count < headerList.Count) rows[r].Add("");
+                    Set(rows[r], headers, "상태", status);
+                    Set(rows[r], headers, "발주일", orderDate);
+                    Set(rows[r], headers, ErpIdHeader, erpId.ToString(CultureInfo.InvariantCulture));
+                    Set(rows[r], headers, ErpListOrderHeader, erpListOrder.ToString(CultureInfo.InvariantCulture));
+                }
+
+                WriteCsvIfChanged(csvPath, rows);
+            }
+            catch
+            {
+                // Pull 자체를 실패 처리해 기존 CAD 작업본을 손상시키는 것보다 보존을 우선한다.
+                // 다음 화면 진입/새로고침에서 다시 시도된다.
             }
         }
 
@@ -911,6 +987,13 @@ namespace OVIA.Desktop
                 // 따라서 SOURCE_CELL 문서는 현재 저장된 cell + element 좌표를 그대로 ERP에 전달합니다.
                 if (UsesSourceCellTransportCoordinates(edited))
                 {
+                    // ERP 전송용 수동 형상은 stroke 보정을 위해 좌표계를 10배 확대해 저장합니다.
+                    // ERP Pull 결과가 다시 로컬 편집 JSON으로 들어온 상태에서 그대로 재전송하면
+                    // 10배 확대가 저장/수정 횟수만큼 누적될 수 있습니다. 먼저 수동 문서를
+                    // OVIA 편집기 기준 compact 좌표계로 되돌린 뒤, 아래에서 ERP 전송용 확대를
+                    // 정확히 1회만 적용합니다. 이 정규화는 현재 메모리의 전송 파생본에만 적용됩니다.
+                    NormalizeManualShapeDocumentForEditor(edited);
+
                     double directCellWidth = ReadNestedNumber(edited, "cell", "width", 0D);
                     double directCellHeight = ReadNestedNumber(edited, "cell", "height", 0D);
 
@@ -919,11 +1002,37 @@ namespace OVIA.Desktop
                     if (directCellWidth <= 0D) directCellWidth = 100D;
                     if (directCellHeight <= 0D) directCellHeight = 60D;
 
+                    // DBF 등 외부 BarList에서 형상이 비어 있던 행을 OVIA에서 직접 작성하면
+                    // OVIA_MANUAL은 편집기 표시를 위해 160x80 전후의 compact SOURCE_CELL을 사용합니다.
+                    // ERP의 기존 rebarShapeFormatter는 LINE/ARC의 stroke-width를 SVG 좌표 단위로
+                    // 고정해서 그리는 구현이므로, 이 작은 viewBox를 그대로 전달하면 같은 선도
+                    // 화면에서는 8~10배 두껍게 확대되어 보입니다.
+                    //
+                    // 해결은 ERP 전송 파생본에서만 수동 문서의 좌표계와 cell을 동일 배율로 확대합니다.
+                    // 형상/문자/원/호의 모든 좌표를 같은 배율로 키우므로 화면상 위치와 비율은
+                    // 전혀 바뀌지 않고, formatter의 고정 stroke-width만 기존 CAD 형상 수준으로
+                    // 상대적으로 얇아집니다. OVIA 로컬 JSON과 편집기 좌표는 변경하지 않습니다.
+                    bool isManualDocument = IsManualShapeDocument(edited);
+                    if (isManualDocument)
+                    {
+                        TransformShapeElements(edited, ManualErpCoordinateScale, 0D, 0D);
+                        directCellWidth *= ManualErpCoordinateScale;
+                        directCellHeight *= ManualErpCoordinateScale;
+                    }
+
                     IDictionary<string, object> directCanonical = BuildCanonicalErpShapeDocument(
                         edited,
                         directCellWidth,
                         directCellHeight
                     );
+
+                    // ERP 저장본이 나중에 OVIA로 Pull될 때 전송용 10배 좌표계를 확실히
+                    // 식별하여 원래 compact 편집 좌표로 되돌릴 수 있도록 메타데이터를 남깁니다.
+                    // ERP formatter가 모르는 속성은 무시하므로 화면 표시에는 영향을 주지 않습니다.
+                    if (isManualDocument)
+                    {
+                        directCanonical["oviaErpCoordinateScale"] = ManualErpCoordinateScale;
+                    }
 
                     return serializer.Serialize(directCanonical);
                 }
@@ -981,6 +1090,93 @@ namespace OVIA.Desktop
                 // 변환에 실패한 경우 기존 정상 동기화 기능을 막지 않고 원문을 보냅니다.
                 return json;
             }
+        }
+
+        private const double ManualErpCoordinateScale = 10D;
+        private const double ManualEditorMaxCellWidth = 400D;
+        private const double ManualEditorMaxCellHeight = 200D;
+
+        private static bool IsManualShapeDocument(IDictionary<string, object> document)
+        {
+            if (document == null) return false;
+
+            string source = ReadString(document, "source");
+            return source.Equals("OVIA_MANUAL", StringComparison.OrdinalIgnoreCase)
+                || source.Equals("MANUAL", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 수동 형상의 ERP 표시용 좌표 확대가 로컬 편집 데이터에 재유입되더라도
+        /// 항상 OVIA 편집기 기준 compact 좌표계로 되돌립니다.
+        ///
+        /// - 신규 패치 데이터: oviaErpCoordinateScale 메타데이터로 정확히 역변환
+        /// - 이전 _24 데이터: 메타데이터가 없으므로 160x80 전후의 수동 좌표계 특성을 이용해
+        ///   10배 누적 확대된 cell을 안전 범위까지 단계적으로 복구
+        /// - CAD/OVIA_EDIT에는 절대 적용하지 않음
+        /// </summary>
+        private static void NormalizeManualShapeDocumentForEditor(IDictionary<string, object> document)
+        {
+            if (!IsManualShapeDocument(document)) return;
+
+            double cellWidth = ReadNestedNumber(document, "cell", "width", 0D);
+            double cellHeight = ReadNestedNumber(document, "cell", "height", 0D);
+            if (cellWidth <= 0D || cellHeight <= 0D) return;
+
+            double inverseScale = 1D;
+            double explicitTransportScale = ReadNumber(document, "oviaErpCoordinateScale", 0D);
+
+            if (explicitTransportScale > 1D
+                && !Double.IsNaN(explicitTransportScale)
+                && !Double.IsInfinity(explicitTransportScale))
+            {
+                inverseScale = 1D / explicitTransportScale;
+            }
+            else
+            {
+                // _24에서 이미 저장된 수동 형상에는 메타가 없습니다.
+                // 기본 manual cell(약 160x80)이 1600x800, 16000x8000처럼 10배씩
+                // 커졌는지 확인하고 compact 범위로 돌아올 때까지 역변환합니다.
+                double normalizedWidth = cellWidth;
+                double normalizedHeight = cellHeight;
+                double accumulatedScale = 1D;
+
+                while ((normalizedWidth > ManualEditorMaxCellWidth
+                        || normalizedHeight > ManualEditorMaxCellHeight)
+                       && accumulatedScale < 1000000D)
+                {
+                    normalizedWidth /= ManualErpCoordinateScale;
+                    normalizedHeight /= ManualErpCoordinateScale;
+                    accumulatedScale *= ManualErpCoordinateScale;
+                }
+
+                if (accumulatedScale > 1D)
+                {
+                    inverseScale = 1D / accumulatedScale;
+                }
+            }
+
+            if (Math.Abs(inverseScale - 1D) < 0.0000001D)
+            {
+                RemoveKeyIgnoreCase(document, "oviaErpCoordinateScale");
+                return;
+            }
+
+            TransformShapeElements(document, inverseScale, 0D, 0D);
+
+            object cellValue;
+            IDictionary<string, object> cell = null;
+            if (TryGet(document, "cell", out cellValue))
+            {
+                cell = AsDictionary(cellValue);
+            }
+
+            if (cell != null)
+            {
+                SetNumber(cell, "width", cellWidth * inverseScale);
+                SetNumber(cell, "height", cellHeight * inverseScale);
+            }
+
+            RemoveKeyIgnoreCase(document, "oviaErpCoordinateScale");
         }
 
         private static bool UsesSourceCellTransportCoordinates(IDictionary<string, object> document)
@@ -1388,10 +1584,32 @@ namespace OVIA.Desktop
             double cellWidth,
             double cellHeight)
         {
-            // 원본 CAD TEXT height의 중앙값/최대값을 기준으로 삼지 않습니다.
-            // 도면별 CAD 문자 단위 편차가 ERP SVG font-size에 그대로 전파되면
-            // 동일한 철근형상 안에서도 160은 거의 안 보이고 2600은 과도하게 커지는 현상이 생깁니다.
-            // ERP 표시는 cell viewBox 비율만으로 결정하여 저장/재조회/재수정 반복에도 크기가 누적되지 않습니다.
+            // DBF 등 외부 BarList에서 형상 없이 들어온 행은 철근형상 확인·수정에서
+            // OVIA_MANUAL 문서(기본 160x80의 compact 좌표계)로 새로 작성됩니다.
+            //
+            // 기존 CAD/OVIA_EDIT 문서용 ERP 표준 최소 높이 70은 수백~수천 단위의
+            // CAD SOURCE_CELL에서는 정상이나, 이 compact 수동 좌표계에 그대로 적용하면
+            // TEXT가 cell 높이 대부분을 차지하여 ERP 셀에서 숫자와 형상이 비정상적으로
+            // 확대/잘림 표시됩니다.
+            //
+            // 따라서 "문서 전체가 수동 생성"인 경우에만 절대값 70 floor를 사용하지 않고
+            // 같은 CAD 표준 비율(width 9.2%, height 14%)로 계산합니다.
+            // 좌표/geometry/cell은 건드리지 않으며 ERP 전송 파생 TEXT.height만 조정합니다.
+            if (IsManualShapeDocument(document))
+            {
+                double widthReference = Math.Max(cellWidth, 0D) * CadShapeVisualPolicy.ErpTextWidthRatio;
+                double heightReference = Math.Max(cellHeight, 0D) * CadShapeVisualPolicy.ErpTextHeightRatio;
+                double reference = Math.Max(6D, Math.Max(widthReference, heightReference));
+
+                if (Double.IsNaN(reference) || Double.IsInfinity(reference) || reference <= 0D)
+                {
+                    return 6D;
+                }
+
+                return reference;
+            }
+
+            // CAD 원본 및 CAD 파생 OVIA_EDIT는 검증된 기존 ERP 표시 계약을 그대로 유지합니다.
             return CadShapeVisualPolicy.ResolveErpReferenceTextHeight(cellWidth, cellHeight);
         }
 
@@ -1459,8 +1677,11 @@ namespace OVIA.Desktop
 
             bool hasFallback = json.IndexOf("oviaErpFallback", StringComparison.OrdinalIgnoreCase) >= 0;
             bool hasTextScaleMetadata = json.IndexOf("oviaTextScale", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool hasManualTransportMetadata = json.IndexOf("oviaErpCoordinateScale", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool mayContainLegacyManualTransport = json.IndexOf("OVIA_MANUAL", StringComparison.OrdinalIgnoreCase) >= 0
+                || json.IndexOf("\"source\":\"MANUAL\"", StringComparison.OrdinalIgnoreCase) >= 0;
 
-            if (!hasFallback && !hasTextScaleMetadata)
+            if (!hasFallback && !hasTextScaleMetadata && !hasManualTransportMetadata && !mayContainLegacyManualTransport)
             {
                 return json;
             }
@@ -1470,6 +1691,11 @@ namespace OVIA.Desktop
                 JavaScriptSerializer serializer = CreateSerializer();
                 IDictionary<string, object> root = AsDictionary(serializer.DeserializeObject(json));
                 if (root == null) return json;
+
+                // ERP 저장용으로 10배 확대했던 OVIA_MANUAL 좌표계를 Pull 시 즉시
+                // 편집기 기준으로 복원합니다. 이전 _24에서 메타 없이 누적된 데이터도
+                // 동일 함수의 legacy 판별로 함께 복구됩니다.
+                NormalizeManualShapeDocumentForEditor(root);
 
                 object elementsValue;
                 if (!TryGet(root, "elements", out elementsValue)) return json;

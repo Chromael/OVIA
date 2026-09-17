@@ -168,6 +168,7 @@
     <Compile Include="FrmWorkspaceShell.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="OviaWorkspaceInputGestureFilter.cs" />
     <Compile Include="OviaFluentTheme.cs" />
     <Compile Include="OviaShared_Store_UI.cs" />
     <Compile Include="Program.cs" />

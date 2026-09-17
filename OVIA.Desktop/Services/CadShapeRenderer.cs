@@ -62,7 +62,7 @@ namespace OVIA.Desktop
 
                 if (jsonPath == null || jsonPath.Trim() == "" || !File.Exists(jsonPath))
                 {
-                    DrawEmpty(g, inner, "CAD 형상 없음");
+                    DrawEmpty(g, inner, "철근형상 없음");
                     return;
                 }
 
@@ -70,7 +70,7 @@ namespace OVIA.Desktop
 
                 if (data == null || data.Elements.Count == 0)
                 {
-                    DrawEmpty(g, inner, "CAD 형상 없음");
+                    DrawEmpty(g, inner, "철근형상 없음");
                     return;
                 }
 
@@ -264,6 +264,11 @@ namespace OVIA.Desktop
                         if (element == null)
                         {
                             continue;
+                        }
+
+                        if (element.Type == "LINE" || element.Type == "ARC" || element.Type == "CIRCLE")
+                        {
+                            pen.Width = GetCadElementStrokeWidthPx(element, penWidth, scale);
                         }
 
                         if (element.Type == "LINE")
@@ -1097,6 +1102,48 @@ namespace OVIA.Desktop
             return offset + (float)(value * scale);
         }
 
+        private float GetCadElementStrokeWidthPx(CadShapeElement element, float baseWidthPx, double coordinateScale)
+        {
+            if (element == null)
+            {
+                return Math.Max(1.35F, baseWidthPx);
+            }
+
+            /*
+             * OVIA 2026-09-11 - CAD 선두께 화면정규화 v2
+             * ------------------------------------------------------------
+             * 작은 BarList 셀에서는 1.0px과 0.6px의 '비율'만 적용하면 안티앨리어싱 때문에
+             * 둘 다 사실상 1px처럼 보여 본선/각도선 차이가 사라집니다.
+             *
+             * 따라서 역할(visualRole)을 우선하며 실제 화면 px을 명확히 분리합니다.
+             * - REBAR/일반선/수동선 : 최소 1.35px
+             * - Dimension/Leader 계열 ANNOTATION : 0.55px
+             *
+             * effectiveLineWeightMm/sourceStrokeWidth는 구형 데이터의 보조 판정에만 사용합니다.
+             */
+            if (String.Equals(element.VisualRole, "ANNOTATION", StringComparison.OrdinalIgnoreCase))
+            {
+                return 0.55F;
+            }
+
+            if (String.Equals(element.VisualRole, "REBAR", StringComparison.OrdinalIgnoreCase)
+                || element.SourceStrokeWidth > 0.0001D)
+            {
+                return Math.Max(1.35F, baseWidthPx);
+            }
+
+            if (element.EffectiveLineWeightMm > 0.0001D
+                && !Double.IsNaN(element.EffectiveLineWeightMm)
+                && !Double.IsInfinity(element.EffectiveLineWeightMm)
+                && element.EffectiveLineWeightMm <= 0.18D)
+            {
+                // visualRole이 없는 과거 JSON에서만 가는 선을 보조 판정.
+                return 0.70F;
+            }
+
+            return Math.Max(1.35F, baseWidthPx);
+        }
+
         private void DrawEmpty(Graphics g, Rectangle inner, string text)
         {
             using (SolidBrush brush = new SolidBrush(Color.FromArgb(130, 135, 145)))
@@ -1141,6 +1188,9 @@ namespace OVIA.Desktop
                     element.Height = GetNumber(item, "height", 0);
                     element.TextScale = Math.Max(0.25D, GetNumber(item, "textScale", 1D));
                     element.Rotation = GetNumber(item, "rotation", 0);
+                    element.VisualRole = GetString(item, "visualRole").ToUpperInvariant();
+                    element.EffectiveLineWeightMm = Math.Max(0D, GetNumber(item, "effectiveLineWeightMm", 0D));
+                    element.SourceStrokeWidth = Math.Max(0D, GetNumber(item, "sourceStrokeWidth", 0D));
                     element.HasBounds = HasNumber(item, "boundsMinX")
                         && HasNumber(item, "boundsMinY")
                         && HasNumber(item, "boundsMaxX")
@@ -1228,6 +1278,9 @@ namespace OVIA.Desktop
         public double Height = 0;
         public double TextScale = 1;
         public double Rotation = 0;
+        public string VisualRole = "";
+        public double EffectiveLineWeightMm = 0;
+        public double SourceStrokeWidth = 0;
         public bool HasBounds = false;
         public double BoundsMinX = 0;
         public double BoundsMinY = 0;

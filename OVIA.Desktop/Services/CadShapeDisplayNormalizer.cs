@@ -134,6 +134,9 @@ namespace OVIA.Desktop
                 cloned.Height = item.Height;
                 cloned.TextScale = item.TextScale;
                 cloned.Rotation = item.Rotation;
+                cloned.VisualRole = item.VisualRole;
+                cloned.EffectiveLineWeightMm = item.EffectiveLineWeightMm;
+                cloned.SourceStrokeWidth = item.SourceStrokeWidth;
                 cloned.HasBounds = item.HasBounds;
                 cloned.BoundsMinX = item.BoundsMinX;
                 cloned.BoundsMinY = item.BoundsMinY;

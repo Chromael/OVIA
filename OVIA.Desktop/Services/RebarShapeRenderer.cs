@@ -698,7 +698,7 @@ namespace OVIA.Desktop
 
         private void DrawNoShape(Graphics g, Rectangle bounds, string rawText)
         {
-            string message = "형상 선택 필요";
+            string message = "철근형상 없음";
 
             if (rawText != null && rawText.Trim() != "")
             {

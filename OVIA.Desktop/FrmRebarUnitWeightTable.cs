@@ -194,7 +194,7 @@ namespace OVIA.Desktop
             tableHeaderPanel.Controls.Add(tableTitleLabel);
 
             tableBasisLabel = new Label();
-            tableBasisLabel.Text = "1톤 단위 조견표 · 환산중량 단중 : KS D 3504 기준";
+            tableBasisLabel.Text = "1,000kg 단위 조견표 · 환산중량 단중 : KS D 3504 기준";
             tableBasisLabel.AutoSize = false;
             tableBasisLabel.Location = new Point(650, 2);
             tableBasisLabel.Size = new Size(560, 30);

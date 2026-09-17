@@ -61,6 +61,30 @@ namespace OVIA.Desktop
                 List<OviaVersionInfoEntry> normalized = CloneEntries(entries);
                 NormalizeEntries(normalized);
 
+                // 개발(Debug)에서는 배포 원본이 되는 소스 트리의 버전 이력을 먼저 저장합니다.
+                // 이렇게 해야 bin\x64\Debug에만 남았다가 Release/Installer에서 누락되는 일이 없습니다.
+                string sourcePath = GetDevelopmentSourceVersionInfoFilePath();
+                if (!string.IsNullOrWhiteSpace(sourcePath))
+                {
+                    WriteFile(sourcePath, normalized);
+
+                    // 현재 실행 중인 Debug 출력물도 즉시 같은 내용으로 맞춥니다.
+                    string runtimePath = GetInstallVersionInfoFilePath();
+                    if (!PathsEqual(sourcePath, runtimePath))
+                    {
+                        WriteFile(runtimePath, normalized);
+                    }
+
+                    OviaVersionInfoEntry latest = GetLatestEntry(normalized);
+                    if (latest != null)
+                    {
+                        SynchronizeDevelopmentReleaseMetadata(latest.VersionText);
+                    }
+                    return;
+                }
+
+                // 설치된 Release에서는 버전정보가 배포 이력 자체이므로 읽기 전용이 원칙입니다.
+                // 예외적으로 호출되더라도 Program Files 쓰기 실패 시 사용자 폴더에만 보관합니다.
                 string primaryPath = GetInstallVersionInfoFilePath();
                 try
                 {
@@ -126,31 +150,23 @@ namespace OVIA.Desktop
 
         public static string GetEffectiveVersionInfoFilePath()
         {
-            string installPath = GetInstallVersionInfoFilePath();
-            string userPath = GetUserVersionInfoFilePath();
-            bool hasInstall = File.Exists(installPath);
-            bool hasUser = File.Exists(userPath);
-
-            if (hasInstall && hasUser)
+            // 개발 중에는 소스 트리의 누적 이력이 단일 원본입니다.
+            string sourcePath = GetDevelopmentSourceVersionInfoFilePath();
+            if (!string.IsNullOrWhiteSpace(sourcePath) && File.Exists(sourcePath))
             {
-                try
-                {
-                    DateTime installTime = File.GetLastWriteTimeUtc(installPath);
-                    DateTime userTime = File.GetLastWriteTimeUtc(userPath);
-                    return userTime > installTime ? userPath : installPath;
-                }
-                catch
-                {
-                    return installPath;
-                }
+                return sourcePath;
             }
 
-            if (hasInstall)
+            // 설치/재설치 후에는 설치파일에 포함된 이력이 항상 우선입니다.
+            // 과거 사용자 폴더 파일의 수정시각이 더 최신이라는 이유로 새 설치본의 버전을 덮어쓰지 않습니다.
+            string installPath = GetInstallVersionInfoFilePath();
+            if (File.Exists(installPath))
             {
                 return installPath;
             }
 
-            if (hasUser)
+            string userPath = GetUserVersionInfoFilePath();
+            if (File.Exists(userPath))
             {
                 return userPath;
             }
@@ -237,6 +253,209 @@ namespace OVIA.Desktop
             }
 
             return Path.Combine(programFiles, "OVIA");
+        }
+
+        public static bool IsDevelopmentSourceAvailable()
+        {
+            return !string.IsNullOrWhiteSpace(GetDevelopmentSourceVersionInfoFilePath());
+        }
+
+        public static string GetDevelopmentSourceVersionInfoFilePath()
+        {
+            string[] starts = new string[]
+            {
+                SafeGetStartupPath(),
+                AppDomain.CurrentDomain.BaseDirectory,
+                Environment.CurrentDirectory,
+                SafeGetExecutingAssemblyDirectory()
+            };
+
+            int i;
+            for (i = 0; i < starts.Length; i++)
+            {
+                string projectPath = FindOviaDesktopProjectFolder(starts[i]);
+                if (!string.IsNullOrWhiteSpace(projectPath))
+                {
+                    return Path.Combine(projectPath, "Data", VersionFolderName, VersionFileName);
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static string SafeGetStartupPath()
+        {
+            try
+            {
+                return Application.StartupPath == null ? string.Empty : Application.StartupPath;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string SafeGetExecutingAssemblyDirectory()
+        {
+            try
+            {
+                string location = typeof(OviaVersionInfoStore).Assembly.Location;
+                return string.IsNullOrWhiteSpace(location) ? string.Empty : Path.GetDirectoryName(location);
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string FindOviaDesktopProjectFolder(string startPath)
+        {
+            if (string.IsNullOrWhiteSpace(startPath))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                DirectoryInfo current = new DirectoryInfo(startPath);
+                int depth = 0;
+                while (current != null && depth < 12)
+                {
+                    if (File.Exists(Path.Combine(current.FullName, "OVIA.Desktop.csproj")))
+                    {
+                        return current.FullName;
+                    }
+
+                    string nestedProject = Path.Combine(current.FullName, "OVIA.Desktop");
+                    if (File.Exists(Path.Combine(nestedProject, "OVIA.Desktop.csproj")))
+                    {
+                        return nestedProject;
+                    }
+
+                    current = current.Parent;
+                    depth++;
+                }
+            }
+            catch
+            {
+            }
+
+            return string.Empty;
+        }
+
+        public static void EnsureDevelopmentReleaseMetadataCurrent(List<OviaVersionInfoEntry> entries)
+        {
+            if (entries == null || entries.Count == 0)
+            {
+                return;
+            }
+
+            OviaVersionInfoEntry latest = GetLatestEntry(entries);
+            if (latest == null || string.IsNullOrWhiteSpace(latest.VersionText))
+            {
+                return;
+            }
+
+            SynchronizeDevelopmentReleaseMetadata(latest.VersionText);
+        }
+
+        public static string GetDevelopmentDisplayVersionInfoFilePath()
+        {
+            string sourcePath = GetDevelopmentSourceVersionInfoFilePath();
+            return string.IsNullOrWhiteSpace(sourcePath) ? GetDisplayInstallVersionInfoFilePath() : sourcePath;
+        }
+
+        private static void SynchronizeDevelopmentReleaseMetadata(string versionText)
+        {
+            string version = NormalizeVersionText(versionText);
+            if (!IsValidVersionText(version))
+            {
+                return;
+            }
+
+            string sourceHistoryPath = GetDevelopmentSourceVersionInfoFilePath();
+            if (string.IsNullOrWhiteSpace(sourceHistoryPath))
+            {
+                return;
+            }
+
+            DirectoryInfo versionFolder = Directory.GetParent(sourceHistoryPath);
+            DirectoryInfo dataFolder = versionFolder == null ? null : versionFolder.Parent;
+            DirectoryInfo projectFolder = dataFolder == null ? null : dataFolder.Parent;
+            if (projectFolder == null)
+            {
+                return;
+            }
+
+            UpdateAssemblyInfoVersion(Path.Combine(projectFolder.FullName, "Properties", "AssemblyInfo.cs"), version);
+
+            DirectoryInfo solutionFolder = projectFolder.Parent;
+            if (solutionFolder != null)
+            {
+                string installerFolder = Path.Combine(solutionFolder.FullName, "Installer");
+                Directory.CreateDirectory(installerFolder);
+                string installerVersionPath = Path.Combine(installerFolder, "ovia_version_build.iss");
+                string content = "; OVIA 버전정보 화면에서 자동 생성됩니다. 직접 수정하지 마세요.\r\n"
+                    + "#define OviaVersion \"" + version + "\"\r\n";
+                File.WriteAllText(installerVersionPath, content, new UTF8Encoding(true));
+            }
+        }
+
+        private static void UpdateAssemblyInfoVersion(string assemblyInfoPath, string version)
+        {
+            if (string.IsNullOrWhiteSpace(assemblyInfoPath) || !File.Exists(assemblyInfoPath))
+            {
+                return;
+            }
+
+            string fourPartVersion = version + ".0";
+            string text = File.ReadAllText(assemblyInfoPath, Encoding.UTF8);
+            text = ReplaceAssemblyAttribute(text, "AssemblyVersion", fourPartVersion);
+            text = ReplaceAssemblyAttribute(text, "AssemblyFileVersion", fourPartVersion);
+            File.WriteAllText(assemblyInfoPath, text, new UTF8Encoding(true));
+        }
+
+        private static string ReplaceAssemblyAttribute(string source, string attributeName, string version)
+        {
+            if (source == null)
+            {
+                return string.Empty;
+            }
+
+            string prefix = "[assembly: " + attributeName + "(\"";
+            int start = source.IndexOf(prefix, StringComparison.Ordinal);
+            if (start < 0)
+            {
+                return source;
+            }
+
+            int valueStart = start + prefix.Length;
+            int valueEnd = source.IndexOf("\")]", valueStart, StringComparison.Ordinal);
+            if (valueEnd < 0)
+            {
+                return source;
+            }
+
+            return source.Substring(0, valueStart) + version + source.Substring(valueEnd);
+        }
+
+        private static bool PathsEqual(string left, string right)
+        {
+            if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+            {
+                return false;
+            }
+
+            try
+            {
+                string a = Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string b = Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                return a.Equals(b, StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return left.Equals(right, StringComparison.OrdinalIgnoreCase);
+            }
         }
 
         public static string GetUserVersionInfoFilePath()

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace OVIA.Desktop.Controls
@@ -223,6 +224,85 @@ namespace OVIA.Desktop.Controls
             set { SetNavigationEnabled(btnUp, value); }
         }
 
+        // 2026-09-15: 키보드/마우스 공통 입력과 상단 버튼이 동일한 실행 메서드를 공유한다.
+        // OviaExplorerIconButton은 WinForms Button이 아니므로 PerformClick()에 의존하지 않는다.
+        public void PerformBackCommand()
+        {
+            if (btnBack != null && btnBack.Enabled)
+            {
+                ExecuteBackCommand();
+            }
+        }
+
+        public void PerformForwardCommand()
+        {
+            if (btnForward != null && btnForward.Enabled)
+            {
+                ExecuteForwardCommand();
+            }
+        }
+
+        public void PerformRefreshCommand()
+        {
+            if (btnRefresh != null && btnRefresh.Enabled)
+            {
+                ExecuteRefreshCommand();
+            }
+        }
+
+        private void ExecuteBackCommand()
+        {
+            OVIA.Desktop.IOviaWorkspaceBrowserNavigation browserNavigation = OVIA.Desktop.OviaWorkspaceNavigation.FindBrowserNavigation(this);
+            if (browserNavigation != null && browserNavigation.NavigateBackInBrowser())
+            {
+                RefreshNavigationButtonStates();
+                return;
+            }
+
+            OVIA.Desktop.IOviaWorkspaceNavigator navigator = OVIA.Desktop.OviaWorkspaceNavigation.FindNavigator(this);
+            if (navigator != null && navigator.NavigateBackInWorkspace())
+            {
+                RefreshNavigationButtonStates();
+                return;
+            }
+
+            Raise(BackClicked);
+            RefreshNavigationButtonStates();
+        }
+
+        private void ExecuteForwardCommand()
+        {
+            OVIA.Desktop.IOviaWorkspaceBrowserNavigation browserNavigation = OVIA.Desktop.OviaWorkspaceNavigation.FindBrowserNavigation(this);
+            if (browserNavigation != null && browserNavigation.NavigateForwardInBrowser())
+            {
+                RefreshNavigationButtonStates();
+                return;
+            }
+
+            OVIA.Desktop.IOviaWorkspaceNavigator navigator = OVIA.Desktop.OviaWorkspaceNavigation.FindNavigator(this);
+            if (navigator != null && navigator.NavigateForwardInWorkspace())
+            {
+                RefreshNavigationButtonStates();
+                return;
+            }
+
+            Raise(ForwardClicked);
+            RefreshNavigationButtonStates();
+        }
+
+        private void ExecuteRefreshCommand()
+        {
+            OVIA.Desktop.IOviaWorkspaceBrowserNavigation browserNavigation = OVIA.Desktop.OviaWorkspaceNavigation.FindBrowserNavigation(this);
+            if (browserNavigation != null && browserNavigation.RefreshBrowser())
+            {
+                RefreshNavigationButtonStates();
+                return;
+            }
+
+            Raise(RefreshClicked);
+            RefreshNavigationButtonStates();
+        }
+
         public void RefreshNavigationButtonStates()
         {
             bool canBrowserBack = false;
@@ -296,47 +376,11 @@ namespace OVIA.Desktop.Controls
         private void BuildControls()
         {
             btnBack = CreateExplorerButton("\uE72B", "뒤로");
-            btnBack.Click += delegate
-            {
-                OVIA.Desktop.IOviaWorkspaceBrowserNavigation browserNavigation = OVIA.Desktop.OviaWorkspaceNavigation.FindBrowserNavigation(this);
-                if (browserNavigation != null && browserNavigation.NavigateBackInBrowser())
-                {
-                    RefreshNavigationButtonStates();
-                    return;
-                }
-
-                OVIA.Desktop.IOviaWorkspaceNavigator navigator = OVIA.Desktop.OviaWorkspaceNavigation.FindNavigator(this);
-                if (navigator != null && navigator.NavigateBackInWorkspace())
-                {
-                    RefreshNavigationButtonStates();
-                    return;
-                }
-
-                Raise(BackClicked);
-                RefreshNavigationButtonStates();
-            };
+            btnBack.Click += delegate { ExecuteBackCommand(); };
             Controls.Add(btnBack);
 
             btnForward = CreateExplorerButton("\uE72A", "앞으로");
-            btnForward.Click += delegate
-            {
-                OVIA.Desktop.IOviaWorkspaceBrowserNavigation browserNavigation = OVIA.Desktop.OviaWorkspaceNavigation.FindBrowserNavigation(this);
-                if (browserNavigation != null && browserNavigation.NavigateForwardInBrowser())
-                {
-                    RefreshNavigationButtonStates();
-                    return;
-                }
-
-                OVIA.Desktop.IOviaWorkspaceNavigator navigator = OVIA.Desktop.OviaWorkspaceNavigation.FindNavigator(this);
-                if (navigator != null && navigator.NavigateForwardInWorkspace())
-                {
-                    RefreshNavigationButtonStates();
-                    return;
-                }
-
-                Raise(ForwardClicked);
-                RefreshNavigationButtonStates();
-            };
+            btnForward.Click += delegate { ExecuteForwardCommand(); };
             Controls.Add(btnForward);
 
             btnUp = CreateExplorerButton("\uE74A", "위로");
@@ -355,18 +399,7 @@ namespace OVIA.Desktop.Controls
             Controls.Add(btnUp);
 
             btnRefresh = CreateExplorerButton("\uE72C", "새로고침");
-            btnRefresh.Click += delegate
-            {
-                OVIA.Desktop.IOviaWorkspaceBrowserNavigation browserNavigation = OVIA.Desktop.OviaWorkspaceNavigation.FindBrowserNavigation(this);
-                if (browserNavigation != null && browserNavigation.RefreshBrowser())
-                {
-                    RefreshNavigationButtonStates();
-                    return;
-                }
-
-                Raise(RefreshClicked);
-                RefreshNavigationButtonStates();
-            };
+            btnRefresh.Click += delegate { ExecuteRefreshCommand(); };
             Controls.Add(btnRefresh);
 
             btnHome = CreateExplorerButton("\uE7F4", "메인");
@@ -1530,18 +1563,111 @@ namespace OVIA.Desktop.Controls
         }
     }
 
+    /// <summary>
+    /// 읽기 전용 표시 텍스트를 일반 문서처럼 마우스로 드래그 선택하고 Ctrl+C 할 수 있게 하는 컨트롤.
+    /// 기능성 Grid/Breadcrumb에는 사용하지 않아 기존 선택/탐색 이벤트와 완전히 분리한다.
+    /// </summary>
+    public sealed class OviaSelectableTextBox : TextBox
+    {
+        [DllImport("user32.dll")]
+        private static extern bool HideCaret(IntPtr hWnd);
+
+        public OviaSelectableTextBox()
+        {
+            ReadOnly = true;
+            BorderStyle = BorderStyle.None;
+            TabStop = false;
+            ShortcutsEnabled = true;
+            HideSelection = false;
+            Multiline = false;
+            WordWrap = false;
+            ScrollBars = ScrollBars.None;
+            Cursor = Cursors.IBeam;
+            AutoSize = false;
+        }
+
+        protected override void OnGotFocus(EventArgs e)
+        {
+            base.OnGotFocus(e);
+            HideTextCaret();
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            HideTextCaret();
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if ((e.Button & MouseButtons.Left) == MouseButtons.Left)
+            {
+                HideTextCaret();
+            }
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            HideTextCaret();
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            HideTextCaret();
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            // 읽기 전용 텍스트 선택 시 Windows EDIT 컨트롤이 다시 caret을 만들 수 있으므로
+            // 메시지 처리 직후에도 숨긴다. 선택영역과 Ctrl+C 기능에는 영향을 주지 않는다.
+            if (Focused)
+            {
+                HideTextCaret();
+            }
+        }
+
+        private void HideTextCaret()
+        {
+            if (IsHandleCreated)
+            {
+                try
+                {
+                    HideCaret(Handle);
+                }
+                catch
+                {
+                    // caret 숨김 실패가 텍스트 선택/복사 기능에 영향을 주면 안 된다.
+                }
+            }
+        }
+
+        protected override void OnLeave(EventArgs e)
+        {
+            base.OnLeave(e);
+            SelectionLength = 0;
+            SelectionStart = 0;
+        }
+    }
+
     public sealed class OviaProjectContextHeader : UserControl
     {
-        private readonly Label projectLabel;
+        private readonly OviaSelectableTextBox projectLabel;
+        private readonly OviaSelectableTextBox projectNumberAccentLabel;
         private readonly Label firstSeparatorLabel;
-        private readonly Label orderNumberLabel;
-        private readonly Label dueDateLabel;
+        private readonly OviaSelectableTextBox orderNumberLabel;
+        private readonly OviaSelectableTextBox dueDateLabel;
         private readonly Label secondSeparatorLabel;
-        private readonly Label barListTitleLabel;
-        private readonly Label statusLabel;
+        private readonly OviaSelectableTextBox barListTitleLabel;
+        private readonly OviaSelectableTextBox statusLabel;
         private readonly ToolTip toolTip;
 
         private string projectText = string.Empty;
+        private string projectNumberText = string.Empty;
+        private string projectNameText = string.Empty;
         private string orderNumberText = string.Empty;
         private string dueDateText = string.Empty;
         private string barListTitleText = string.Empty;
@@ -1550,6 +1676,8 @@ namespace OVIA.Desktop.Controls
         private string projectToolTipOverride = string.Empty;
         private bool hasBarListContext;
         private bool hasOrderOrDueContext;
+        private bool highlightProjectNumberWithAccent;
+        private string orderNumberToolTipText = string.Empty;
 
         public OviaProjectContextHeader()
         {
@@ -1568,25 +1696,22 @@ namespace OVIA.Desktop.Controls
             toolTip.ReshowDelay = 100;
             toolTip.ShowAlways = true;
 
-            projectLabel = CreateTitleLabel(OviaFluentTheme.FontTitle(14F, FontStyle.Bold), Color.Black);
+            projectLabel = CreateSelectableTitleText(OviaFluentTheme.FontTitle(14F, FontStyle.Bold), Color.Black, HorizontalAlignment.Left);
+            projectNumberAccentLabel = CreateSelectableTitleText(OviaFluentTheme.FontTitle(14F, FontStyle.Bold), OviaFluentTheme.Accent, HorizontalAlignment.Left);
+            projectNumberAccentLabel.Visible = false;
             firstSeparatorLabel = CreateTitleLabel(OviaFluentTheme.FontSystem(10F, FontStyle.Regular), OviaFluentTheme.TextTertiary);
-            orderNumberLabel = CreateTitleLabel(OviaFluentTheme.FontSystem(9.5F, FontStyle.Regular), OviaFluentTheme.TextPrimary);
-            dueDateLabel = CreateTitleLabel(OviaFluentTheme.FontSystem(9.5F, FontStyle.Regular), OviaFluentTheme.TextPrimary);
+            orderNumberLabel = CreateSelectableTitleText(OviaFluentTheme.FontSystem(9.5F, FontStyle.Regular), OviaFluentTheme.TextPrimary, HorizontalAlignment.Left);
+            dueDateLabel = CreateSelectableTitleText(OviaFluentTheme.FontSystem(9.5F, FontStyle.Regular), OviaFluentTheme.TextPrimary, HorizontalAlignment.Left);
             secondSeparatorLabel = CreateTitleLabel(OviaFluentTheme.FontSystem(10F, FontStyle.Regular), OviaFluentTheme.TextTertiary);
-            barListTitleLabel = CreateTitleLabel(OviaFluentTheme.FontSystem(9.5F, FontStyle.Bold), OviaFluentTheme.TextPrimary);
+            barListTitleLabel = CreateSelectableTitleText(OviaFluentTheme.FontSystem(9.5F, FontStyle.Bold), OviaFluentTheme.TextPrimary, HorizontalAlignment.Left);
 
             firstSeparatorLabel.Text = "|";
             secondSeparatorLabel.Text = "|";
 
-            statusLabel = new Label();
-            statusLabel.AutoSize = false;
-            statusLabel.Font = OviaFluentTheme.FontSystem(9F, FontStyle.Regular);
-            statusLabel.ForeColor = OviaFluentTheme.TextSecondary;
-            statusLabel.BackColor = Color.Transparent;
-            statusLabel.TextAlign = ContentAlignment.MiddleRight;
-            statusLabel.AutoEllipsis = true;
+            statusLabel = CreateSelectableTitleText(OviaFluentTheme.FontSystem(9F, FontStyle.Regular), OviaFluentTheme.TextSecondary, HorizontalAlignment.Right);
 
             this.Controls.Add(projectLabel);
+            this.Controls.Add(projectNumberAccentLabel);
             this.Controls.Add(firstSeparatorLabel);
             this.Controls.Add(orderNumberLabel);
             this.Controls.Add(dueDateLabel);
@@ -1598,16 +1723,39 @@ namespace OVIA.Desktop.Controls
             SetContext(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
         }
 
+        public bool HighlightProjectNumberWithAccent
+        {
+            get { return highlightProjectNumberWithAccent; }
+            set
+            {
+                highlightProjectNumberWithAccent = value;
+                ApplyProjectTitleDisplay();
+                LayoutContextLabels();
+            }
+        }
+
+        public string OrderNumberToolTipText
+        {
+            get { return orderNumberToolTipText; }
+            set
+            {
+                orderNumberToolTipText = NormalizeDisplayText(value);
+                ApplyOrderNumberToolTip();
+            }
+        }
+
         public void SetContext(string projectNo, string projectName, string orderNumber, string dueDate, string barListTitle, string clientName, string projectStatus)
         {
-            projectText = BuildProjectText(projectNo, projectName);
+            projectNumberText = NormalizeDisplayText(projectNo);
+            projectNameText = NormalizeDisplayText(projectName);
+            projectText = BuildProjectText(projectNumberText, projectNameText);
             orderNumberText = NormalizeDisplayText(orderNumber);
             dueDateText = NormalizeDisplayText(dueDate);
             barListTitleText = NormalizeDisplayText(barListTitle);
             clientNameText = NormalizeDisplayText(clientName);
             projectStatusText = NormalizeDisplayText(projectStatus);
 
-            projectLabel.Text = projectText;
+            ApplyProjectTitleDisplay();
             orderNumberLabel.Text = orderNumberText;
             dueDateLabel.Text = dueDateText;
             barListTitleLabel.Text = barListTitleText;
@@ -1621,8 +1769,10 @@ namespace OVIA.Desktop.Controls
             secondSeparatorLabel.Visible = hasOrderOrDueContext && barListTitleText != string.Empty;
             barListTitleLabel.Visible = barListTitleText != string.Empty;
 
-            toolTip.SetToolTip(projectLabel, projectToolTipOverride == string.Empty ? projectText : projectToolTipOverride);
-            toolTip.SetToolTip(orderNumberLabel, orderNumberText);
+            string projectToolTipText = projectToolTipOverride == string.Empty ? projectText : projectToolTipOverride;
+            toolTip.SetToolTip(projectLabel, projectToolTipText);
+            toolTip.SetToolTip(projectNumberAccentLabel, projectToolTipText);
+            ApplyOrderNumberToolTip();
             toolTip.SetToolTip(dueDateLabel, dueDateText == string.Empty ? string.Empty : "납기일 : " + dueDateText);
             toolTip.SetToolTip(barListTitleLabel, barListTitleText);
             toolTip.SetToolTip(statusLabel, statusLabel.Text);
@@ -1634,7 +1784,36 @@ namespace OVIA.Desktop.Controls
         public void SetProjectToolTip(string text)
         {
             projectToolTipOverride = NormalizeDisplayText(text);
-            toolTip.SetToolTip(projectLabel, projectToolTipOverride == string.Empty ? projectText : projectToolTipOverride);
+            string projectToolTipText = projectToolTipOverride == string.Empty ? projectText : projectToolTipOverride;
+            toolTip.SetToolTip(projectLabel, projectToolTipText);
+            toolTip.SetToolTip(projectNumberAccentLabel, projectToolTipText);
+        }
+
+        private void ApplyProjectTitleDisplay()
+        {
+            if (projectLabel == null || projectNumberAccentLabel == null)
+            {
+                return;
+            }
+
+            bool useAccentNumber = highlightProjectNumberWithAccent && projectNumberText != string.Empty;
+            projectNumberAccentLabel.Visible = useAccentNumber;
+            projectNumberAccentLabel.ForeColor = OviaFluentTheme.Accent;
+            projectNumberAccentLabel.Text = useAccentNumber ? projectNumberText : string.Empty;
+            projectLabel.Text = useAccentNumber ? projectNameText : projectText;
+        }
+
+        private void ApplyOrderNumberToolTip()
+        {
+            if (toolTip == null || orderNumberLabel == null)
+            {
+                return;
+            }
+
+            string text = orderNumberText == string.Empty
+                ? string.Empty
+                : (orderNumberToolTipText == string.Empty ? orderNumberText : orderNumberToolTipText);
+            toolTip.SetToolTip(orderNumberLabel, text);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -1671,6 +1850,17 @@ namespace OVIA.Desktop.Controls
             return label;
         }
 
+        private OviaSelectableTextBox CreateSelectableTitleText(Font font, Color color, HorizontalAlignment alignment)
+        {
+            OviaSelectableTextBox textBox = new OviaSelectableTextBox();
+            textBox.Font = font;
+            textBox.ForeColor = color;
+            textBox.BackColor = OviaFluentTheme.AppBackground;
+            textBox.TextAlign = alignment;
+            textBox.Height = 30;
+            return textBox;
+        }
+
         private void LayoutContextLabels()
         {
             if (this.Width <= 0)
@@ -1685,7 +1875,7 @@ namespace OVIA.Desktop.Controls
             int availableWidth = Math.Max(1, statusLeft - 18);
             int x = 0;
 
-            statusLabel.SetBounds(statusLeft, 9, statusWidth, 26);
+            SetSelectableBounds(statusLabel, statusLeft, 9, statusWidth, 26);
 
             bool hasContext = hasBarListContext;
             firstSeparatorLabel.Visible = hasContext;
@@ -1693,11 +1883,32 @@ namespace OVIA.Desktop.Controls
             dueDateLabel.Visible = dueDateText != string.Empty;
             secondSeparatorLabel.Visible = hasOrderOrDueContext && barListTitleText != string.Empty;
             barListTitleLabel.Visible = barListTitleText != string.Empty;
-            int projectDesired = MeasureLabelWidth(projectLabel, projectText, 10);
+            bool useAccentNumber = highlightProjectNumberWithAccent && projectNumberText != string.Empty;
+            int projectNumberDesired = useAccentNumber ? MeasureLabelWidth(projectNumberAccentLabel, projectNumberText, 2) : 0;
+            int projectNameDesired = useAccentNumber ? MeasureLabelWidth(projectLabel, projectNameText, 8) : MeasureLabelWidth(projectLabel, projectText, 10);
+            int projectGap = useAccentNumber && projectNameText != string.Empty ? 10 : 0;
+            int projectDesired = projectNumberDesired + projectGap + projectNameDesired;
             int projectMaximum = hasContext ? Math.Max(180, (int)Math.Round(availableWidth * 0.43)) : availableWidth;
             int projectWidth = Math.Min(projectDesired, projectMaximum);
             projectWidth = Math.Max(1, Math.Min(projectWidth, availableWidth));
-            projectLabel.SetBounds(x, titleTop, projectWidth, titleHeight);
+
+            if (useAccentNumber)
+            {
+                int numberWidth = Math.Min(projectNumberDesired, projectWidth);
+                projectNumberAccentLabel.Visible = true;
+                SetSelectableBounds(projectNumberAccentLabel, x, titleTop, Math.Max(1, numberWidth), titleHeight);
+
+                int nameLeft = x + numberWidth + projectGap;
+                int nameWidth = Math.Max(0, projectWidth - numberWidth - projectGap);
+                SetSelectableBounds(projectLabel, nameLeft, titleTop, nameWidth, titleHeight);
+            }
+            else
+            {
+                projectNumberAccentLabel.Visible = false;
+                projectNumberAccentLabel.SetBounds(0, 0, 0, 0);
+                SetSelectableBounds(projectLabel, x, titleTop, projectWidth, titleHeight);
+            }
+
             x += projectWidth;
 
             if (!hasContext || x >= availableWidth)
@@ -1715,7 +1926,7 @@ namespace OVIA.Desktop.Controls
             if (orderNumberLabel.Visible && remaining > 0)
             {
                 int width = Math.Min(MeasureLabelWidth(orderNumberLabel, orderNumberText, 8), Math.Min(150, remaining));
-                orderNumberLabel.SetBounds(x, titleTop, Math.Max(1, width), titleHeight);
+                SetSelectableBounds(orderNumberLabel, x, titleTop, Math.Max(1, width), titleHeight);
                 x += width + 12;
             }
 
@@ -1724,7 +1935,7 @@ namespace OVIA.Desktop.Controls
             if (dueDateLabel.Visible && remaining > 0)
             {
                 int width = Math.Min(MeasureLabelWidth(dueDateLabel, dueDateText, 8), Math.Min(105, remaining));
-                dueDateLabel.SetBounds(x, titleTop, Math.Max(1, width), titleHeight);
+                SetSelectableBounds(dueDateLabel, x, titleTop, Math.Max(1, width), titleHeight);
                 x += width + 12;
             }
 
@@ -1744,8 +1955,25 @@ namespace OVIA.Desktop.Controls
 
             if (barListTitleLabel.Visible && remaining > 0)
             {
-                barListTitleLabel.SetBounds(x, titleTop, remaining, titleHeight);
+                SetSelectableBounds(barListTitleLabel, x, titleTop, remaining, titleHeight);
             }
+        }
+
+        private void SetSelectableBounds(OviaSelectableTextBox textBox, int x, int top, int width, int rowHeight)
+        {
+            if (textBox == null)
+            {
+                return;
+            }
+
+            int preferredHeight = TextRenderer.MeasureText(
+                "Ag",
+                textBox.Font,
+                new Size(Math.Max(1, width), Math.Max(1, rowHeight)),
+                TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Height + 4;
+            int textHeight = Math.Max(18, Math.Min(rowHeight, preferredHeight));
+            int y = top + Math.Max(0, (rowHeight - textHeight) / 2);
+            textBox.SetBounds(x, y, Math.Max(1, width), textHeight);
         }
 
         private void HideContextLabelsBeyondProject()
@@ -1757,7 +1985,7 @@ namespace OVIA.Desktop.Controls
             barListTitleLabel.SetBounds(0, 0, 0, 0);
         }
 
-        private int MeasureLabelWidth(Label label, string text, int horizontalPadding)
+        private int MeasureLabelWidth(Control label, string text, int horizontalPadding)
         {
             if (label == null || string.IsNullOrEmpty(text))
             {

@@ -9,6 +9,12 @@ namespace OVIA.Desktop
 {
     public sealed class CadShapeEditDocument
     {
+        // CAD 원본 셀이 없는 OVIA 수동 신규 형상용 표준 편집 셀입니다.
+        // 사용자 합의 비율: 가로 2 : 세로 0.75 = 160 : 60.
+        // 화면 픽셀 크기가 아니라 논리 좌표계이며, 저장/재수정 시 동일 셀을 유지합니다.
+        public const double ManualGuideCellWidth = 160D;
+        public const double ManualGuideCellHeight = 60D;
+
         public int Version = 4;
         public int RowNo = 0;
         public double Width = 100D;
@@ -23,9 +29,11 @@ namespace OVIA.Desktop
             CadShapeEditDocument document = new CadShapeEditDocument();
             document.Version = 4;
             document.Source = "OVIA_MANUAL";
-            document.LayoutPolicy = "CONTENT_BOUNDS";
-            document.Width = 160D;
-            document.Height = 80D;
+            // CAD 셀이 없는 신규 수동 형상도 처음부터 고정 셀 좌표계를 갖습니다.
+            // 이렇게 해야 신규 작성 때의 빨간 가이드가 저장 후 재수정 때도 동일하게 재현됩니다.
+            document.LayoutPolicy = "SOURCE_CELL";
+            document.Width = ManualGuideCellWidth;
+            document.Height = ManualGuideCellHeight;
             return document;
         }
 
@@ -78,6 +86,9 @@ namespace OVIA.Desktop
                     element.TextScale = Math.Max(0.25D, GetNumber(item, "textScale", 1D));
                     element.Rotation = GetNumber(item, "rotation", 0D);
                     element.ColorIndex = (int)Math.Round(GetNumber(item, "colorIndex", 7D));
+                    element.VisualRole = GetString(item, "visualRole").ToUpperInvariant();
+                    element.EffectiveLineWeightMm = Math.Max(0D, GetNumber(item, "effectiveLineWeightMm", 0D));
+                    element.SourceStrokeWidth = Math.Max(0D, GetNumber(item, "sourceStrokeWidth", 0D));
                     element.HasBounds = HasNumber(item, "boundsMinX")
                         && HasNumber(item, "boundsMinY")
                         && HasNumber(item, "boundsMaxX")
@@ -419,6 +430,22 @@ namespace OVIA.Desktop
                 }
 
                 sb.Append(", \"colorIndex\": ").Append(element.ColorIndex.ToString(CultureInfo.InvariantCulture));
+                if (!String.IsNullOrWhiteSpace(element.VisualRole))
+                {
+                    sb.Append(", \"visualRole\": ").Append(JsonString(element.VisualRole.Trim().ToUpperInvariant()));
+                }
+
+                if ((element.Type == "LINE" || element.Type == "ARC" || element.Type == "CIRCLE")
+                    && element.EffectiveLineWeightMm > 0.0001D)
+                {
+                    sb.Append(", \"effectiveLineWeightMm\": ").Append(JsonNumber(element.EffectiveLineWeightMm));
+                }
+
+                if (element.Type == "LINE" && element.SourceStrokeWidth > 0.0001D)
+                {
+                    sb.Append(", \"sourceStrokeWidth\": ").Append(JsonNumber(element.SourceStrokeWidth));
+                }
+
                 sb.Append("}");
             }
 
@@ -606,6 +633,12 @@ namespace OVIA.Desktop
         public double TextScale = 1D;
         public double Rotation = 0D;
         public int ColorIndex = 7;
+        // DIMENSION/LEADER에서 파생된 주석선 등 표시 역할. 빈 값은 일반 철근/수동 도형.
+        public string VisualRole = "";
+        // CAD 원본의 최종 유효 선가중치(mm). 0이면 과거/수동 데이터로 간주하여 기존 기본 두께를 사용합니다.
+        public double EffectiveLineWeightMm = 0D;
+        // CAD Polyline 자체 Width(도면 좌표 단위). 0이면 일반 선으로 처리합니다.
+        public double SourceStrokeWidth = 0D;
         public bool HasBounds = false;
         public double BoundsMinX = 0D;
         public double BoundsMinY = 0D;

@@ -20,6 +20,7 @@ namespace OVIA.Desktop
         private readonly bool isManualDocument;
         private readonly CadShapeEditDocument rawDocument;
         private readonly CadShapeEditDocument workingDocument;
+        private readonly bool readOnlyView;
         private CadShapeEditorControl editor;
         private DataGridView textGrid;
         private Label lblSelectionType;
@@ -65,7 +66,13 @@ namespace OVIA.Desktop
         }
 
         public FrmShapePicker(RebarShapeRepository repository, string currentValue, string currentDimensionText, string cadShapeJsonPath)
+            : this(repository, currentValue, currentDimensionText, cadShapeJsonPath, false)
         {
+        }
+
+        public FrmShapePicker(RebarShapeRepository repository, string currentValue, string currentDimensionText, string cadShapeJsonPath, bool readOnlyView)
+        {
+            this.readOnlyView = readOnlyView;
             this.cadShapeJsonPath = cadShapeJsonPath == null ? "" : cadShapeJsonPath.Trim();
 
             CadShapeEditDocument loadedDocument = CadShapeDisplayNormalizer.CreateEditableDocument(
@@ -123,7 +130,7 @@ namespace OVIA.Desktop
 
         private void BuildUI()
         {
-            Text = "철근 형상 확인·수정";
+            Text = readOnlyView ? "철근 형상" : "철근 형상 확인·수정";
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
             MaximizeBox = true;
@@ -137,7 +144,8 @@ namespace OVIA.Desktop
 
             Panel toolbar = new Panel();
             toolbar.Dock = DockStyle.Top;
-            toolbar.Height = 90;
+            toolbar.Height = readOnlyView ? 0 : 90;
+            toolbar.Visible = !readOnlyView;
             toolbar.BackColor = Color.FromArgb(248, 249, 252);
             toolbar.Padding = new Padding(12, 6, 12, 6);
             Controls.Add(toolbar);
@@ -200,7 +208,8 @@ namespace OVIA.Desktop
 
             Panel bottom = new Panel();
             bottom.Dock = DockStyle.Bottom;
-            bottom.Height = 62;
+            bottom.Height = readOnlyView ? 0 : 62;
+            bottom.Visible = !readOnlyView;
             bottom.BackColor = Color.White;
             bottom.Padding = new Padding(16, 12, 16, 12);
             Controls.Add(bottom);
@@ -270,10 +279,14 @@ namespace OVIA.Desktop
             editor = new CadShapeEditorControl();
             editor.Dock = DockStyle.Fill;
             editor.Margin = new Padding(0);
+            editor.OverlayNoticeText = readOnlyView
+                ? "진행중이거나 완료된 BarList는 확인만 가능합니다."
+                : String.Empty;
             editor.SelectionChanged += Editor_SelectionChanged;
             editor.DocumentChanged += Editor_DocumentChanged;
             editor.ModeChanged += Editor_ModeChanged;
             editor.TextEditRequested += Editor_TextEditRequested;
+            editor.Enabled = !readOnlyView;
             editorFrame.Controls.Add(editor);
 
             BuildRightPanel(split.Panel2);
@@ -934,6 +947,15 @@ namespace OVIA.Desktop
 
         private void UpdateToolbarState()
         {
+            if (btnApply != null)
+            {
+                btnApply.Enabled = !readOnlyView && HasDocumentChanges();
+            }
+
+            if (readOnlyView)
+            {
+                return;
+            }
             if (editor == null)
             {
                 return;
@@ -951,6 +973,65 @@ namespace OVIA.Desktop
             btnDelete.Enabled = editor.SelectedCount > 0;
             btnSplit.Enabled = editor.CanSplitSelectedLine;
 
+        }
+
+
+        private bool HasDocumentChanges()
+        {
+            if (editor == null || editor.Document == null || workingDocument == null)
+            {
+                return false;
+            }
+
+            CadShapeEditDocument current = editor.Document;
+            if (current.Elements == null || workingDocument.Elements == null
+                || current.Elements.Count != workingDocument.Elements.Count)
+            {
+                return true;
+            }
+
+            for (int i = 0; i < current.Elements.Count; i++)
+            {
+                CadShapeEditElement left = current.Elements[i];
+                CadShapeEditElement right = workingDocument.Elements[i];
+
+                if (!AreElementsEquivalent(left, right))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool AreElementsEquivalent(CadShapeEditElement left, CadShapeEditElement right)
+        {
+            if (ReferenceEquals(left, right)) return true;
+            if (left == null || right == null) return false;
+
+            return String.Equals(left.Type ?? "", right.Type ?? "", StringComparison.Ordinal)
+                && String.Equals(left.Text ?? "", right.Text ?? "", StringComparison.Ordinal)
+                && String.Equals(left.TextId ?? "", right.TextId ?? "", StringComparison.Ordinal)
+                && String.Equals(left.ObjectGroupId ?? "", right.ObjectGroupId ?? "", StringComparison.Ordinal)
+                && String.Equals(left.ObjectGroupKind ?? "", right.ObjectGroupKind ?? "", StringComparison.Ordinal)
+                && left.X1.Equals(right.X1)
+                && left.Y1.Equals(right.Y1)
+                && left.X2.Equals(right.X2)
+                && left.Y2.Equals(right.Y2)
+                && left.CX.Equals(right.CX)
+                && left.CY.Equals(right.CY)
+                && left.Radius.Equals(right.Radius)
+                && left.StartAngle.Equals(right.StartAngle)
+                && left.EndAngle.Equals(right.EndAngle)
+                && left.Height.Equals(right.Height)
+                && left.TextScale.Equals(right.TextScale)
+                && left.Rotation.Equals(right.Rotation)
+                && left.ColorIndex == right.ColorIndex
+                && left.HasBounds == right.HasBounds
+                && left.BoundsMinX.Equals(right.BoundsMinX)
+                && left.BoundsMinY.Equals(right.BoundsMinY)
+                && left.BoundsMaxX.Equals(right.BoundsMaxX)
+                && left.BoundsMaxY.Equals(right.BoundsMaxY);
         }
 
         private void SetModeButtonStyle(Button button, bool active)
@@ -1243,10 +1324,26 @@ namespace OVIA.Desktop
         {
             editor.CommitInlineTextEdit();
 
+            // SOURCE_CELL 편집 결과는 CAD 물리 ShapeCell 가이드 안에 완전히 들어와야 합니다.
+            // TEXT도 기준점이 아니라 실제 표시 bounds까지 검사하여 셀 밖 저장을 차단합니다.
+            if (editor != null && !editor.ValidateSourceCellContent(true))
+            {
+                return;
+            }
+
             if (editor.Document.CountGeometryElements() <= 0)
             {
-                MessageBox.Show("철근 형상선이 없습니다. 선 추가 도구로 형상을 그린 후 적용해주세요.", "철근 형상 확인", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                DialogResult emptyShapeResult = MessageBox.Show(
+                    "철근형상이 없는 상태로 저장하시겠습니까?",
+                    "철근 형상 확인",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question
+                );
+
+                if (emptyShapeResult != DialogResult.Yes)
+                {
+                    return;
+                }
             }
 
             try
@@ -1284,13 +1381,13 @@ namespace OVIA.Desktop
                     // 충분히 크게 보이도록 현재 콘텐츠 기준의 로컬 셀로 정규화합니다.
                     // ERP 전송 시에는 raw companion의 최초 CAD 셀을 기준으로
                     // 별도의 ERP용 좌표를 생성하므로 로컬 표시와 ERP 표시를 분리합니다.
-                    NormalizeEditedDocumentForBarListDisplay(resultDocument);
+                    NormalizeEditedDocumentForBarListDisplay(resultDocument, true, rawDocument.Width, rawDocument.Height);
                 }
                 else
                 {
                     resultDocument.OriginalSourcePath = "";
                     resultDocument.Source = "OVIA_MANUAL";
-                    NormalizeEditedDocumentForBarListDisplay(resultDocument);
+                    NormalizeEditedDocumentForBarListDisplay(resultDocument, false, 0D, 0D);
                 }
 
                 // NormalizeEditedDocumentForBarListDisplay()에서 정한
@@ -1314,7 +1411,7 @@ namespace OVIA.Desktop
         }
 
 
-        private void NormalizeEditedDocumentForBarListDisplay(CadShapeEditDocument document)
+        private void NormalizeEditedDocumentForBarListDisplay(CadShapeEditDocument document, bool preserveExistingCadCell, double originalCellWidth, double originalCellHeight)
         {
             if (document == null || document.Elements == null || document.Elements.Count == 0)
             {
@@ -1343,8 +1440,56 @@ namespace OVIA.Desktop
             double contentHeight = Math.Max(maxY - minY, 1D);
             double padX = Math.Max(contentWidth * 0.07D, 2D);
             double padY = Math.Max(contentHeight * 0.10D, 2D);
+
+            // CAD SOURCE_CELL은 최초 CAD 물리 셀 자체가 좌표 계약입니다.
+            // 2026-09-11부터는 편집 결과를 수용하기 위해 좌표를 이동하거나 cell을 확장하지 않습니다.
+            // 편집기에서 원본 cell 경계를 넘는 작업을 차단하고, 저장 시에도 최초 cell.width/height를
+            // 그대로 복원하여 CAD → OVIA → ERP/태그의 비율과 여백이 누적 변형되지 않게 합니다.
+            if (preserveExistingCadCell && document.Width > 0D && document.Height > 0D)
+            {
+                double stableCellWidth = originalCellWidth > 0D ? originalCellWidth : document.Width;
+                double stableCellHeight = originalCellHeight > 0D ? originalCellHeight : document.Height;
+
+                document.Width = Math.Max(stableCellWidth, 1D);
+                document.Height = Math.Max(stableCellHeight, 1D);
+                document.LayoutPolicy = "SOURCE_CELL";
+                return;
+            }
+
+            // OVIA에서 직접 만든 수동 형상도 작성할 때 사용한 셀 자체가 편집 좌표 계약입니다.
+            // 신규 수동 형상은 CreateEmpty()의 160x60(2:0.75) 표준 셀을 사용하고,
+            // 과거 수동 형상은 파일에 저장되어 있던 기존 width/height를 그대로 유지합니다.
+            // content bounds에 맞춰 매 저장마다 셀을 축소/이동하면 다음 수정 때 가이드가 달라지므로 금지합니다.
+            string source = document.Source == null ? "" : document.Source.Trim();
+            bool manualDocument = source.Equals("OVIA_MANUAL", StringComparison.OrdinalIgnoreCase)
+                || source.Equals("MANUAL", StringComparison.OrdinalIgnoreCase);
+
+            if (manualDocument && document.Width > 0D && document.Height > 0D)
+            {
+                document.Width = Math.Max(document.Width, 1D);
+                document.Height = Math.Max(document.Height, 1D);
+                document.LayoutPolicy = "SOURCE_CELL";
+                return;
+            }
+
             double offsetX = padX - minX;
             double offsetY = padY - minY;
+
+            TranslateDocumentElements(document, offsetX, offsetY);
+
+            document.Width = contentWidth + padX * 2D;
+            document.Height = contentHeight + padY * 2D;
+
+            // Save()에서 다시 content bounds로 줄이지 않도록 현재 compact cell을 보존합니다.
+            document.LayoutPolicy = "SOURCE_CELL";
+        }
+
+        private static void TranslateDocumentElements(CadShapeEditDocument document, double offsetX, double offsetY)
+        {
+            if (document == null || document.Elements == null)
+            {
+                return;
+            }
 
             for (int i = 0; i < document.Elements.Count; i++)
             {
@@ -1380,11 +1525,6 @@ namespace OVIA.Desktop
                 }
             }
 
-            document.Width = contentWidth + padX * 2D;
-            document.Height = contentHeight + padY * 2D;
-
-            // Save()에서 다시 content bounds로 줄이지 않도록 현재 compact cell을 보존합니다.
-            document.LayoutPolicy = "SOURCE_CELL";
         }
 
 

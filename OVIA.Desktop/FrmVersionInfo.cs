@@ -43,10 +43,20 @@ namespace OVIA.Desktop
         {
             this.companyId = companyId == null ? string.Empty : companyId;
             this.userId = userId == null ? string.Empty : userId;
-            this.canEdit = OviaSystemSettingsStore.IsSystemAdministrator(this.companyId, this.userId);
+            this.canEdit = IsDevelopmentVersionEditorEnabled()
+                && OviaSystemSettingsStore.IsSystemAdministrator(this.companyId, this.userId);
 
             BuildUI();
             LoadRowsToGrid();
+        }
+
+        private static bool IsDevelopmentVersionEditorEnabled()
+        {
+#if DEBUG
+            return OviaVersionInfoStore.IsDevelopmentSourceAvailable();
+#else
+            return false;
+#endif
         }
 
         private void BuildUI()
@@ -397,6 +407,9 @@ namespace OVIA.Desktop
             try
             {
                 List<OviaVersionInfoEntry> entries = OviaVersionInfoStore.Load(OviaSystemSettingsStore.Load().VersionText);
+                // 소스에 이미 누적된 최신 버전이 Installer/EXE 메타데이터보다 앞서 있는 경우에도
+                // 버전정보 화면을 여는 순간 개발 배포 메타데이터를 최신값으로 다시 맞춥니다.
+                OviaVersionInfoStore.EnsureDevelopmentReleaseMetadataCurrent(entries);
                 grid.Rows.Clear();
                 int i;
                 for (i = 0; i < entries.Count; i++)
@@ -1006,7 +1019,7 @@ namespace OVIA.Desktop
                 return;
             }
 
-            lblVersionPath.Text = "저장경로 : " + OviaVersionInfoStore.GetDisplayInstallVersionInfoFilePath();
+            lblVersionPath.Text = "저장경로 : " + OviaVersionInfoStore.GetDevelopmentDisplayVersionInfoFilePath();
         }
 
         private void UpdateSaveButtonVisibility()

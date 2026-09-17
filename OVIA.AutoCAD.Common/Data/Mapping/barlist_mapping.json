@@ -1,6 +1,6 @@
 ﻿{
-  "version": "ovia-barlist-mapping-2026.07.14.017",
-  "updatedAt": "2026-07-14",
+  "version": "ovia-barlist-mapping-2026.09.10.001",
+  "updatedAt": "2026-09-10",
   "standardColumns": [
     {
       "key": "no",
@@ -27,6 +27,8 @@
       "priority": 100,
       "aliases": [
         "부위",
+        "부재명",
+        "부재",
         "위치",
         "층",
         "구간",
@@ -124,13 +126,22 @@
     },
     {
       "key": "weight_ton",
-      "displayName": "중량(Ton)",
-      "dataType": "number_ton",
+      "displayName": "중량(kg)",
+      "dataType": "number_kg",
       "priority": 90,
       "aliases": [
-        "중량(Ton)",
+        "중량(kg)",
+        "중량(KG)",
+        "총중량(kg)",
+        "총중량(KG)",
         "중량",
         "총중량",
+        "KG",
+        "kg",
+        "중량KG",
+        "총중량KG",
+        "중량(Ton)",
+        "총중량(Ton)",
         "톤",
         "TON",
         "Ton",
@@ -141,11 +152,7 @@
         "중량TON",
         "중량(TON)",
         "총중량TON",
-        "총중량(TON)",
-        "KG",
-        "kg",
-        "중량KG",
-        "중량(KG)"
+        "총중량(TON)"
       ]
     },
     {

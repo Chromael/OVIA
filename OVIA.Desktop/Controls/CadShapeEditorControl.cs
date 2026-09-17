@@ -87,6 +87,18 @@ namespace OVIA.Desktop
         private int inlineTextElementIndex;
         private bool inlineEditClosing;
         private static Cursor rotationCursor;
+        private string overlayNoticeText;
+        private bool sourceCellBoundaryViolationDuringDrag;
+
+        public string OverlayNoticeText
+        {
+            get { return overlayNoticeText ?? String.Empty; }
+            set
+            {
+                overlayNoticeText = value ?? String.Empty;
+                Invalidate();
+            }
+        }
 
         public event EventHandler SelectionChanged;
         public event EventHandler DocumentChanged;
@@ -248,6 +260,17 @@ namespace OVIA.Desktop
             CancelInlineTextEdit();
             document = source == null ? CadShapeEditDocument.CreateEmpty() : source.Clone();
             originalDocument = original == null ? document.Clone() : original.Clone();
+
+            // AutoCAD 원본 JSON의 TEXT rotation은 CAD 좌표계(Y-up, 반시계+) 기준입니다.
+            // BarList 렌더러는 CAD 원본에 한해 부호를 반전해 화면 좌표계(Y-down)에 맞추지만,
+            // 편집기는 과거에 이 변환 없이 rotation을 그대로 사용하여 ±90도 세로 치수가
+            // 180도 반대 방향으로 보이는 문제가 있었습니다.
+            // 편집기 내부는 OVIA_EDIT와 같은 화면 회전 규약을 사용하므로 CAD/CAD_RAW 문서를
+            // 로드할 때 TEXT rotation만 1회 변환합니다. 저장 후 Source=OVIA_EDIT가 되면 이 값이
+            // 그대로 사용되어 BarList/편집기/ERP의 문자 방향이 일치합니다.
+            ConvertCadTextRotationsToEditorConvention(document);
+            ConvertCadTextRotationsToEditorConvention(originalDocument);
+
             document.EnsureTextIds();
             originalDocument.EnsureTextIds();
             RebuildCadCurveObjectGroups();
@@ -271,6 +294,31 @@ namespace OVIA.Desktop
             Invalidate();
             OnSelectionChanged();
             OnDocumentChanged();
+        }
+
+        public bool ValidateSourceCellContent(bool showWarning)
+        {
+            if (!IsSourceCellDocument() || document.Elements == null)
+            {
+                return true;
+            }
+
+            int i;
+            for (i = 0; i < document.Elements.Count; i++)
+            {
+                CadShapeEditElement element = document.Elements[i];
+                if (element != null && !IsElementInsideSourceCell(element))
+                {
+                    if (showWarning)
+                    {
+                        ShowSourceCellBoundaryWarning();
+                    }
+
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         public void FitToScreen()
@@ -403,6 +451,19 @@ namespace OVIA.Desktop
             ClearSelection(false);
             document.EnsureTextIds();
             RebuildCadCurveObjectGroups();
+
+            // 마지막 철근 Geometry가 삭제되면 즉시 표준 빈 형상 가이드(160x60)로 화면을 다시 맞춥니다.
+            // 원본 CAD 셀 크기는 originalDocument에 그대로 보존되므로 Undo/초기 형상 복원에는 영향이 없습니다.
+            if (document.CountGeometryElements() <= 0)
+            {
+                document.Width = CadShapeEditDocument.ManualGuideCellWidth;
+                document.Height = CadShapeEditDocument.ManualGuideCellHeight;
+                document.LayoutPolicy = "SOURCE_CELL";
+                zoom = DefaultFitZoom;
+                panOffset = PointF.Empty;
+                ResetViewBoundsFromDocument();
+            }
+
             Invalidate();
             OnSelectionChanged();
             OnDocumentChanged();
@@ -443,8 +504,8 @@ namespace OVIA.Desktop
                 return false;
             }
 
-            PushUndo();
             Dictionary<string, string> remappedGroups = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            List<CadShapeEditElement> pendingCopies = new List<CadShapeEditElement>();
             List<int> newIndexes = new List<int>();
             double offsetWorld = 18D / Math.Max(GetTransform().Scale, 0.0001D) * Math.Min(pasteSequence + 1, 6);
             int i;
@@ -471,13 +532,24 @@ namespace OVIA.Desktop
                 }
 
                 TranslateElement(copy, offsetWorld, offsetWorld);
-                document.Elements.Add(copy);
-                newIndexes.Add(document.Elements.Count - 1);
+                pendingCopies.Add(copy);
             }
 
-            if (newIndexes.Count == 0)
+            if (pendingCopies.Count == 0)
             {
                 return false;
+            }
+
+            if (!EnsureElementsInsideSourceCellOrWarn(pendingCopies))
+            {
+                return false;
+            }
+
+            PushUndo();
+            for (i = 0; i < pendingCopies.Count; i++)
+            {
+                document.Elements.Add(pendingCopies[i]);
+                newIndexes.Add(document.Elements.Count - 1);
             }
 
             pasteSequence++;
@@ -795,6 +867,7 @@ namespace OVIA.Desktop
             g.PixelOffsetMode = PixelOffsetMode.HighQuality;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             DrawBackgroundGrid(g);
+            DrawSourceCellGuide(g);
             DrawElements(g);
             DrawPendingLine(g);
             DrawPendingRectangle(g);
@@ -957,6 +1030,7 @@ namespace OVIA.Desktop
             }
 
             isDragging = true;
+            sourceCellBoundaryViolationDuringDrag = false;
             dragKind = hitPart;
             dragStartWorld = world;
             CaptureDragStartElements(
@@ -1032,6 +1106,13 @@ namespace OVIA.Desktop
                 double dx = world.X - dragStartWorld.X;
                 double dy = world.Y - dragStartWorld.Y;
                 ApplyDrag(dx, dy, world);
+
+                if (!AreDraggedElementsInsideSourceCell())
+                {
+                    RestoreDraggedElementsToStart();
+                    sourceCellBoundaryViolationDuringDrag = true;
+                }
+
                 Invalidate();
                 OnDocumentChanged();
                 return;
@@ -1080,6 +1161,13 @@ namespace OVIA.Desktop
 
                 isMarqueeSelecting = false;
                 isDragging = false;
+
+                if (sourceCellBoundaryViolationDuringDrag)
+                {
+                    sourceCellBoundaryViolationDuringDrag = false;
+                    ShowSourceCellBoundaryWarning();
+                }
+
                 dragStartElements.Clear();
                 dragKind = 0;
             }
@@ -1194,6 +1282,11 @@ namespace OVIA.Desktop
 
         private void HandleAddLineClick(PointF world)
         {
+            if (!EnsurePointInsideSourceCellOrWarn(world))
+            {
+                return;
+            }
+
             if (!hasPendingLineStart)
             {
                 pendingLineStart = SnapToExistingLineEndpoint(world, -1, null);
@@ -1210,13 +1303,19 @@ namespace OVIA.Desktop
                 return;
             }
 
-            PushUndo();
             CadShapeEditElement line = new CadShapeEditElement();
             line.Type = "LINE";
             line.X1 = pendingLineStart.X;
             line.Y1 = pendingLineStart.Y;
             line.X2 = end.X;
             line.Y2 = end.Y;
+
+            if (!EnsureElementInsideSourceCellOrWarn(line))
+            {
+                return;
+            }
+
+            PushUndo();
             document.Elements.Add(line);
             RebuildCadCurveObjectGroups();
             SetSelectedIndex(document.Elements.Count - 1);
@@ -1227,6 +1326,11 @@ namespace OVIA.Desktop
 
         private void HandleAddRectangleClick(PointF world)
         {
+            if (!EnsurePointInsideSourceCellOrWarn(world))
+            {
+                return;
+            }
+
             if (!hasPendingRectangleStart)
             {
                 pendingRectangleStart = world;
@@ -1241,7 +1345,6 @@ namespace OVIA.Desktop
                 return;
             }
 
-            PushUndo();
             string groupId = CreateManualObjectGroupId("RECTANGLE");
             int firstIndex = document.Elements.Count;
             PointF topLeft = new PointF(
@@ -1255,10 +1358,19 @@ namespace OVIA.Desktop
             PointF topRight = new PointF(bottomRight.X, topLeft.Y);
             PointF bottomLeft = new PointF(topLeft.X, bottomRight.Y);
 
-            document.Elements.Add(CreateManualGroupLine(topLeft, topRight, groupId, "RECTANGLE"));
-            document.Elements.Add(CreateManualGroupLine(topRight, bottomRight, groupId, "RECTANGLE"));
-            document.Elements.Add(CreateManualGroupLine(bottomRight, bottomLeft, groupId, "RECTANGLE"));
-            document.Elements.Add(CreateManualGroupLine(bottomLeft, topLeft, groupId, "RECTANGLE"));
+            List<CadShapeEditElement> rectangleElements = new List<CadShapeEditElement>();
+            rectangleElements.Add(CreateManualGroupLine(topLeft, topRight, groupId, "RECTANGLE"));
+            rectangleElements.Add(CreateManualGroupLine(topRight, bottomRight, groupId, "RECTANGLE"));
+            rectangleElements.Add(CreateManualGroupLine(bottomRight, bottomLeft, groupId, "RECTANGLE"));
+            rectangleElements.Add(CreateManualGroupLine(bottomLeft, topLeft, groupId, "RECTANGLE"));
+
+            if (!EnsureElementsInsideSourceCellOrWarn(rectangleElements))
+            {
+                return;
+            }
+
+            PushUndo();
+            document.Elements.AddRange(rectangleElements);
 
             RebuildCadCurveObjectGroups();
             List<int> members;
@@ -1279,6 +1391,11 @@ namespace OVIA.Desktop
 
         private void HandleAddCircleClick(PointF world)
         {
+            if (!EnsurePointInsideSourceCellOrWarn(world))
+            {
+                return;
+            }
+
             if (!hasPendingCircleCenter)
             {
                 pendingCircleCenter = world;
@@ -1294,10 +1411,10 @@ namespace OVIA.Desktop
                 return;
             }
 
-            PushUndo();
             string groupId = CreateManualObjectGroupId("ELLIPSE");
             int firstIndex = document.Elements.Count;
             const int segmentCount = 96;
+            List<CadShapeEditElement> ellipseElements = new List<CadShapeEditElement>();
             int i;
 
             for (i = 0; i < segmentCount; i++)
@@ -1312,9 +1429,16 @@ namespace OVIA.Desktop
                     (float)(pendingCircleCenter.X + Math.Cos(secondAngle) * radius),
                     (float)(pendingCircleCenter.Y + Math.Sin(secondAngle) * radius)
                 );
-                document.Elements.Add(CreateManualGroupLine(first, second, groupId, "ELLIPSE"));
+                ellipseElements.Add(CreateManualGroupLine(first, second, groupId, "ELLIPSE"));
             }
 
+            if (!EnsureElementsInsideSourceCellOrWarn(ellipseElements))
+            {
+                return;
+            }
+
+            PushUndo();
+            document.Elements.AddRange(ellipseElements);
             RebuildCadCurveObjectGroups();
             List<int> members;
             if (TryGetCadCurveObjectMembers(firstIndex, out members))
@@ -1334,6 +1458,11 @@ namespace OVIA.Desktop
 
         private void HandleAddScrewClick(PointF world)
         {
+            if (!EnsurePointInsideSourceCellOrWarn(world))
+            {
+                return;
+            }
+
             if (!hasPendingScrewStart)
             {
                 pendingScrewStart = world;
@@ -1348,16 +1477,23 @@ namespace OVIA.Desktop
                 return;
             }
 
-            PushUndo();
             string groupId = CreateManualObjectGroupId("SCREW");
             int firstIndex = document.Elements.Count;
+            List<CadShapeEditElement> screwElements = new List<CadShapeEditElement>();
             int i;
 
             for (i = 1; i < points.Count; i++)
             {
-                document.Elements.Add(CreateManualGroupLine(points[i - 1], points[i], groupId, "SCREW"));
+                screwElements.Add(CreateManualGroupLine(points[i - 1], points[i], groupId, "SCREW"));
             }
 
+            if (!EnsureElementsInsideSourceCellOrWarn(screwElements))
+            {
+                return;
+            }
+
+            PushUndo();
+            document.Elements.AddRange(screwElements);
             RebuildCadCurveObjectGroups();
             List<int> members;
             if (TryGetCadCurveObjectMembers(firstIndex, out members))
@@ -1434,6 +1570,11 @@ namespace OVIA.Desktop
 
         private void HandleAddAngleClick(PointF world)
         {
+            if (!EnsurePointInsideSourceCellOrWarn(world))
+            {
+                return;
+            }
+
             PointF snapped = SnapToExistingLineEndpoint(world, -1, null);
 
             if (!hasPendingAngleCenter)
@@ -1476,7 +1617,6 @@ namespace OVIA.Desktop
                 return;
             }
 
-            PushUndo();
             CadShapeEditElement angle = new CadShapeEditElement();
             angle.Type = "ARC";
             angle.CX = pendingAngleCenter.X;
@@ -1484,6 +1624,13 @@ namespace OVIA.Desktop
             angle.Radius = radius;
             angle.StartAngle = startAngle;
             angle.EndAngle = startAngle + sweep;
+
+            if (!EnsureElementInsideSourceCellOrWarn(angle))
+            {
+                return;
+            }
+
+            PushUndo();
             document.Elements.Add(angle);
             RebuildCadCurveObjectGroups();
             SetSelectedIndex(document.Elements.Count - 1);
@@ -1566,7 +1713,11 @@ namespace OVIA.Desktop
 
         private void AddTextAt(PointF world)
         {
-            PushUndo();
+            if (!EnsurePointInsideSourceCellOrWarn(world))
+            {
+                return;
+            }
+
             CadShapeEditElement text = new CadShapeEditElement();
             text.Type = "TEXT";
             text.Text = "값";
@@ -1577,6 +1728,13 @@ namespace OVIA.Desktop
             text.Height = CadShapeVisualPolicy.EditorCanonicalTextHeight;
             text.TextScale = 1D;
             text.Rotation = 0D;
+
+            if (!EnsureElementInsideSourceCellOrWarn(text))
+            {
+                return;
+            }
+
+            PushUndo();
             document.Elements.Add(text);
             document.EnsureTextIds();
             RebuildCadCurveObjectGroups();
@@ -3505,6 +3663,355 @@ namespace OVIA.Desktop
             }
         }
 
+        private bool IsSourceCellDocument()
+        {
+            if (document == null || document.Width <= 0D || document.Height <= 0D)
+            {
+                return false;
+            }
+
+            string layoutPolicy = document.LayoutPolicy == null ? "" : document.LayoutPolicy.Trim();
+            string source = document.Source == null ? "" : document.Source.Trim();
+
+            // CAD SOURCE_CELL뿐 아니라 OVIA에서 직접 작성한 수동 형상도
+            // 저장된 cell.width/height를 편집 가이드 계약으로 사용합니다.
+            // 과거 OVIA_MANUAL이 CONTENT_BOUNDS로 저장된 경우에도 기존 셀 크기를 그대로
+            // 가이드로 재현하여 '신규 입력 때 보이던 가이드가 수정 때 사라지는' 문제를 막습니다.
+            return layoutPolicy.Equals("SOURCE_CELL", StringComparison.OrdinalIgnoreCase)
+                || source.Equals("OVIA_MANUAL", StringComparison.OrdinalIgnoreCase)
+                || source.Equals("MANUAL", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void ConvertCadTextRotationsToEditorConvention(CadShapeEditDocument target)
+        {
+            if (target == null || target.Elements == null)
+            {
+                return;
+            }
+
+            string source = target.Source == null ? "" : target.Source.Trim();
+
+            // OVIA_EDIT/OVIA_MANUAL은 이미 편집기 화면 회전 규약이므로 다시 변환하면 안 됩니다.
+            bool cadSource = source.StartsWith("CAD", StringComparison.OrdinalIgnoreCase)
+                && !source.Equals("OVIA_EDIT", StringComparison.OrdinalIgnoreCase);
+
+            if (!cadSource)
+            {
+                return;
+            }
+
+            for (int i = 0; i < target.Elements.Count; i++)
+            {
+                CadShapeEditElement element = target.Elements[i];
+                if (element == null || !String.Equals(element.Type, "TEXT", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                element.Rotation = NormalizeSignedDegreesStatic(-element.Rotation);
+            }
+        }
+
+        private static double NormalizeSignedDegreesStatic(double value)
+        {
+            while (value > 180D) value -= 360D;
+            while (value < -180D) value += 360D;
+            return value;
+        }
+
+        private static bool IsManualDocument(CadShapeEditDocument target)
+        {
+            if (target == null)
+            {
+                return false;
+            }
+
+            string source = target.Source == null ? "" : target.Source.Trim();
+            return source.Equals("OVIA_MANUAL", StringComparison.OrdinalIgnoreCase)
+                || source.Equals("MANUAL", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private double GetSourceCellWidth()
+        {
+            // 철근 Geometry를 전부 삭제한 빈 형상은 더 이상 과거 CAD 셀 크기를 가이드로 사용하지 않습니다.
+            // CAD 원본 셀이 없는 수동 신규 형상과 동일하게 OVIA 표준 빈 형상 가이드(160x60)를 사용합니다.
+            if (document != null && document.CountGeometryElements() <= 0)
+            {
+                return CadShapeEditDocument.ManualGuideCellWidth;
+            }
+
+            if (originalDocument != null
+                && originalDocument.Width > 0D
+                && ((originalDocument.LayoutPolicy != null
+                    && originalDocument.LayoutPolicy.Trim().Equals("SOURCE_CELL", StringComparison.OrdinalIgnoreCase))
+                    || IsManualDocument(originalDocument)))
+            {
+                return originalDocument.Width;
+            }
+
+            return document == null ? 0D : Math.Max(document.Width, 0D);
+        }
+
+        private double GetSourceCellHeight()
+        {
+            // 빈 형상은 OVIA 표준 가이드 비율 160:60(2:0.75)을 사용합니다.
+            if (document != null && document.CountGeometryElements() <= 0)
+            {
+                return CadShapeEditDocument.ManualGuideCellHeight;
+            }
+
+            if (originalDocument != null
+                && originalDocument.Height > 0D
+                && ((originalDocument.LayoutPolicy != null
+                    && originalDocument.LayoutPolicy.Trim().Equals("SOURCE_CELL", StringComparison.OrdinalIgnoreCase))
+                    || IsManualDocument(originalDocument)))
+            {
+                return originalDocument.Height;
+            }
+
+            return document == null ? 0D : Math.Max(document.Height, 0D);
+        }
+
+        private void DrawSourceCellGuide(Graphics g)
+        {
+            if (!IsSourceCellDocument())
+            {
+                return;
+            }
+
+            PointF topLeft = WorldToScreen(new PointF(0F, 0F));
+            PointF bottomRight = WorldToScreen(new PointF((float)GetSourceCellWidth(), (float)GetSourceCellHeight()));
+            float left = Math.Min(topLeft.X, bottomRight.X);
+            float top = Math.Min(topLeft.Y, bottomRight.Y);
+            float width = Math.Abs(bottomRight.X - topLeft.X);
+            float height = Math.Abs(bottomRight.Y - topLeft.Y);
+
+            if (width < 1F || height < 1F)
+            {
+                return;
+            }
+
+            using (Pen guidePen = new Pen(Color.FromArgb(220, 210, 35, 35), 1.6F))
+            {
+                guidePen.DashStyle = DashStyle.Dash;
+                g.DrawRectangle(guidePen, left, top, width, height);
+            }
+        }
+
+        private bool IsWorldPointInsideSourceCell(PointF point)
+        {
+            if (!IsSourceCellDocument())
+            {
+                return true;
+            }
+
+            const double epsilon = 0.0001D;
+            return point.X >= -epsilon
+                && point.Y >= -epsilon
+                && point.X <= GetSourceCellWidth() + epsilon
+                && point.Y <= GetSourceCellHeight() + epsilon;
+        }
+
+        private bool IsElementInsideSourceCell(CadShapeEditElement element)
+        {
+            if (!IsSourceCellDocument() || element == null)
+            {
+                return true;
+            }
+
+            RectangleF bounds = GetElementWorldBoundsForSourceCell(element);
+            const float epsilon = 0.0001F;
+            return bounds.Left >= -epsilon
+                && bounds.Top >= -epsilon
+                && bounds.Right <= (float)GetSourceCellWidth() + epsilon
+                && bounds.Bottom <= (float)GetSourceCellHeight() + epsilon;
+        }
+
+        private RectangleF GetElementWorldBoundsForSourceCell(CadShapeEditElement element)
+        {
+            if (element == null)
+            {
+                return RectangleF.Empty;
+            }
+
+            if (element.Type == "LINE")
+            {
+                return RectangleF.FromLTRB(
+                    (float)Math.Min(element.X1, element.X2),
+                    (float)Math.Min(element.Y1, element.Y2),
+                    (float)Math.Max(element.X1, element.X2),
+                    (float)Math.Max(element.Y1, element.Y2)
+                );
+            }
+
+            if (element.Type == "CIRCLE")
+            {
+                float radius = (float)Math.Abs(element.Radius);
+                return RectangleF.FromLTRB(
+                    (float)element.CX - radius,
+                    (float)element.CY - radius,
+                    (float)element.CX + radius,
+                    (float)element.CY + radius
+                );
+            }
+
+            if (element.Type == "ARC")
+            {
+                List<PointF> points = new List<PointF>();
+                double sweep = element.EndAngle - element.StartAngle;
+                int segments = Math.Max(12, (int)Math.Ceiling(Math.Abs(sweep) / 10D));
+                int i;
+
+                for (i = 0; i <= segments; i++)
+                {
+                    double angle = (element.StartAngle + sweep * i / segments) * Math.PI / 180D;
+                    points.Add(new PointF(
+                        (float)(element.CX + Math.Cos(angle) * Math.Abs(element.Radius)),
+                        (float)(element.CY + Math.Sin(angle) * Math.Abs(element.Radius))
+                    ));
+                }
+
+                return points.Count == 0 ? RectangleF.Empty : BoundsFromPoints(points.ToArray());
+            }
+
+            if (element.Type == "TEXT")
+            {
+                // TEXT는 기준점만 검사하지 않고 실제 편집 화면의 표시 bounds를
+                // 동일 단일 좌표 배율로 world 좌표에 환산해 셀 내부 여부를 판정합니다.
+                RectangleF screenBounds = GetElementScreenBounds(element);
+                EditorTransform transform = GetTransform();
+                float scale = (float)Math.Max(transform.Scale, 0.0001D);
+                PointF center = new PointF((float)element.X1, (float)element.Y1);
+                float halfWidth = screenBounds.Width / scale / 2F;
+                float halfHeight = screenBounds.Height / scale / 2F;
+                return RectangleF.FromLTRB(
+                    center.X - halfWidth,
+                    center.Y - halfHeight,
+                    center.X + halfWidth,
+                    center.Y + halfHeight
+                );
+            }
+
+            return RectangleF.Empty;
+        }
+
+        private bool AreDraggedElementsInsideSourceCell()
+        {
+            if (!IsSourceCellDocument() || dragStartElements.Count == 0)
+            {
+                return true;
+            }
+
+            foreach (int index in dragStartElements.Keys)
+            {
+                if (index < 0 || index >= document.Elements.Count)
+                {
+                    continue;
+                }
+
+                if (!IsElementInsideSourceCell(document.Elements[index]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private void RestoreDraggedElementsToStart()
+        {
+            foreach (KeyValuePair<int, CadShapeEditElement> pair in dragStartElements)
+            {
+                if (pair.Key < 0 || pair.Key >= document.Elements.Count || pair.Value == null)
+                {
+                    continue;
+                }
+
+                document.Elements[pair.Key] = pair.Value.Clone();
+            }
+
+            RebuildCadCurveObjectGroups();
+        }
+
+        private bool EnsurePointInsideSourceCellOrWarn(PointF point)
+        {
+            if (IsWorldPointInsideSourceCell(point))
+            {
+                return true;
+            }
+
+            ShowSourceCellBoundaryWarning();
+            return false;
+        }
+
+        private bool EnsureElementInsideSourceCellOrWarn(CadShapeEditElement element)
+        {
+            if (IsElementInsideSourceCell(element))
+            {
+                return true;
+            }
+
+            ShowSourceCellBoundaryWarning();
+            return false;
+        }
+
+        private bool EnsureElementsInsideSourceCellOrWarn(IEnumerable<CadShapeEditElement> elements)
+        {
+            if (!IsSourceCellDocument() || elements == null)
+            {
+                return true;
+            }
+
+            foreach (CadShapeEditElement element in elements)
+            {
+                if (!IsElementInsideSourceCell(element))
+                {
+                    ShowSourceCellBoundaryWarning();
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private void ShowSourceCellBoundaryWarning()
+        {
+            MessageBox.Show(
+                this,
+                "철근형상 셀 영역을 벗어날 수 없습니다.",
+                "OVIA",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning
+            );
+        }
+
+        private float GetCadElementStrokeWidthPx(CadShapeEditElement element, float baseWidthPx)
+        {
+            if (element == null)
+            {
+                return baseWidthPx;
+            }
+
+            /*
+             * OVIA 2026-09-11 - 편집기 선두께 화면정규화 v2
+             * ------------------------------------------------------------
+             * 철근 본선과 사용자가 '선 추가/사각형 추가/원 추가'로 만드는 기본 도형은
+             * 반드시 같은 기본 굵기를 사용해야 연결·보정 편집이 자연스럽습니다.
+             *
+             * - 철근 본선 / 수동 추가 도형 : 기본 1.55px (선택 시 기존 2.3px 강조 유지)
+             * - Dimension/Leader 각도선·화살표·보조선 : 0.80px
+             *
+             * CAD 물리 LineWeight/Polyline Width를 직접 px로 확대하지 않습니다.
+             */
+            if (String.Equals(element.VisualRole, "ANNOTATION", StringComparison.OrdinalIgnoreCase))
+            {
+                return 0.80F;
+            }
+
+            // REBAR 또는 역할 없는 일반/수동 요소는 현재 baseWidth를 그대로 사용.
+            return baseWidthPx;
+        }
+
         private void DrawElements(Graphics g)
         {
             int i;
@@ -3521,7 +4028,13 @@ namespace OVIA.Desktop
                 }
 
                 Color lineColor = selected ? Color.FromArgb(19, 104, 206) : Color.FromArgb(12, 17, 28);
-                float width = selected ? 2.3F : 1.55F;
+                float baseWidth = selected ? 2.3F : 1.55F;
+                float width = baseWidth;
+
+                if (element.Type == "LINE" || element.Type == "ARC" || element.Type == "CIRCLE")
+                {
+                    width = GetCadElementStrokeWidthPx(element, baseWidth);
+                }
 
                 using (Pen pen = new Pen(lineColor, width))
                 using (SolidBrush brush = new SolidBrush(lineColor))
@@ -4068,6 +4581,16 @@ namespace OVIA.Desktop
 
         private void DrawOverlay(Graphics g)
         {
+            if (!String.IsNullOrWhiteSpace(OverlayNoticeText))
+            {
+                using (Font noticeFont = OviaFluentTheme.FontKorean(9F, FontStyle.Regular))
+                using (SolidBrush noticeBrush = new SolidBrush(Color.FromArgb(55, 65, 81)))
+                {
+                    g.DrawString(OverlayNoticeText, noticeFont, noticeBrush, 12F, 10F);
+                }
+                return;
+            }
+
             string modeText;
             string guide;
 
@@ -4594,6 +5117,23 @@ namespace OVIA.Desktop
                 minY = 0D;
                 maxX = 160D;
                 maxY = 80D;
+            }
+            else if (IsSourceCellDocument())
+            {
+                // SOURCE_CELL은 콘텐츠 bounds가 아니라 CAD 물리 ShapeCell 전체가 기준 좌표계입니다.
+                // 편집기에서도 0,0 ~ cell.width,cell.height를 그대로 viewport로 사용하여
+                // CAD 셀의 가로/세로 비율과 원래 여백을 보존합니다.
+                minX = 0D;
+                minY = 0D;
+                maxX = Math.Max(GetSourceCellWidth(), 1D);
+                maxY = Math.Max(GetSourceCellHeight(), 1D);
+
+                viewMinX = minX;
+                viewMinY = minY;
+                viewMaxX = maxX;
+                viewMaxY = maxY;
+                hasViewBounds = true;
+                return;
             }
             else
             {

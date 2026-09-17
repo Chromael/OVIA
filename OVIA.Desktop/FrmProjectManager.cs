@@ -20,6 +20,7 @@ namespace OVIA.Desktop
         private Panel sessionInfoPanel;
         private Label lblSessionInfo;
         private Label lblAutoCadInfo;
+        private Label lblOviaVersion;
         private AutoCadRuntimeInfo currentAutoCadRuntimeInfo;
         private OviaWorkspaceHeader workspaceHeader;
         private Panel pagerPanel;
@@ -874,6 +875,18 @@ namespace OVIA.Desktop
             lblAutoCadInfo.Cursor = Cursors.Hand;
             lblAutoCadInfo.Visible = false;
 
+            lblOviaVersion = new Label();
+            lblOviaVersion.Location = new Point(sessionInfoPanel.Width, 0);
+            lblOviaVersion.Size = new Size(0, 24);
+            lblOviaVersion.BackColor = Color.Transparent;
+            lblOviaVersion.ForeColor = OviaFluentTheme.TextSecondary;
+            lblOviaVersion.Font = OviaFluentTheme.FontKorean(8.8F, FontStyle.Regular);
+            lblOviaVersion.TextAlign = ContentAlignment.MiddleRight;
+            lblOviaVersion.AutoEllipsis = false;
+            lblOviaVersion.Cursor = Cursors.Default;
+            lblOviaVersion.Text = BuildOviaFooterVersionText();
+            lblOviaVersion.Visible = true;
+
             supportInfoContextMenu = OviaGridContextMenuFactory.CreateMenu(
                 OviaGridContextMenuFactory.CreateItem("지원정보 복사", delegate { CopySupportInfoToClipboard(); })
             );
@@ -886,6 +899,7 @@ namespace OVIA.Desktop
 
             sessionInfoPanel.Controls.Add(lblSessionInfo);
             sessionInfoPanel.Controls.Add(lblAutoCadInfo);
+            sessionInfoPanel.Controls.Add(lblOviaVersion);
             parent.Controls.Add(sessionInfoPanel);
             sessionInfoPanel.BringToFront();
 
@@ -927,6 +941,12 @@ namespace OVIA.Desktop
                 lblAutoCadInfo.Text = runtimeInfo == null ? "" : "  |  AutoCAD " + runtimeInfo.DisplayText;
             }
 
+            // 로그인 화면/환경설정 > 버전정보와 동일한 실제 최신 버전정보를 사용한다.
+            if (lblOviaVersion != null && !lblOviaVersion.IsDisposed)
+            {
+                lblOviaVersion.Text = BuildOviaFooterVersionText();
+            }
+
             ApplySessionInfoLayout();
         }
 
@@ -934,7 +954,8 @@ namespace OVIA.Desktop
         {
             if (sessionInfoPanel == null || sessionInfoPanel.IsDisposed
                 || lblSessionInfo == null || lblSessionInfo.IsDisposed
-                || lblAutoCadInfo == null || lblAutoCadInfo.IsDisposed)
+                || lblAutoCadInfo == null || lblAutoCadInfo.IsDisposed
+                || lblOviaVersion == null || lblOviaVersion.IsDisposed)
             {
                 return;
             }
@@ -944,6 +965,14 @@ namespace OVIA.Desktop
             bool showAutoCad = currentAutoCadRuntimeInfo != null && !string.IsNullOrWhiteSpace(lblAutoCadInfo.Text);
             int autoCadWidth = 0;
 
+            Size versionMeasured = TextRenderer.MeasureText(
+                lblOviaVersion.Text,
+                lblOviaVersion.Font,
+                new Size(int.MaxValue, panelHeight),
+                TextFormatFlags.SingleLine | TextFormatFlags.NoPadding
+            );
+            int versionWidth = Math.Min(panelWidth, Math.Max(1, versionMeasured.Width + 4));
+
             if (showAutoCad)
             {
                 Size measured = TextRenderer.MeasureText(
@@ -952,12 +981,41 @@ namespace OVIA.Desktop
                     new Size(int.MaxValue, panelHeight),
                     TextFormatFlags.SingleLine | TextFormatFlags.NoPadding
                 );
-                autoCadWidth = Math.Min(panelWidth, Math.Max(1, measured.Width + 4));
+                autoCadWidth = Math.Min(Math.Max(0, panelWidth - versionWidth), Math.Max(1, measured.Width + 4));
             }
 
+            int versionLeft = Math.Max(0, panelWidth - versionWidth);
+            int autoCadLeft = Math.Max(0, versionLeft - autoCadWidth);
+
+            lblOviaVersion.Visible = true;
+            lblOviaVersion.SetBounds(versionLeft, 0, versionWidth, panelHeight);
+
             lblAutoCadInfo.Visible = showAutoCad;
-            lblAutoCadInfo.SetBounds(panelWidth - autoCadWidth, 0, autoCadWidth, panelHeight);
-            lblSessionInfo.SetBounds(0, 0, Math.Max(0, panelWidth - autoCadWidth), panelHeight);
+            lblAutoCadInfo.SetBounds(autoCadLeft, 0, autoCadWidth, panelHeight);
+            lblSessionInfo.SetBounds(0, 0, Math.Max(0, autoCadLeft), panelHeight);
+        }
+
+        private static string BuildOviaFooterVersionText()
+        {
+            try
+            {
+                // 로그인 화면 및 메인 > 환경설정 > 버전정보와 같은 데이터 원천.
+                string version = OviaSystemSettingsStore.GetConfiguredVersionText();
+                version = OviaVersionInfoStore.NormalizeVersionText(version);
+
+                if (!string.IsNullOrWhiteSpace(version))
+                {
+                    return "  |  V. " + version;
+                }
+            }
+            catch
+            {
+                // 버전정보 파일을 읽지 못한 예외 상황에서는 EXE 메타데이터를 보조값으로 사용한다.
+            }
+
+            string fallback = Application.ProductVersion == null ? "" : Application.ProductVersion.Trim();
+            fallback = OviaVersionInfoStore.NormalizeVersionText(fallback);
+            return "  |  V. " + (string.IsNullOrWhiteSpace(fallback) ? "-" : fallback);
         }
 
         private string BuildSessionInfoText(string sessionCompanyId, string sessionUserId, string sessionUserName, string sessionIpAddress)

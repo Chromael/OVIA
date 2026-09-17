@@ -629,6 +629,7 @@ namespace OVIA.Desktop
         private void BuildProjectInfo(Control parent)
         {
             projectContextHeader = new OviaProjectContextHeader();
+            projectContextHeader.HighlightProjectNumberWithAccent = true;
             projectContextHeader.Location = new Point(34, 156);
             projectContextHeader.Size = new Size(1108, 58);
             projectContextHeader.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -656,7 +657,7 @@ namespace OVIA.Desktop
             cboBarListSort = CreateFilterSelectBox(new Point(328, 18), new Size(132, OviaFluentTheme.CommonInputHeight), new string[] { "최근등록순", "수정일순", "제목순", "발주일순", "납기일순" });
             card.Controls.Add(cboBarListSort);
 
-            cboStatusFilter = CreateFilterSelectBox(new Point(470, 18), new Size(118, OviaFluentTheme.CommonInputHeight), new string[] { "상태전체", "접수", "미전송", "전송" });
+            cboStatusFilter = CreateFilterSelectBox(new Point(470, 18), new Size(118, OviaFluentTheme.CommonInputHeight), new string[] { "상태전체" });
             card.Controls.Add(cboStatusFilter);
 
             cboWriteFilter = CreateFilterSelectBox(new Point(598, 18), new Size(118, OviaFluentTheme.CommonInputHeight), new string[] { "작성전체", "공장", "현장" });
@@ -1333,6 +1334,9 @@ namespace OVIA.Desktop
             suppressFilterEvents = true;
             try
             {
+                // 상태는 OVIA 로컬 고정값(접수/미전송/전송)을 사용하지 않는다.
+                // ERP Pull로 materialize된 실제 barlist_status 값만 필터 후보로 구성한다.
+                RefreshSelectItems(cboStatusFilter, "상태전체", GetDistinctValues(source, "상태"));
                 RefreshSelectItems(cboBuildingFilter, "동 전체", GetDistinctValues(source, "동"));
                 RefreshSelectItems(cboFloorFilter, "층 전체", GetDistinctValues(source, "층"));
                 RefreshSelectItems(cboWorkTypeFilter, "공종 전체", MergeDefaultAndDistinctValues(new string[] { "작성", "공장", "현장" }, GetDistinctValues(source, "공종")));
@@ -1377,7 +1381,8 @@ namespace OVIA.Desktop
                 ProjectBarListSummary row = source[i];
                 string value = "";
 
-                if (fieldName == "동") value = row.Building;
+                if (fieldName == "상태") value = row.Status;
+                else if (fieldName == "동") value = row.Building;
                 else if (fieldName == "층") value = row.Floor;
                 else if (fieldName == "공종") value = row.WorkType;
                 else if (fieldName == "작성") value = row.WriteStatus;
@@ -1897,7 +1902,7 @@ namespace OVIA.Desktop
                 return a.TotalLength.CompareTo(b.TotalLength);
             }
 
-            if (columnName == "중량(Ton)")
+            if (columnName == "중량(kg)" || columnName == "중량(Ton)")
             {
                 return a.TotalWeight.CompareTo(b.TotalWeight);
             }
@@ -2193,18 +2198,10 @@ namespace OVIA.Desktop
 
         private string NormalizeBarListStatus(string value)
         {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return "접수";
-            }
-
-            value = value.Trim();
-            if (ContainsText(value, "전송") && !ContainsText(value, "미전송")) return "전송";
-            if (ContainsText(value, "미전송")) return "미전송";
-            if (ContainsText(value, "접수")) return "접수";
-            if (ContainsText(value, "완료")) return "전송";
-            if (ContainsText(value, "저장")) return "접수";
-            return value;
+            // 상태(barlist_status)는 ERP가 단일 원장이다.
+            // OVIA에서 "발주완료"를 "전송"으로 변환하거나 빈 값을 "접수"로 보정하지 않는다.
+            // ERP API가 반환한 상태 문자열을 그대로 표시/필터에 사용한다.
+            return string.IsNullOrWhiteSpace(value) ? "" : value.Trim();
         }
 
         private string NormalizeWriteLocation(string value)
@@ -3807,9 +3804,17 @@ namespace OVIA.Desktop
                 return;
             }
 
-            btnCadTitleText.Enabled = !waiting;
-            btnCadTitleText.Cursor = waiting ? Cursors.WaitCursor : Cursors.Hand;
-            btnCadTitleText.Text = waiting ? "…" : "T";
+            // 제목 추출 대기 중에는 원래의 CAD 텍스트 아이콘을 유지한 채
+            // OVIA 주력색 배경 + 흰색 아이콘으로 활성 상태를 명확히 표시합니다.
+            // Enabled=false로 만들면 공통 OviaButton이 비활성 회색 팔레트를 그리므로
+            // 버튼은 활성 상태를 유지하고 Click 핸들러의 cadTitleRequestPending 가드로 중복 실행을 막습니다.
+            btnCadTitleText.Enabled = true;
+            btnCadTitleText.Cursor = waiting ? Cursors.Default : Cursors.Hand;
+            btnCadTitleText.Text = "\uF87C";
+            btnCadTitleText.Role = waiting
+                ? OVIA.Desktop.OviaButtonRole.Primary
+                : OVIA.Desktop.OviaButtonRole.Neutral;
+            btnCadTitleText.Invalidate();
 
             if (cadTitleToolTip != null)
             {
@@ -4129,51 +4134,83 @@ namespace OVIA.Desktop
                 return false;
             }
 
-            object autoCadApplication = null;
-            object activeDocument = null;
+            // AutoCAD가 직전 명령/선택을 정리하는 짧은 순간에는 COM이
+            // RPC_E_CALL_REJECTED(0x80010001) 또는 RPC_E_SERVERCALL_RETRYLATER(0x8001010A)를
+            // 반환할 수 있습니다. NETLOAD 여부와 무관한 AutoCAD Busy 상태이므로 짧게 재시도합니다.
+            const int maxAttempts = 10;
+            int attempt;
+            Exception lastException = null;
 
-            try
+            for (attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                autoCadApplication = Marshal.GetActiveObject("AutoCAD.Application");
-                if (autoCadApplication == null)
+                try
                 {
-                    errorMessage = "실행 중인 AutoCAD에 연결하지 못했습니다. AutoCAD와 DWG 도면을 연 뒤 다시 시도해 주세요.";
-                    return false;
+                    object autoCadApplication = Marshal.GetActiveObject("AutoCAD.Application");
+                    if (autoCadApplication == null)
+                    {
+                        errorMessage = "실행 중인 AutoCAD에 연결하지 못했습니다. AutoCAD와 DWG 도면을 연 뒤 다시 시도해 주세요.";
+                        return false;
+                    }
+
+                    object activeDocument = autoCadApplication.GetType().InvokeMember(
+                        "ActiveDocument",
+                        BindingFlags.GetProperty,
+                        null,
+                        autoCadApplication,
+                        null
+                    );
+
+                    if (activeDocument == null)
+                    {
+                        errorMessage = "AutoCAD에서 활성 도면을 찾지 못했습니다. DWG 도면을 연 뒤 다시 시도해 주세요.";
+                        return false;
+                    }
+
+                    activeDocument.GetType().InvokeMember(
+                        "SendCommand",
+                        BindingFlags.InvokeMethod,
+                        null,
+                        activeDocument,
+                        new object[] { command.Trim() + "\r" }
+                    );
+
+                    return true;
                 }
-
-                activeDocument = autoCadApplication.GetType().InvokeMember(
-                    "ActiveDocument",
-                    BindingFlags.GetProperty,
-                    null,
-                    autoCadApplication,
-                    null
-                );
-
-                if (activeDocument == null)
+                catch (Exception ex)
                 {
-                    errorMessage = "AutoCAD에서 활성 도면을 찾지 못했습니다. DWG 도면을 연 뒤 다시 시도해 주세요.";
-                    return false;
+                    Exception detail = ex is TargetInvocationException && ex.InnerException != null
+                        ? ex.InnerException
+                        : ex;
+
+                    lastException = detail;
+                    int hresult = detail == null ? 0 : detail.HResult;
+                    bool autoCadBusy = hresult == unchecked((int)0x80010001)
+                        || hresult == unchecked((int)0x8001010A);
+
+                    if (!autoCadBusy || attempt >= maxAttempts)
+                    {
+                        break;
+                    }
+
+                    System.Threading.Thread.Sleep(180);
                 }
-
-                activeDocument.GetType().InvokeMember(
-                    "SendCommand",
-                    BindingFlags.InvokeMethod,
-                    null,
-                    activeDocument,
-                    new object[] { command.Trim() + "\r" }
-                );
-
-                return true;
             }
-            catch (Exception ex)
-            {
-                Exception detail = ex is TargetInvocationException && ex.InnerException != null
-                    ? ex.InnerException
-                    : ex;
 
-                errorMessage = "AutoCAD 제목 추출 명령을 실행하지 못했습니다. OVIA AutoCAD 플러그인이 자동 로드되었는지 확인해 주세요. 개발 테스트에서는 해당 버전 OVIA.AutoCAD DLL을 NETLOAD할 수 있습니다.\r\n\r\n상세: " + detail.Message;
+            if (lastException != null
+                && (lastException.HResult == unchecked((int)0x80010001)
+                    || lastException.HResult == unchecked((int)0x8001010A)))
+            {
+                errorMessage = "AutoCAD가 다른 작업을 처리 중이라 제목 추출을 시작하지 못했습니다. 잠시 후 제목 추출 아이콘을 다시 눌러 주세요.";
                 return false;
             }
+
+            errorMessage = "AutoCAD 제목 추출 명령을 실행하지 못했습니다. OVIA AutoCAD 플러그인의 로드 상태를 확인해 주세요.";
+            if (lastException != null && !string.IsNullOrWhiteSpace(lastException.Message))
+            {
+                errorMessage += "\r\n\r\n상세: " + lastException.Message;
+            }
+
+            return false;
         }
 
         public static bool TryReadResult(string requestToken, out string status, out string titleText, out string errorMessage)
